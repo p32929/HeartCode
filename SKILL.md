@@ -49,7 +49,13 @@ reached has an `error` and is skipped; the command still exits `0`.
 | `-m` | What runs |
 |---|---|
 | `default`, or no `-m` | the user's list: #1, and the next one in order when it fails (rate limits, outages…). Use this unless you need one particular model. |
-| a model from the list: `-m "<provider> <model>"` (`-m "groq openai/gpt-oss-120b"`), or `-m <model>` alone | that model alone: never another one, also when it fails (it's tried again, up to `--max-retries`) |
+| a model from the list: `-m "<provider> <model>"` (`-m "groq openai/gpt-oss-120b"`), or `-m <model>` alone | that model alone: never another one, also when it fails (a rate limit or an outage is tried again, up to `--max-retries`) |
+
+**Failures:** a rate limit, a server error, a timeout or a lost connection is waited out and tried
+again (or handed to the next model in the list), up to `--max-retries` (10). An error waiting can't
+fix (a model name the server doesn't know, a wrong key, a request it refuses) is never sent again:
+the run stops with that error and exit code `1`. With the default list it moves on to the next
+model only if the user set its fallback rule to "at any error".
 
 `--provider <name>` and `-u <url>` (a server for this run) also mean one model, alone.
 
@@ -64,7 +70,8 @@ heart -p --output-format json -C /path/to/project "fix the failing test in math.
 
 - `-C <folder>`: the project to work in (default: the current folder). A folder, not a file.
 - The prompt is the last argument, or stdin: `echo "explain src/agent.js" | heart -p`.
-- Exit code: `0` it finished, `1` it failed (no model, the model kept failing, `--max-turns` hit).
+- Exit code: `0` it finished, `1` it failed (no model, the model kept failing, the server refused
+  the request (wrong model name, bad key), `--max-turns` hit). The error is in `result` (JSON) or on stderr.
 
 `--output-format json` prints one object on stdout:
 
