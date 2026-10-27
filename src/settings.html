@@ -1,0 +1,1540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HeartCode Settings</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --panel2: #f9fafb; --text: #1f2328; --muted: #57606a; --faint: #8c959f; --line: #dde2e8;
+    --brand: #1a7f37; --brand-soft: #e6f4ea; --on-brand: #ffffff; --accent: #0969da; --accent-soft: #e8f1fd; --ok: #1a7f37; --ok-soft: #e6f4ea; --err: #cf222e; --err-soft: #fdecee;
+    --input: #ffffff; --hover: #eef1f5; --on-accent: #ffffff;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0f13; --panel: #15181e; --panel2: #1a1d24; --text: #e6e8eb; --muted: #9aa0aa; --faint: #6b7280; --line: #272c36;
+      --brand: #9ece6a; --brand-soft: #1e2a18; --on-brand: #0d0f13; --accent: #7aa2f7; --accent-soft: #1b2438; --ok: #9ece6a; --ok-soft: #1e2a18; --err: #f7768e; --err-soft: #3a1c22;
+      --input: #0f1116; --hover: #1d212a; --on-accent: #0d0f13;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  a { color: var(--accent); }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+
+  /* the app: pages on the left, one page at a time on the right, using the whole width */
+  .app { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100vh; }
+  aside { border-right: 1px solid var(--line); padding: 20px 12px; position: sticky; top: 0; height: 100vh; overflow-y: auto; background: var(--panel); display: flex; flex-direction: column; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; padding: 0 10px 20px; }
+  .brand span { color: var(--brand); font-size: 18px; }
+  nav a { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; color: var(--muted); text-decoration: none; margin-bottom: 2px; }
+  nav a:hover { background: var(--hover); color: var(--text); }
+  nav a.on { background: var(--brand-soft); color: var(--text); font-weight: 600; }
+  nav a .ic { width: 18px; text-align: center; opacity: .8; }
+  nav a .count { margin-left: auto; font-size: 12px; color: var(--faint); font-weight: normal; }
+  .using { margin: auto 4px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 12.5px; background: var(--panel2); }
+  .using .k { color: var(--faint); display: block; }
+  .using b { display: block; font-family: var(--mono); font-size: 12.5px; word-break: break-all; margin: 2px 0; }
+  main { padding: 32px 40px 64px; width: 100%; max-width: 1640px; min-width: 0; }
+  .page { display: none; }
+  .page.on { display: block; }
+  .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .lead { color: var(--muted); margin: 0; max-width: 760px; }
+  h2 { font-size: 15px; margin: 0 0 4px; }
+  h3 { font-size: 13px; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .sub { color: var(--muted); margin: 0 0 14px; font-size: 13px; }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; }
+  .stack { display: flex; flex-direction: column; gap: 18px; }
+  /* two columns: the work on the left, a panel on the right */
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 24px; align-items: start; }
+  .split > .side { position: sticky; top: 24px; }
+  /* cards that fill the width, side by side */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 18px; align-items: start; }
+  .grid .wide { grid-column: 1 / -1; }
+  /* two columns of cards, each a stack (no gaps where one card is shorter) */
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: stretch; }
+  .cols > .stack { display: flex; flex-direction: column; }
+  .cols > .stack > .card:last-child { flex: 1; } /* both columns end at the same line */
+  /* two or three choices in one control (Command | URL) */
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; height: 38px; }
+  .seg label { display: flex; align-items: center; padding: 0 14px; cursor: pointer; color: var(--muted); }
+  .seg label + label { border-left: 1px solid var(--line); }
+  .seg label.on { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+  .seg input { position: absolute; opacity: 0; width: 0; }
+  /* a list on the left, what's chosen on the right */
+  .md { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 20px; align-items: start; }
+  .md .list { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; position: sticky; top: 24px; max-height: calc(100vh - 170px); display: flex; flex-direction: column; }
+  .md .list .top { padding: 12px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; }
+  .md .list .items { overflow-y: auto; }
+  .md .group { padding: 10px 14px 4px; font-size: 11px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+  .md .it { display: block; width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: 9px 14px; border-left: 3px solid transparent; cursor: pointer; }
+  .md .it:hover { background: var(--hover); }
+  .md .it.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .md .it .t { display: flex; gap: 6px; align-items: center; font-weight: 600; font-size: 13px; word-break: break-all; }
+  .md .it .d { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .md .detail { min-width: 0; }
+  .md.solo { grid-template-columns: minmax(0, 1fr); } /* nothing to list: the panel gets the width */
+  .md.solo .list { display: none; }
+  /* a long list (the prompts): list and editor fill the screen's height, like an editor app */
+  /* a list (or tabs) and its editor fill the screen below the page's title, like an editor app;
+     the height is set from where it starts (fillHeight) */
+  .md.fill { min-height: 460px; align-items: stretch; }
+  .md.fill:not(.tabs) .list { max-height: none; height: 100%; position: static; }
+  .md.fill.tabs { grid-template-rows: auto minmax(0, 1fr); }
+  .md.fill .detail { min-height: 0; }
+  .md.fill .detail > .card { height: 100%; display: flex; flex-direction: column; overflow: auto; }
+  .md.fill .detail > .card > textarea.editor { flex: 1; height: auto !important; min-height: 140px; }
+  /* a few items: tabs above the panel instead of a mostly empty column */
+  .md.tabs { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .md.tabs .list { position: static; max-height: none; background: none; border: 0; overflow: visible; }
+  .md.tabs .items { display: flex; flex-wrap: wrap; gap: 8px; overflow: visible; }
+  .md.tabs .group { display: none; }
+  .md.tabs .it { width: auto; border: 1px solid var(--line); border-radius: 999px; padding: 7px 16px; background: var(--panel); }
+  .md.tabs .it.on { border-color: var(--accent); background: var(--accent-soft); }
+  .md.tabs .it .d { display: none; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); flex: none; }
+
+  label.f { display: block; font-size: 12.5px; font-weight: 600; margin: 14px 0 6px; }
+  .hint { color: var(--faint); font-size: 12.5px; margin-top: 6px; }
+  input[type=text], input[type=password], input[type=number], input[type=search], select, textarea {
+    width: 100%; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--input);
+  }
+  input[type=text], input[type=password], input[type=number], input[type=search], select { height: 38px; }
+  textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; tab-size: 2; line-height: 1.55; display: block; }
+  textarea.editor { min-height: 96px; overflow-y: auto; } /* grows with its text (grow()), up to most of the screen */
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; white-space: nowrap; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+  button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+  button.danger { color: var(--err); }
+  button.small { padding: 3px 10px; font-size: 12.5px; }
+  button.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+  button:disabled { opacity: .4; cursor: default; }
+  .row { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+  .row > .grow { flex: 1; min-width: 180px; }
+  .actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+  .actions .spacer { flex: 1; }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+  .muted { color: var(--muted); }
+  .tag { display: inline-block; white-space: nowrap; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; background: var(--hover); color: var(--muted); }
+  .tag.brand { background: var(--brand); color: var(--on-brand); }
+  .tag.ok { background: var(--ok-soft); color: var(--ok); }
+  .tag.err { background: var(--err-soft); color: var(--err); }
+  .empty { text-align: center; padding: 26px 16px; color: var(--muted); }
+  .empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
+
+  /* first start: the steps, then adding a provider */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 22px; }
+  .step { display: flex; gap: 12px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--muted); font-size: 13px; }
+  .step .num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: var(--hover); color: var(--muted); flex: none; }
+  .step b { display: block; color: var(--text); }
+  .step.done .num { background: var(--ok-soft); color: var(--ok); }
+  .step.now { border-color: var(--brand); }
+  .step.now .num { background: var(--brand); color: var(--on-brand); }
+  .presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 10px; }
+  .preset { text-align: left; padding: 12px 14px; border-radius: 10px; }
+  .preset b { display: block; }
+  .preset span { color: var(--muted); font-size: 12px; }
+  .preset.on { border-color: var(--accent); background: var(--accent-soft); }
+
+  /* Providers & models: every provider's models on the left (pick one), yours in order on the right;
+     both fill the screen's height and scroll inside */
+  .work { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 20px; }
+  .work > .card { padding: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .cat-top { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+  .cat-top input { flex: 1; min-width: 0; }
+  .cat-top button { flex: none; }
+  .prov-h { cursor: pointer; }
+  .prov-h .fold { border: 0; background: none; color: var(--muted); padding: 2px 4px; font-size: 16px; line-height: 1; transition: transform .15s; align-self: flex-start; margin-top: 1px; }
+  .prov-h .fold:hover { color: var(--text); }
+  section.collapsed .prov-h .fold { transform: rotate(-90deg); }
+  section.collapsed > :not(.prov-h) { display: none; } /* folded: just its header */
+  .cat-list { flex: 1; overflow-y: auto; }
+  .prov-h { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; background: var(--panel2); border-bottom: 1px solid var(--line); }
+  .prov-h .who { flex: 1; min-width: 200px; }
+  .prov-h .name { font-weight: 700; font-size: 15px; }
+  .prov-h .meta { font-size: 12px; color: var(--muted); }
+  .prov-h .meta .mono { font-size: 12px; }
+  .rows { display: flex; flex-direction: column; } /* one model per line, A to Z */
+  .mrow { break-inside: avoid; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 16px; border: 0; border-radius: 0; border-bottom: 1px solid var(--line); background: none; cursor: pointer; min-width: 0; }
+  .mrow:hover { background: var(--hover); }
+  .mrow.flash { animation: flash 1.6s ease-out; }
+  @keyframes flash { from { background: var(--brand-soft); box-shadow: inset 3px 0 0 var(--brand); } to { background: none; box-shadow: none; } }
+  .mrow .id { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+  .mrow .add { color: var(--accent); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+  .mrow.taken .id { color: var(--muted); }
+  .mwrap { display: flex; break-inside: avoid; border-bottom: 1px solid var(--line); }
+  .mwrap .mrow { border-bottom: 0; }
+  .mwrap .forget { border: 0; background: none; color: var(--faint); padding: 0 12px; }
+  .mwrap .forget:hover { color: var(--err); }
+  .prov-h .listsw { margin-top: 8px; width: fit-content; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+  .prov-h .listsw .sw { margin-top: 0; }
+  .log-opts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; }
+  .log-opts .opt { border-bottom: 0; padding-bottom: 0; }
+  @media (max-width: 860px) { .log-opts { grid-template-columns: 1fr; } }
+  .log-days { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .log-days input { width: 90px; }
+  .log-days .muted { font-size: 12.5px; flex: 1; min-width: 220px; }
+  .reqs-card { margin-top: 18px; padding: 0; }
+  .reqs-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+  .reqs { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); min-height: 420px; }
+  .req-list { max-height: 70vh; overflow-y: auto; border-right: 1px solid var(--line); }
+  .req-detail { max-height: 70vh; overflow-y: auto; padding: 16px 18px; min-width: 0; }
+  .rq { display: block; width: 100%; text-align: left; border: 0; border-radius: 0; border-bottom: 1px solid var(--line); border-left: 3px solid transparent; background: none; padding: 10px 14px; cursor: pointer; }
+  .rq:hover { background: var(--hover); }
+  .rq.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .rq.failed { border-left-color: var(--err); }
+  .rq.failed.on { background: var(--err-soft); }
+  .rq .l1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .rq .m { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rq .l2 { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .rq .why { color: var(--err); font-size: 12px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; font-size: 13px; margin: 8px 0 14px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; overflow-wrap: anywhere; }
+  .req-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 6px 0 12px; max-height: 360px; overflow: auto; }
+  .req-detail details { margin: 4px 0; }
+  .req-detail summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+  .req-detail h3 { font-size: 14px; margin: 16px 0 4px; }
+  @media (max-width: 860px) { .reqs { grid-template-columns: 1fr; } .req-list { border-right: 0; max-height: 50vh; } }
+  .cat-note { padding: 12px 16px; color: var(--muted); font-size: 12.5px; }
+  .byname { display: flex; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  .byname input { height: 32px; font-family: var(--mono); font-size: 12.5px; }
+  /* two lines' room, never more: a test's progress doesn't move the cards below */
+  .olist .test { font-size: 11.5px; line-height: 1.45; margin-top: 3px; color: var(--faint); display: flex; align-items: flex-start; gap: 6px; height: calc(2 * 1.45em + 2px); }
+  .olist .test .msg { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .olist .test .spin { margin-top: 3px; flex: none; }
+  .olist .test button { flex: none; }
+  .olist .test.ok { color: var(--ok); }
+  .olist .test.warn { color: var(--accent); }
+  dialog#ms { width: min(480px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--text); padding: 22px 24px; }
+  dialog#ms::backdrop { background: rgba(0, 0, 0, .55); }
+  dialog#ms h2 { margin: 0 0 6px; font-family: var(--mono); font-size: 15px; overflow-wrap: anywhere; }
+  dialog#ms .opt:last-of-type { border-bottom: 0; }
+  dialog#ms .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  .olist .test.failed { color: var(--err); }
+  .olist .test.testing, .olist .test.waiting { color: var(--accent); }
+  .olist .test button { padding: 0 7px; font-size: 11px; }
+  .spin { width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .mine-top { padding: 16px 18px 6px; }
+  .mine-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .mine-title h2 { margin: 0 0 6px; flex: 1; white-space: nowrap; }
+  .mine-title button { white-space: nowrap; }
+  .olist { list-style: none; margin: 0; padding: 6px 12px 12px; flex: 1; overflow-y: auto; }
+  .olist li { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; background: var(--panel); }
+  .olist li.in { border-color: var(--brand); background: var(--brand-soft); }
+  .olist li.next { border-style: dashed; background: none; color: var(--faint); font-size: 12.5px; justify-content: center; padding: 14px 10px; }
+  .olist li.in { cursor: grab; user-select: none; transition: transform .16s ease, box-shadow .16s ease; position: relative; }
+  .olist.sorting li.in { transition: transform .16s ease; }
+  .olist li.in.lifted { transition: none; z-index: 2; cursor: grabbing; box-shadow: 0 10px 28px rgba(0, 0, 0, .35), 0 0 0 2px var(--brand); }
+  .olist .grip { touch-action: none; }
+  body.sorting, body.sorting * { cursor: grabbing !important; }
+  /* Your models: a table, one row a model */
+  .mt-card { padding: 0; }
+  .mt-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 14px 18px; border-bottom: 1px solid var(--line); min-height: 58px; }
+  .mt-top .sorts { flex: 1; min-width: 0; color: var(--muted); font-size: 13px; }
+  .mt-top .chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--brand); background: var(--brand-soft); border-radius: 999px; padding: 1px 4px 1px 9px; margin: 2px 4px 2px 0; color: var(--text); font-size: 12.5px; }
+  .mt-top .chip button { border: 0; background: none; padding: 0 4px; font-size: 12px; color: var(--muted); }
+  .mt-scroll { overflow-x: auto; }
+  .mt { min-width: 1080px; }
+  .mt-h, .mtable li { display: grid; grid-template-columns: 16px 30px minmax(170px, 3fr) minmax(80px, 1.2fr) 76px 82px 56px 62px 54px 60px 64px minmax(200px, 2fr) 30px; align-items: center; column-gap: 8px; padding: 8px 18px; }
+  .mt-h { border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); padding-top: 10px; padding-bottom: 10px; }
+  .mt-h button { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; white-space: nowrap; }
+  .mt-h button:hover { color: var(--text); }
+  .mt-h button.on { color: var(--brand); font-weight: 700; }
+  .mt-h .num, .mtable .num { text-align: right; }
+  .mtable { list-style: none; margin: 0; padding: 0; }
+  .mtable li { border-bottom: 1px solid var(--line); background: var(--panel); font-size: 13px; position: relative; }
+  .mtable li:last-child { border-bottom: 0; }
+  .mtable li.in { user-select: none; transition: transform .16s ease, box-shadow .16s ease; }
+  .mtable.drag li.in { cursor: grab; }
+  .mtable li.in.lifted { transition: none; z-index: 2; cursor: grabbing; box-shadow: 0 10px 28px rgba(0, 0, 0, .35), 0 0 0 2px var(--brand); }
+  .mtable .grip { color: var(--faint); touch-action: none; }
+  .mtable:not(.drag) .grip { visibility: hidden; }
+  .mtable .n { font-weight: 800; color: var(--brand); }
+  .mtable .m { font-family: var(--mono); font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
+  .mtable .p { color: var(--muted); overflow-wrap: anywhere; }
+  .mtable .yes { color: var(--ok); }
+  .mtable .no { color: var(--faint); }
+  .mtable .src { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .mtable .src.warn { color: var(--accent); }
+  .mtable button { padding: 1px 7px; font-size: 11.5px; }
+  .mt-empty { padding: 28px 18px; color: var(--muted); }
+  .olist .grip { cursor: grab; color: var(--faint); padding: 0 2px; user-select: none; }
+  .olist .n { font-weight: 800; color: var(--brand); min-width: 24px; }
+  .olist .what { flex: 1; min-width: 0; }
+  .olist .m { font-family: var(--mono); font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
+  .olist .p { color: var(--muted); font-size: 12px; }
+  .olist button { padding: 2px 8px; font-size: 12px; }
+  .mine-rules { border-top: 1px solid var(--line); padding: 4px 18px 16px; }
+  .mine-rules .hint { min-height: 2.9em; } /* the hints differ in length: the next setting stays put */
+  .mine-empty { padding: 30px 22px; text-align: center; color: var(--muted); }
+  .mine-empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 6px; }
+
+  /* switches */
+  .opt { display: flex; gap: 14px; align-items: flex-start; padding: 14px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .opt:last-child { border-bottom: 0; padding-bottom: 0; }
+  .opt:first-child { padding-top: 0; }
+  .opt .t { flex: 1; min-width: 0; }
+  .opt b { display: block; }
+  .opt span { color: var(--muted); font-size: 13px; }
+  .sw { position: relative; width: 38px; height: 22px; flex: none; margin-top: 2px; }
+  .sw input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .sw i { position: absolute; inset: 0; border-radius: 11px; background: var(--line); transition: background .15s; }
+  .sw i::after { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; border-radius: 50%; background: #fff; transition: transform .15s; }
+  .sw input:checked + i { background: var(--ok); }
+  .sw input:checked + i::after { transform: translateX(16px); }
+  .sw input:focus-visible + i { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* choices as cards (permissions, colors) */
+  .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .choice { position: relative; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; cursor: pointer; background: var(--panel); }
+  .choice:hover { border-color: var(--accent); }
+  .choice.on { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+  .choice b { display: block; }
+  .choice span { color: var(--muted); font-size: 12.5px; }
+  .choice input { position: absolute; opacity: 0; }
+  .swatch { display: flex; gap: 3px; margin-bottom: 8px; }
+  .swatch i { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--line); }
+
+  /* a model's tooltip: shown at once on hover (or keyboard focus), next to the row */
+  #tip { position: fixed; z-index: 30; max-width: 380px; padding: 12px 14px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0, 0, 0, .28); font-size: 12.5px; pointer-events: none; opacity: 0; transition: opacity .08s; }
+  #tip.show { opacity: 1; }
+  #tip .tid { font-family: var(--mono); font-weight: 700; font-size: 13px; word-break: break-all; }
+  #tip .tname { color: var(--muted); margin-top: 1px; }
+  #tip dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 10px 0 0; }
+  #tip dt { color: var(--faint); }
+  #tip dd { margin: 0; }
+  #tip .tdesc { color: var(--muted); margin-top: 10px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  #tip .thint { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--accent); font-weight: 600; }
+  #toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); padding: 10px 18px; border-radius: 10px; background: var(--text); color: var(--bg); opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); z-index: 10; }
+  #toast.show { opacity: 1; }
+  #toast.err { background: var(--err); color: #fff; }
+
+  @media (max-width: 1180px) {
+    .split { grid-template-columns: 1fr; }
+    .work { grid-template-columns: 1fr; height: auto !important; }
+    .work .mine { order: -1; }
+    .cat-list { max-height: 520px; }
+    .split > .side { position: static; order: -1; }
+    .md { grid-template-columns: 280px minmax(0, 1fr); }
+  }
+  @media (max-width: 860px) {
+    .app { grid-template-columns: minmax(0, 1fr); }
+    aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 16px 8px; }
+    .brand { padding: 0 0 8px; }
+    nav { display: flex; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
+    nav a { flex: none; margin: 0; }
+    nav a .count, .using { display: none; }
+    main { padding: 20px 16px 60px; }
+    .steps { grid-template-columns: 1fr; }
+    .choices { grid-template-columns: 1fr; }
+    .grid, .cols { grid-template-columns: 1fr; }
+    .md { grid-template-columns: 1fr; }
+    .md .list { position: static; max-height: 300px; }
+    .md.fill .list { height: auto !important; max-height: 300px; }
+    .md.fill .detail > .card { height: auto; }
+    .md.fill .detail > .card > textarea.editor { min-height: 260px; }
+    .prov-head, .prov-body { padding-left: 14px; padding-right: 14px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><span>♥</span> HeartCode settings</div>
+    <nav id="nav">
+      <a href="#providers" data-page="providers"><span class="ic">◉</span> Providers &amp; models <span class="count" id="n-providers"></span></a>
+      <a href="#models" data-page="models"><span class="ic">☰</span> Your models <span class="count" id="n-mine"></span></a>
+      <a href="#general" data-page="general"><span class="ic">⚙</span> General</a>
+      <a href="#logging" data-page="logging"><span class="ic">▤</span> Logging <span class="count" id="n-failed"></span></a>
+      <a href="#prompts" data-page="prompts"><span class="ic">✎</span> System prompt</a>
+      <a href="#mcp" data-page="mcp"><span class="ic">⧉</span> MCP servers <span class="count" id="n-mcp"></span></a>
+      <a href="#skills" data-page="skills"><span class="ic">✦</span> Skills <span class="count" id="n-skills"></span></a>
+      <a href="#files" data-page="files"><span class="ic">≡</span> Advanced files</a>
+    </nav>
+    <div class="using" id="using"></div>
+  </aside>
+
+  <main>
+    <!-- Providers & models -->
+    <section class="page" id="page-providers">
+      <div class="head">
+        <div><h1>Providers &amp; models</h1><p class="lead">A provider is a service with models (OpenRouter, Groq, Ollama on this machine…). Add one, then choose which of its models HeartCode uses.</p></div>
+        <button class="primary" id="p-open">+ Add a provider</button>
+      </div>
+      <div class="steps" id="steps"></div>
+      <div class="stack">
+          <div class="card" id="p-form" hidden>
+            <h2 id="p-title">Add a provider</h2>
+            <p class="sub">Pick one to fill in its address, or type any OpenAI-compatible API below.</p>
+            <div class="presets" id="presets"></div>
+            <div class="row" style="margin-top:6px">
+              <div class="grow"><label class="f" for="p-name">Name</label><input type="text" id="p-name" placeholder="openrouter, groq, work…"></div>
+              <div class="grow" style="flex:2"><label class="f" for="p-url">Base URL</label><input type="text" id="p-url" placeholder="https://openrouter.ai/api/v1"></div>
+            </div>
+            <label class="f" for="p-key">API key <span class="muted" id="p-keynote" style="font-weight:normal"></span></label>
+            <input type="password" id="p-key" autocomplete="off" placeholder="paste it here (none for a server on this machine, like Ollama)">
+            <div class="hint">Kept in config.json on this machine. This page only shows its first and last characters.</div>
+            <div class="actions"><button class="primary" id="p-save">Add provider</button><button class="ghost" id="p-cancel">Cancel</button></div>
+          </div>
+          <div class="work" id="p-work">
+            <div class="card catalog">
+              <div class="cat-top"><input type="search" id="m-search" placeholder="Search all models…"><button class="small" id="fold-all" type="button">Collapse all</button><button class="small" id="unfold-all" type="button">Expand all</button></div>
+              <div class="cat-list" id="p-list"></div>
+            </div>
+            <div class="card mine" id="inuse"></div>
+          </div>
+      </div>
+    </section>
+
+    <!-- Your models: all at once, sortable -->
+    <section class="page" id="page-models">
+      <div class="head"><div><h1>Your models</h1><p class="lead">Every model in your list, with what it can do. Click a column to sort by it, then more columns to break ties; click again to flip, a third time to drop it. Save the order you see, or drag a row: that saves the order you see with your change, and you go on from there.</p></div></div>
+      <div class="card mt-card" id="mt"></div>
+    </section>
+
+    <!-- Logging -->
+    <section class="page" id="page-logging">
+      <div class="head"><div><h1>Logging</h1><p class="lead">What HeartCode writes down, for finding out what went wrong. Off unless you switch it on.</p></div></div>
+      <div class="card">
+        <div class="log-opts">
+          <div>
+            <h2>The run's log</h2>
+            <p class="sub">Everything each run does, as text: requests, replies, retries, tools, commands, what you typed.</p>
+            <div id="l-run"></div>
+          </div>
+          <div>
+            <h2>Requests</h2>
+            <p class="sub">Each request to a model and its reply or error: which failed, which worked, and which fallback answered.</p>
+            <div id="l-req"></div>
+            <div class="row" style="align-items:center;gap:10px;margin-top:12px">
+              <label class="f" for="l-detail" style="margin:0">Keep</label>
+              <select id="l-detail" style="flex:1">
+                <option value="full">Everything: what was sent and what came back</option>
+                <option value="summary">Only a summary: model, result, error, timings, tokens</option>
+              </select>
+            </div>
+            <div class="hint">Everything can make big files on long conversations. API keys are never written.</div>
+          </div>
+        </div>
+        <div class="log-days">
+          <label for="l-days"><b>Keep logs for</b></label>
+          <input type="number" id="l-days" min="1" max="3650" step="1" value="30">
+          <span>days</span>
+          <span class="muted">Older ones (both kinds) are deleted when HeartCode starts, and right away when you change this. 30 days unless you change it.</span>
+        </div>
+      </div>
+      <div class="card reqs-card">
+        <div class="reqs-top">
+          <h2 style="margin:0">Requests logged</h2>
+          <div class="seg" id="l-filter">
+            <label class="on"><input type="radio" name="l-filter" value="all" checked>All</label><label><input type="radio" name="l-filter" value="failed">Failed</label><label><input type="radio" name="l-filter" value="fallback">Fallbacks</label>
+          </div>
+        </div>
+        <div class="reqs">
+          <div class="req-list" id="l-list"></div>
+          <div class="req-detail" id="l-detail-pane"><div class="empty">Click a request to see it in full.</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- General -->
+    <section class="page" id="page-general">
+      <div class="head"><div><h1>General</h1><p class="lead">How HeartCode works for you. Saved for next time; a running HeartCode takes changes right away.</p></div></div>
+      <div class="cols">
+        <div class="stack">
+          <div class="card">
+            <h2>What can HeartCode do without asking?</h2>
+            <p class="sub">Shift+Tab in HeartCode switches between these too (and to plan mode).</p>
+            <div class="choices" id="g-perm"></div>
+          </div>
+          <div class="card">
+            <h2>Colors</h2>
+            <p class="sub">Your own colors on top of a theme: theme.json in <a href="#files">Advanced files</a>.</p>
+            <div class="choices" id="g-theme"></div>
+          </div>
+          <div class="card">
+            <h2>Thinking and context</h2>
+            <div class="row">
+              <div class="grow"><label class="f" for="g-effort">How hard a thinking model thinks</label><select id="g-effort"></select></div>
+              <div class="grow"><label class="f" for="g-context">Context window (tokens)</label><input type="number" id="g-context" min="1" placeholder="as the model says"></div>
+            </div>
+            <div class="hint">Leave the context window empty unless HeartCode gets it wrong for your model.</div>
+          </div>
+        </div>
+        <div class="stack">
+          <div class="card">
+            <h2>Features</h2>
+            <p class="sub">Switch each one on or off.</p>
+            <div id="g-toggles"></div>
+          </div>
+          <div class="card">
+            <h2>Voice input</h2>
+            <p class="sub">Ctrl+R in HeartCode. Empty: whisper-cli on this machine. Or a provider's transcription API: <span class="mono">{ "provider": "groq", "model": "whisper-large-v3" }</span>; add <span class="mono">"language": "auto"</span> for other languages.</p>
+            <textarea id="v-text" spellcheck="false" rows="3" placeholder="(whisper-cli on this machine)"></textarea>
+            <div class="actions"><button class="primary" id="v-save">Save voice</button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- System prompt and the other prompts -->
+    <section class="page" id="page-prompts">
+      <div class="head"><div><h1>System prompt</h1><p class="lead">What HeartCode tells the model. Change a prompt and save: a running HeartCode uses yours from the next message. <span class="mono">{{names}}</span> are filled in by HeartCode; Reset puts HeartCode's back.</p></div></div>
+      <div class="md">
+        <div class="list"><div class="top"><input type="search" id="r-search" placeholder="Search prompts…"></div><div class="items" id="r-items"></div></div>
+        <div class="detail" id="r-detail"></div>
+      </div>
+    </section>
+
+    <!-- MCP servers -->
+    <section class="page" id="page-mcp">
+      <div class="head"><div><h1>MCP servers</h1><p class="lead">Programs that give the model more tools: a browser, a database, your issue tracker. Off: HeartCode doesn't start it or offer it to the model.</p></div></div>
+      <div class="stack">
+        <div class="card">
+          <h2>Add a server</h2>
+          <p class="sub">The command that starts it on this machine, or the URL of a remote one (a sign-in page opens if it needs one).</p>
+          <div class="row">
+            <div style="width:200px"><label class="f" for="c-name">Name</label><input type="text" id="c-name" placeholder="github"></div>
+            <div><label class="f">Kind</label><div class="seg" id="c-kind">
+              <label class="on"><input type="radio" name="c-kind" value="command" checked>Command</label><label><input type="radio" name="c-kind" value="url">URL</label>
+            </div></div>
+            <div class="grow" style="flex:3"><label class="f" for="c-what" id="c-what-label">Command</label><input type="text" id="c-what" placeholder="npx -y @modelcontextprotocol/server-github"></div>
+            <button class="primary" id="c-add">Add server</button>
+          </div>
+        </div>
+        <div class="card" id="c-list"></div>
+        <details class="card" id="c-raw"><summary style="cursor:pointer;font-weight:600">Edit mcp.json directly</summary><p class="sub" style="margin-top:10px">For what the form doesn't have: environment variables (<span class="mono">"env"</span>), headers, and so on.</p><div id="c-file"></div></details>
+      </div>
+    </section>
+
+    <!-- Skills -->
+    <section class="page" id="page-skills">
+      <div class="head"><div><h1>Skills</h1><p class="lead">Ready-made prompts. You type one as <span class="mono">/name</span>, or the model uses it when it fits.</p></div><button class="primary" id="k-new">+ New skill</button></div>
+      <div class="md">
+        <div class="list"><div class="items" id="k-items"></div></div>
+        <div class="detail" id="k-detail"></div>
+      </div>
+    </section>
+
+    <!-- Advanced files -->
+    <section class="page" id="page-files">
+      <div class="head"><div><h1>Advanced files</h1><p class="lead">The rest of HeartCode's settings, as the files they're kept in (<span class="mono" id="f-home"></span>). A JSON file that doesn't parse isn't saved; save one empty to delete it.</p></div></div>
+      <div class="md">
+        <div class="list"><div class="items" id="f-items"></div></div>
+        <div class="detail" id="f-detail"></div>
+      </div>
+    </section>
+  </main>
+</div>
+<dialog id="ms" aria-labelledby="ms-title">
+  <form>
+    <h2 id="ms-title"></h2>
+    <p class="sub" id="ms-from"></p>
+    <label class="f" for="ms-context">Context window (tokens)</label>
+    <div class="row" style="gap:8px;align-items:center"><input type="number" id="ms-context" min="512" step="1" style="flex:1"><button class="small" id="ms-measure" type="button">Measure</button></div>
+    <div class="hint">Empty: as found (models.dev, the server, or what HeartCode learns). Measure asks the server.</div>
+    <label class="opt"><div class="t"><b>Tool calls</b><span>Reads, edits and runs things itself. Off: HeartCode guides it step by step.</span></div><span class="sw"><input type="checkbox" id="ms-tools"><i></i></span></label>
+    <label class="opt"><div class="t"><b>Thinking</b><span>Thinks before it answers (the effort setting applies).</span></div><span class="sw"><input type="checkbox" id="ms-thinking"><i></i></span></label>
+    <label class="opt"><div class="t"><b>Images</b><span>Reads screenshots and pictures you send.</span></div><span class="sw"><input type="checkbox" id="ms-images"><i></i></span></label>
+    <label class="opt"><div class="t"><b>Streaming</b><span>Its reply shows as it's written. Off: all at once at the end.</span></div><span class="sw"><input type="checkbox" id="ms-stream"><i></i></span></label>
+    <div class="actions"><button id="ms-cancel" type="button">Cancel</button><button class="primary" id="ms-save" type="button">Save</button></div>
+  </form>
+</dialog>
+<div id="toast" role="status"></div>
+<div id="tip" role="tooltip"></div>
+<script>
+const token = new URLSearchParams(location.search).get('t')
+const $ = (id) => document.getElementById(id)
+const h = (tag, props = {}, ...kids) => {
+  const el = document.createElement(tag)
+  for (const [k, v] of Object.entries(props)) k.startsWith('on') ? el.addEventListener(k.slice(2), v) : k in el ? (el[k] = v) : el.setAttribute(k, v)
+  el.append(...kids.flat(Infinity).filter((x) => x != null && x !== false))
+  return el
+}
+// an element's content, without the null/false parts (left out on purpose)
+const put = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter((x) => x != null && x !== false))
+let S = null
+let toastTimer
+function toast(text, err = false) {
+  const t = $('toast')
+  t.textContent = text
+  t.className = 'show' + (err ? ' err' : '')
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => (t.className = ''), err ? 6000 : 2400)
+}
+async function api(path, body) {
+  const res = await fetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { 'x-heart-token': token, ...(body !== undefined && { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) })
+  const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+  return data
+}
+async function act(path, body, done) {
+  try {
+    const r = await api(path, body)
+    if (r.providers) render(r)
+    if (done) toast(done)
+    return r
+  } catch (e) {
+    toast(e.message, true)
+    return null
+  }
+}
+const sw = (props) => h('label', { className: 'sw' }, h('input', { type: 'checkbox', ...props }), h('i'))
+
+// pages: one at a time, from the address (#providers…)
+const PAGES = ['providers', 'models', 'general', 'logging', 'prompts', 'mcp', 'skills', 'files']
+const page = () => (PAGES.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'providers')
+function showPage() {
+  for (const p of PAGES) $('page-' + p).classList.toggle('on', p === page())
+  for (const a of document.querySelectorAll('nav a')) a.classList.toggle('on', a.dataset.page === page())
+  if (S) drawUsing(S)
+  scrollTo(0, 0)
+  fillHeight()
+  document.querySelector('nav a.on')?.scrollIntoView({ inline: 'center', block: 'nearest' }) // on a phone the pages scroll sideways
+}
+addEventListener('hashchange', showPage)
+
+// A list on the left, the chosen one on the right (prompts, skills, files). Unsaved text in the
+// editor is kept per item while you look at others, marked with a dot in the list.
+const DRAFTS = { prompts: {}, skills: {}, files: {} }
+const SEL = { prompts: 'agent/system', skills: null, files: null }
+function masterDetail(kind, itemsEl, detailEl, groups, draw) {
+  const all = groups.flatMap((g) => g.items)
+  if (!all.some((x) => x.id === SEL[kind]) && SEL[kind] !== '+new') SEL[kind] = all[0]?.id ?? null
+  // the list: built when its items change; otherwise each item is updated in place (the chosen
+  // one, a dot for unsaved changes, "yours"), so it stays where you scrolled it
+  const inside = (x) => [h('div', { className: 't' }, DRAFTS[kind][x.id] !== undefined ? h('span', { className: 'dot', title: 'not saved' }) : null, x.title, x.badge ?? null), x.sub ? h('div', { className: 'd', textContent: x.sub }) : null]
+  const shape = JSON.stringify(groups.map((g) => [g.title, g.items.map((x) => x.id)]))
+  if (itemsEl.dataset.shape !== shape) {
+    itemsEl.dataset.shape = shape
+    put(itemsEl, groups.map((g) => [
+      g.title && g.items.length ? h('div', { className: 'group', textContent: g.title }) : null,
+      g.items.map((x) => h('button', { className: 'it', 'data-id': x.id })),
+    ]))
+  }
+  const byId = new Map(all.map((x) => [x.id, x]))
+  for (const b of itemsEl.querySelectorAll('.it')) {
+    const x = byId.get(b.dataset.id)
+    b.className = 'it' + (x.id === SEL[kind] ? ' on' : '')
+    put(b, inside(x))
+    b.onclick = () => ((SEL[kind] = x.id), masterDetail(kind, itemsEl, detailEl, groups, draw))
+  }
+  itemsEl.closest('.md').classList.toggle('solo', !all.length) // nothing to list: no list column
+  itemsEl.closest('.md').classList.toggle('tabs', all.length > 0 && all.length <= 8) // a few: tabs on top
+  put(detailEl, draw(SEL[kind] === '+new' ? '+new' : all.find((x) => x.id === SEL[kind])))
+  itemsEl.closest('.md').classList.add('fill')
+  fillHeight()
+}
+// an editor for one item: its text (or your unsaved changes to it)
+// A text box as tall as its text (at least a few lines, at most most of the screen): no empty box.
+function grow(ta, min = 96) {
+  const fit = () => {
+    ta.style.height = 'auto'
+    ta.style.height = `${Math.min(Math.max(ta.scrollHeight + 2, min), Math.max(min, innerHeight * 0.72))}px`
+  }
+  ta.addEventListener('input', fit)
+  requestAnimationFrame(fit) // once it's on the page
+  return ta
+}
+// the list-and-editor pages: down to the bottom of the screen (from wherever their title ends)
+function fillHeight() {
+  requestAnimationFrame(() => {
+    const room = (el) => Math.max(460, innerHeight - el.getBoundingClientRect().top - window.scrollY - 28)
+    for (const md of document.querySelectorAll('.page.on .md.fill')) md.style.height = innerWidth > 860 ? `${room(md)}px` : ''
+    // the models: as tall as what's in them, at most to the bottom of the screen (then they scroll)
+    // (measured from the content's own height: the layout isn't touched, so nothing scrolls back)
+    for (const w of document.querySelectorAll('.page.on .work')) {
+      const natural = Math.max(...[...w.children].map((card) => [...card.children].reduce((n, c) => n + c.scrollHeight, 2)))
+      w.style.height = innerWidth > 860 ? `${Math.min(natural, room(w))}px` : ''
+    }
+  })
+}
+addEventListener('resize', () => (document.querySelectorAll('textarea').forEach((t) => t.dispatchEvent(new Event('input'))), fillHeight()))
+function editor(kind, id, saved, props = {}) {
+  const ta = grow(h('textarea', { className: 'editor', spellcheck: false, ...props, value: DRAFTS[kind][id] ?? saved }))
+  ta.addEventListener('input', () => {
+    if (ta.value === saved) delete DRAFTS[kind][id]
+    else DRAFTS[kind][id] = ta.value
+  })
+  return ta
+}
+const saved = (kind, id) => delete DRAFTS[kind][id]
+// saves one item: its draft goes first (so the page drawn after shows it saved), and comes back if saving fails
+async function saveItem(kind, id, path, body, done) {
+  const d = DRAFTS[kind][id]
+  delete DRAFTS[kind][id]
+  const r = await act(path, body, done)
+  if (!r && d !== undefined) DRAFTS[kind][id] = d
+  if (!r) render(S)
+  return r
+}
+
+// --- Providers & models ---
+const PRESETS = [
+  ['openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', 'hundreds of models'],
+  ['groq', 'Groq', 'https://api.groq.com/openai/v1', 'very fast'],
+  ['openai', 'OpenAI', 'https://api.openai.com/v1', 'GPT models'],
+  ['gemini', 'Gemini', 'https://generativelanguage.googleapis.com/v1beta/openai', 'Google'],
+  ['mistral', 'Mistral', 'https://api.mistral.ai/v1', 'Mistral, Codestral'],
+  ['deepseek', 'DeepSeek', 'https://api.deepseek.com/v1', 'DeepSeek models'],
+  ['together', 'Together', 'https://api.together.xyz/v1', 'open models'],
+  ['ollama', 'Ollama', 'http://localhost:11434/v1', 'on this machine'],
+  ['lmstudio', 'LM Studio', 'http://localhost:1234/v1', 'on this machine'],
+]
+function drawPresets() {
+  put($('presets'), PRESETS.map(([name, label, url, what]) => h('button', { type: 'button', className: 'preset' + ($('p-url').value === url ? ' on' : ''), onclick: () => {
+    if (!editing && (!$('p-name').value || PRESETS.some(([n]) => n === $('p-name').value))) $('p-name').value = name
+    $('p-url').value = url
+    drawPresets()
+    $('p-key').focus()
+  } }, h('b', { textContent: label }), h('span', { textContent: what }))))
+}
+$('p-url').oninput = drawPresets
+
+const MODELS = {} // provider → { list } | { error } | { loading }
+const filters = {}
+function loadModels(name, again = false) {
+  if (MODELS[name] && !again) return
+  MODELS[name] = { loading: true }
+  api('/api/models', { name }).then(({ models, details }) => (MODELS[name] = { list: models, details: details ?? {} }), (e) => (MODELS[name] = { error: e.message })).then(() => S && drawProviders(S))
+}
+const useModel = (provider, model) => act('/api/model', { provider, model }, `HeartCode now uses ${provider} · ${model}`)
+const saveOrder = (list, done, opts = {}) => act('/api/order', { list, ...opts }, done)
+
+let editing = null
+let formOpen = false
+function openForm(p = null) {
+  editing = p
+  formOpen = true
+  $('p-title').textContent = p ? `Edit ${p.name}` : 'Add a provider'
+  $('p-name').value = p?.name ?? ''
+  $('p-url').value = p?.baseUrl ?? ''
+  $('p-key').value = ''
+  $('p-key').placeholder = p?.key ? 'empty: keep the key it has' : 'paste it here (none for a server on this machine, like Ollama)'
+  $('p-keynote').textContent = p?.key ? `(now ${p.key})` : ''
+  $('p-save').textContent = p ? 'Save changes' : 'Add provider'
+  drawPresets()
+  drawProviders(S)
+  $('p-form').scrollIntoView({ behavior: 'smooth', block: 'start' })
+  ;(p ? $('p-url') : $('p-name')).focus()
+}
+function closeForm() {
+  editing = null
+  formOpen = false
+  drawProviders(S)
+}
+$('p-open').onclick = () => openForm()
+$('p-cancel').onclick = closeForm
+$('p-save').onclick = async () => {
+  const name = $('p-name').value.trim()
+  const k = $('p-key').value.trim()
+  const was = editing
+  const r = await act('/api/provider', { name, baseUrl: $('p-url').value, apiKey: k, keepKey: Boolean(was?.key && !k), was: was?.name })
+  if (!r) return
+  const added = r.providers.find((p) => p.name === name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, ''))
+  if (!added) return
+  if (was) delete MODELS[was.name]
+  loadModels(added.name, true) // a new one, or a new URL or key: its models (again)
+  toast(was ? `saved ${added.name}` : `added ${added.name}: its models are loading`)
+  closeForm()
+  document.querySelector(`[data-provider="${added.name}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+for (const id of ['c-name', 'c-what']) $(id).addEventListener('keydown', (e) => e.key === 'Enter' && $('c-add').click())
+for (const id of ['p-name', 'p-url', 'p-key']) $(id).addEventListener('keydown', (e) => e.key === 'Enter' && $('p-save').click())
+
+// model names in a natural order: "glm-5.2" before "glm-5.10", case doesn't matter
+const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+let modelQuery = ''
+// Providers folded on the page (the browser remembers them). Typing a search opens them all, until
+// you fold or unfold one (or all) again.
+let searchOpen = false
+const FOLDED = new Set((() => {
+  try {
+    return JSON.parse(localStorage.getItem('heart.folded') ?? '[]')
+  } catch {
+    return []
+  }
+})())
+function applyFolds() {
+  try {
+    localStorage.setItem('heart.folded', JSON.stringify([...FOLDED]))
+  } catch {}
+  for (const sec of $('p-list').querySelectorAll('section[data-provider]')) {
+    const folded = FOLDED.has(sec.dataset.provider) && !(searchOpen && modelQuery.trim())
+    sec.classList.toggle('collapsed', folded)
+    sec.querySelector('.fold')?.setAttribute('aria-expanded', String(!folded))
+  }
+}
+// A fold by hand during a search starts from what's shown (the ones it opened stay open).
+function settle() {
+  if (searchOpen && modelQuery.trim()) for (const sec of $('p-list').querySelectorAll('section[data-provider]')) FOLDED.delete(sec.dataset.provider)
+  searchOpen = false
+}
+const fold = (name) => (settle(), FOLDED.has(name) ? FOLDED.delete(name) : FOLDED.add(name), applyFolds())
+$('fold-all').onclick = () => (settle(), S?.providers.forEach((p) => FOLDED.add(p.name)), applyFolds())
+$('unfold-all').onclick = () => (settle(), FOLDED.clear(), applyFolds())
+$('m-search').oninput = (e) => ((modelQuery = e.target.value), (searchOpen = true), S && drawProviders(S), applyFolds())
+// A model's tooltip: its full name and what's known about it (from the provider, HeartCode's price
+// list and its own test), and what a click does. Shown on hover and on keyboard focus.
+const kTok = (n) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n))
+const usd = (x) => (x === 0 ? 'free' : `$${x < 0.01 ? x.toFixed(4) : x < 1 ? x.toFixed(3).replace(/0$/, '') : x.toFixed(2)}`)
+// What a model is, under it in your list, in the two lines its card keeps for it (at most two
+// lines of text, its button on the right): where that comes from, and Edit (or Set it up, for one
+// models.dev doesn't know). Replaced in place when it changes (streamed).
+const FROM = { 'models.dev': 'from models.dev', you: 'set by you', tested: 'tested' }
+function testLine(t) {
+  const x = t.tested
+  const edit = (label) => h('button', { className: 'small', textContent: label, onclick: (e) => (e.stopPropagation(), openSetup(t)) })
+  const [cls, text, action] =
+    !x ? ['none', 'looking it up in models.dev…', null]
+      : x.source === 'assumed' ? ['warn', 'not in models.dev: set up what it can do', [retry(t), edit('Set it up')]]
+      : ['ok', `✓ ${testedText(x)} · ${Object.keys(x.set ?? {}).length ? 'yours' : FROM[x.source]}`, edit('Edit')]
+  return h('div', { className: 'test ' + cls }, h('span', { className: 'msg', textContent: text }), action)
+}
+
+// models.dev looked up again: one model (its Retry), or all of yours (Retry all)
+const retry = (t) => h('button', { className: 'small', textContent: 'Retry', title: 'look it up in models.dev again', onclick: (e) => (e.stopPropagation(), lookUp(t)) })
+async function lookUp(t) {
+  toast(t ? `looking up ${t.model} in models.dev…` : 'looking up your models in models.dev…')
+  const r = await act('/api/models-dev', t ? { provider: t.provider, model: t.model } : {})
+  if (r) toast(t ? (r.found ? `${t.model}: found in models.dev` : `${t.model}: still not in models.dev`) : `models.dev: ${r.found} of ${r.of} found`)
+}
+
+// The model's setup: a window over the page (nothing on it moves). Its context window (empty: as
+// found; Measure asks the server) and what it can do; saved above what models.dev says.
+let setupFor = null
+function openSetup(t) {
+  setupFor = t
+  const x = t.tested ?? {}
+  $('ms-title').textContent = t.model
+  $('ms-from').textContent = {
+    assumed: "models.dev doesn't know this model. Tell HeartCode what it can do; until then it assumes tool calls, streaming and a ~128k window.",
+    'models.dev': 'From models.dev. Change anything that isn\'t right for how you reach it.',
+    you: 'Set by you.',
+    tested: 'From an earlier test. Change anything that isn\'t right.',
+  }[x.source] ?? ''
+  $('ms-context').value = x.set?.context ?? ''
+  $('ms-context').placeholder = x.context ? `${x.context.toLocaleString()}${x.sure === false ? ' (assumed)' : ''}` : 'tokens'
+  $('ms-tools').checked = x.mode ? x.mode === 'tools' : true
+  $('ms-thinking').checked = Boolean(x.thinking)
+  $('ms-images').checked = Boolean(x.vision)
+  $('ms-stream').checked = x.stream !== false
+  $('ms').showModal()
+}
+$('ms-save').onclick = async (e) => {
+  e.preventDefault()
+  const t = setupFor
+  const raw = $('ms-context').value.trim()
+  const r = await act('/api/model-setup', { provider: t.provider, model: t.model, context: raw ? Number(raw) : null, tools: $('ms-tools').checked, thinking: $('ms-thinking').checked, images: $('ms-images').checked, stream: $('ms-stream').checked }, `${t.model}: saved`)
+  if (r) $('ms').close()
+}
+$('ms-cancel').onclick = (e) => (e.preventDefault(), $('ms').close())
+$('ms').querySelector('form').onsubmit = (e) => (e.preventDefault(), $('ms-save').click()) // Enter: save
+// Measure: one request far too big for any model; the server's refusal states its window
+$('ms-measure').onclick = async (e) => {
+  e.preventDefault()
+  const t = setupFor
+  if (!confirm(`Measure ${t.model}'s context window?\n\nHeartCode sends it one request of about 2.2 million tokens (4 MB). Servers refuse it with their limit in the error, and a refused request isn't charged. If a server does take that much, it's stopped at once, but that request may be charged.`)) return
+  const b = $('ms-measure')
+  Object.assign(b, { disabled: true, textContent: 'measuring…' })
+  try {
+    const r = await api('/api/measure', { provider: t.provider, model: t.model })
+    render(r)
+    $('ms-context').value = r.measured.limit ?? r.measured.over
+    toast(r.measured.limit ? `${t.model}: ${r.measured.limit.toLocaleString()} tokens, said by the server` : `${t.model} took over ${r.measured.over.toLocaleString()} tokens`)
+  } catch (x) {
+    toast(x.message, true)
+  } finally {
+    Object.assign(b, { disabled: false, textContent: 'Measure' })
+  }
+}
+// short enough for the two lines a card keeps for it (guided: no tool calls, HeartCode guides it)
+const testedText = (t) => `${t.mode === 'tools' ? 'tool calls' : 'guided'}${t.context ? ` · ${t.sure === false ? '~' : ''}${kTok(t.context)} context` : ''}${t.thinking ? ' · thinks' : ''}${t.vision ? ' · images' : ''}`
+// an error without the request's address in it ("500 from http://…/chat/completions: …" → "500: …")
+const shortError = (e) => {
+  const x = String(e ?? '').replace(/ from https?:\/\/\S+?:(?=\s|$)/, ':').replace(/\{\s*"error"\s*:\s*\{[^{}]*?"message"\s*:\s*"((?:[^"\\]|\\.)*)"[\s\S]*$/, '$1').trim() // a JSON error: its message
+  return x.length > 120 ? x.slice(0, 119) + '…' : x
+}
+function withTip(el, content) {
+  const show = () => {
+    if (document.body.classList.contains('sorting')) return // not while a card is being moved
+    const tip = $('tip')
+    put(tip, content())
+    tip.classList.add('show')
+    const r = el.getBoundingClientRect()
+    const t = tip.getBoundingClientRect()
+    const below = r.bottom + 8 + t.height < innerHeight
+    tip.style.top = `${below ? r.bottom + 6 : Math.max(8, r.top - t.height - 6)}px`
+    tip.style.left = `${Math.min(Math.max(8, r.left), innerWidth - t.width - 8)}px`
+  }
+  const hide = () => $('tip').classList.remove('show')
+  el.addEventListener('mouseenter', show)
+  el.addEventListener('focus', show)
+  el.addEventListener('mouseleave', hide)
+  el.addEventListener('blur', hide)
+  el.addEventListener('click', hide)
+  return el
+}
+addEventListener('scroll', () => $('tip').classList.remove('show'), true)
+
+function drawProviders(s) {
+  const order = s.order
+  const none = !s.providers.length
+  // the steps: always on the page (nothing jumps when one is done), ticked off as you go; with
+  // no provider yet, the form is open (the only way in: no other button)
+  put($('steps'), [
+    ['Add a provider', 'the service with your models', s.providers.length ? 'done' : 'now'],
+    ['Choose a model', 'click one in the list', order.length ? 'done' : s.providers.length ? 'now' : ''],
+    ['Start HeartCode', 'heart, in your project', order.length ? 'now' : ''],
+  ].map(([t, d, cls], i) => h('div', { className: 'step ' + cls }, h('span', { className: 'num', textContent: cls === 'done' ? '✓' : i + 1 }), h('div', {}, h('b', { textContent: t }), d))))
+  const showForm = formOpen || none
+  $('p-form').hidden = !showForm
+  $('p-cancel').hidden = none // nothing to go back to
+  $('p-open').hidden = showForm
+  $('p-work').hidden = none
+  fillHeight()
+
+  // right: your models, in order (#1 is the one in use); drag or ↑ ↓ to reorder
+  const side = innerWidth > 860 ? 'on the left' : 'below' // where the models are (a phone: under this)
+  const save = (list, done) => saveOrder(list, done)
+  const move = (i, j) => {
+    if (i === j) return
+    const list = [...order]
+    const [t] = list.splice(i, 1)
+    list.splice(j, 0, t)
+    save(list, list[0] !== order[0] ? `HeartCode now uses ${list[0].provider} · ${list[0].model}` : 'order saved')
+  }
+  put($('inuse'),
+    h('div', { className: 'mine-top' },
+      h('div', { className: 'mine-title' },
+        h('h2', { textContent: 'Your models' }),
+        h('button', { className: 'small', textContent: 'Table', style: order.length ? '' : 'visibility:hidden', title: 'all of them in a table, to compare and sort', onclick: () => (location.hash = 'models') }),
+        h('button', { className: 'small', textContent: 'Retry all', title: 'look all of them up in models.dev again', style: order.length ? '' : 'visibility:hidden', onclick: () => lookUp() }),
+        h('button', { className: 'small danger', textContent: 'Remove all', title: 'take every model off this list', style: order.length ? '' : 'visibility:hidden', onclick: () => confirm(`Take all ${order.length} model${order.length === 1 ? '' : 's'} off your list? HeartCode then has none to use until you choose one. (They stay under their providers.)`) && saveOrder([], 'all removed: no model chosen now') })),
+      h('p', { className: 'sub', style: 'margin:0', textContent: order.length > 1 ? 'HeartCode uses #1. If it fails, it tries #2, then #3… and round again. Drag to change the order.' : order.length ? `HeartCode uses this one. Click more ${side} to add fallbacks: tried, in order, when one fails.` : `The models HeartCode uses, in the order it tries them. Click one ${side} to start.` })),
+    order.length ? h('ol', { className: 'olist' }, order.map((t, i) => h('li', {
+        className: 'in', 'data-key': `${t.provider}/${t.model}`, title: order.length > 1 ? 'Drag to move it (or Alt+↑ / Alt+↓)' : '',
+        onkeydown: (e) => e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && (e.preventDefault(), move(i, Math.max(0, Math.min(order.length - 1, i + (e.key === 'ArrowUp' ? -1 : 1))))),
+      },
+      order.length > 1 ? h('span', { className: 'grip', textContent: '⋮⋮', title: 'drag to reorder', 'aria-hidden': 'true' }) : null,
+      h('span', { className: 'n', textContent: `#${i + 1}` }),
+      h('div', { className: 'what' },
+        h('div', { className: 'm', textContent: t.model }),
+        h('div', { className: 'p', textContent: `${t.provider} · ${i === 0 ? 'in use' : 'fallback'}` }),
+        testLine(t)),
+      h('button', { className: 'danger', textContent: '✕', title: 'take it off the list', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) })),
+      ), h('li', { className: 'next', textContent: `#${order.length + 1} · click a model ${side} to add it here (a fallback)` }))
+      : h('div', { className: 'mine-empty' }, h('b', { textContent: 'No model chosen yet' }), `Click a model ${side}: it becomes #1, the one HeartCode uses.`),
+    order.length > 1 ? h('div', { className: 'mine-rules' },
+      h('label', { className: 'f', for: 'r-on', textContent: 'When the one in use fails, go on to the next' }),
+      h('div', { className: 'row', style: 'gap:8px' },
+        h('select', { id: 'r-on', style: 'flex:1', onchange: (e) => save(order, 'saved', { on: e.target.value }) },
+          [['failure', 'at its first failure'], ['retries', 'after some tries of the same model'], ['any', 'at any error']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.on === v }))),
+        s.rotation.on === 'retries' ? h('input', { type: 'number', 'aria-label': 'tries', title: 'tries of the same model first', style: 'width:76px', min: 1, max: 20, value: s.rotation.retries, onchange: (e) => save(order, 'saved', { retries: Number(e.target.value) }) }) : null),
+      h('div', { className: 'hint', textContent: { failure: 'A rate limit, server error, timeout or lost connection moves on at once. Errors like "model not found" or a wrong key stop.', retries: 'The same model is tried again (with a short wait) that many times first.', any: 'Also errors like "model not found" or a bad request move on.' }[s.rotation.on] }),
+      h('label', { className: 'f', for: 'r-next', textContent: 'A new message starts with' }),
+      h('select', { id: 'r-next', onchange: (e) => save(order, 'saved', { next: e.target.value }) },
+        [['first', '#1 again'], ['stay', 'the model that answered last']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.next === v })))) : null)
+
+  sortable($('inuse').querySelector('.olist'), move)
+
+  // left: every provider's models, A to Z; one click adds it (the first one becomes #1). Built
+  // again only when what it lists changes (a provider, its models, the search); a change to your
+  // list only updates the rows it touches (markCatalog), so the list stays where you scrolled it.
+  const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + (MODELS[p.name]?.loading ? 'loading' : '')), modelQuery.trim()])
+  if (shape !== catalogShape) (buildCatalog(s), applyFolds())
+  catalogShape = shape
+  markCatalog()
+  $('m-search').placeholder = `Search ${Object.values(MODELS).reduce((n, m) => n + (m.list?.length ?? 0), 0) || 'all'} models, or type a model name…`
+  $('n-providers').textContent = s.providers.length || ''
+}
+// Your models: pick one up (anywhere on it with a mouse, by its ⋮⋮ on a touch screen) and the
+// others move aside as it goes; let go and it's saved, already in its place (no jump when the
+// page redraws from what's saved).
+function sortable(ol, onMove) {
+  if (!ol) return
+  ol.addEventListener('pointerdown', (e) => {
+    const li = e.target.closest('li.in')
+    if (!li || e.button !== 0 || e.target.closest('button, a, input, select, textarea')) return
+    if (e.pointerType !== 'mouse' && !e.target.closest('.grip')) return // a finger scrolls the list, except on the grip
+    const items = [...ol.querySelectorAll('li.in')]
+    if (items.length < 2) return
+    const from = items.indexOf(li)
+    const rects = items.map((x) => x.getBoundingClientRect())
+    const step = rects[1].top - rects[0].top // a card and the space after it
+    const centers = rects.map((r) => r.top + r.height / 2)
+    const startY = e.clientY
+    let to = from
+    let moving = false
+    const shift = () => items.forEach((x, k) => {
+      if (x === li) return
+      const by = from < to && k > from && k <= to ? -step : from > to && k >= to && k < from ? step : 0
+      x.style.transform = by ? `translateY(${by}px)` : ''
+    })
+    const onMovePointer = (ev) => {
+      const dy = ev.clientY - startY
+      if (!moving) {
+        if (Math.abs(dy) < 4) return
+        moving = true
+        li.setPointerCapture(e.pointerId)
+        li.classList.add('lifted')
+        ol.classList.add('sorting')
+        document.body.classList.add('sorting')
+        $('tip').classList.remove('show')
+        getSelection()?.removeAllRanges()
+      }
+      const y = Math.max(rects[0].top - rects[from].top, Math.min(rects.at(-1).bottom - rects[from].bottom, dy)) // within the list
+      li.style.transform = `translateY(${y}px)`
+      const mid = centers[from] + y
+      to = items.filter((x, k) => k !== from && centers[k] < mid).length
+      shift()
+    }
+    const done = () => {
+      removeEventListener('pointermove', onMovePointer)
+      removeEventListener('pointerup', done)
+      removeEventListener('pointercancel', done)
+      if (!moving) return
+      document.body.classList.remove('sorting')
+      ol.classList.remove('sorting')
+      li.classList.remove('lifted')
+      for (const x of items) {
+        x.style.transition = 'none' // into place at once: the cards are where they look
+        x.style.transform = ''
+      }
+      if (to !== from) items[to].insertAdjacentElement(to > from ? 'afterend' : 'beforebegin', li)
+      ol.querySelectorAll('li.in').forEach((x, k) => (x.querySelector('.n').textContent = `#${k + 1}`))
+      requestAnimationFrame(() => items.forEach((x) => (x.style.transition = '')))
+      onMove(from, to)
+    }
+    addEventListener('pointermove', onMovePointer)
+    addEventListener('pointerup', done)
+    addEventListener('pointercancel', done)
+  })
+}
+
+// --- the models on the left: rows that read your list when clicked or hovered (S.order, now) ---
+let catalogShape = null
+const placeOf = (provider, id) => {
+  const i = S.order.findIndex((t) => t.provider === provider && t.model === id)
+  return i < 0 ? undefined : i
+}
+// A model's row on the left: scrolled to and lit up for a moment (one just added by name).
+function showRow(provider, id, said) {
+  toast(said)
+  const row = $('p-list').querySelector(`.mrow[data-provider="${CSS.escape(provider)}"][data-model="${CSS.escape(id)}"]`)
+  if (!row) return
+  row.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  row.classList.remove('flash')
+  void row.offsetWidth // restart the animation
+  row.classList.add('flash')
+}
+// Off your list, the one in use too: the next one becomes #1, or none is left (asked first, then).
+const removeMine = (provider, id) => {
+  const rest = S.order.filter((t) => t.provider !== provider || t.model !== id)
+  if (!rest.length && !confirm(`Take off ${id}? It's your only model: HeartCode then has none to use until you choose one.`)) return
+  return saveOrder(rest, !rest.length ? `${id} removed: no model chosen now` : placeOf(provider, id) === 0 ? `${id} removed: HeartCode now uses ${rest[0].provider} · ${rest[0].model}` : `${id} removed`)
+}
+const addModel = (provider, id) => {
+  const order = S.order
+  return order.length ? saveOrder([...order, { provider, model: id }], `${id} added as #${order.length + 1}`) : useModel(provider, id)
+}
+function rowTail(provider, id) {
+  const at = placeOf(provider, id)
+  return at === 0 ? h('span', { className: 'tag brand', textContent: '#1 in use' }) : at > 0 ? h('span', { className: 'tag brand', textContent: `#${at + 1} fallback` }) : h('span', { className: 'add', textContent: S.order.length ? '+ Add' : 'Use' })
+}
+function buildCatalog(s) {
+  const q = modelQuery.trim()
+  // a name no provider lists (anywhere): offered under each provider, to use it anyway
+  const anyMatch = !q || s.providers.some((p) => (MODELS[p.name]?.list ?? []).some((id) => id.toLowerCase().includes(q.toLowerCase())))
+  put($('p-list'), s.providers.map((p) => {
+    if (!p.list) MODELS[p.name] = { list: [], details: {}, off: true } // its list switched off: never asked for
+    else loadModels(p.name, MODELS[p.name]?.off)
+    const m = MODELS[p.name] ?? { loading: true }
+    // and the models added by name (and any of yours it doesn't list), marked as yours
+    const listed = new Set(m.list ?? [])
+    const yours = [...new Set([...p.added, ...s.order.filter((t) => t.provider === p.name).map((t) => t.model)])].filter((id) => !listed.has(id))
+    const ids = [...listed, ...yours].sort(byName).filter((id) => id.toLowerCase().includes(q.toLowerCase()))
+    const row = (id, own) =>
+      h('button', { className: 'mrow', 'data-provider': p.name, 'data-model': id, onclick: () => (placeOf(p.name, id) === undefined ? addModel(p.name, id) : removeMine(p.name, id)) },
+        h('span', { className: 'id', textContent: id }),
+        own ? h('span', { className: 'tag', textContent: 'not in its list' }) : p.added.includes(id) ? h('span', { className: 'tag', textContent: 'added by you' }) : null,
+        rowTail(p.name, id))
+    // one you added: ✕ forgets it (it leaves your list too)
+    const item = (id) => !p.added.includes(id) ? row(id) : h('div', { className: 'mwrap' }, row(id),
+      h('button', { className: 'forget', textContent: '✕', title: 'forget this model', 'aria-label': `forget ${id}`, onclick: async () => {
+        if (placeOf(p.name, id) !== undefined && !confirm(`Forget ${id}? It leaves your list too.`)) return
+        if (placeOf(p.name, id) !== undefined) await saveOrder(S.order.filter((t) => t.provider !== p.name || t.model !== id), `${id} removed`)
+        act('/api/provider/added', { name: p.name, model: id, remove: true }, `forgot ${id}`)
+      } }))
+    const typed = !anyMatch ? [row(q, true)] : []
+    if (q && anyMatch && !ids.length) return null // searching: only the providers with a match
+    // a model its list leaves out (some servers don't list them all): by its exact name
+    const name = h('input', { type: 'text', placeholder: m.off ? 'List off: a model\'s exact name' : 'Custom model: its exact name', 'aria-label': `add a model to ${p.name} by name` })
+    const go = () => {
+      const id = name.value.trim()
+      if (!id) return name.focus()
+      name.value = ''
+      // only under this provider, with its others: you choose whether to use it (click it, like any)
+      if ([...(MODELS[p.name]?.list ?? []), ...p.added].includes(id)) return showRow(p.name, id, `${id} is in ${p.name}'s models already`)
+      act('/api/provider/added', { name: p.name, model: id }).then((r) => r && showRow(p.name, id, `${id} added to ${p.name}'s models: click it to use it`))
+    }
+    name.addEventListener('keydown', (e) => e.key === 'Enter' && go())
+    return h('section', { 'data-provider': p.name },
+      // the header folds it (a click on it, or its arrow; not on its buttons and switch)
+      h('div', { className: 'prov-h', onclick: (e) => !e.target.closest('button:not(.fold), input, label, a') && fold(p.name) },
+        h('button', { className: 'fold', type: 'button', textContent: '▾', 'aria-label': `fold ${p.name}`, 'aria-expanded': 'true' }),
+        h('div', { className: 'who' },
+          h('span', { className: 'name', textContent: p.name }), ' ',
+          m.off ? h('span', { className: 'tag', textContent: 'list off' }) : m.loading ? h('span', { className: 'tag', textContent: 'loading…' }) : m.error ? h('span', { className: 'tag err', textContent: "can't list its models", title: m.error }) : h('span', { className: 'tag ok', textContent: `${m.list.length} model${m.list.length === 1 ? '' : 's'}` }),
+          ' ', h('span', { className: 'tag inlist' }),
+          h('div', { className: 'meta' }, h('span', { className: 'mono', textContent: p.baseUrl }), ' · key ', h('span', { className: 'mono', textContent: p.key || 'none' })),
+          withTip(h('label', { className: 'listsw' }, sw({ checked: p.list, 'aria-label': `load ${p.name}'s model list`, onchange: (e) => act('/api/provider/list', { name: p.name, on: e.target.checked }, `${p.name}: model list ${e.target.checked ? 'on' : 'off'}`) }), 'Load its model list'),
+            () => 'On: its models are loaded from the provider. Off: never asked for; only the models you add by name show.')),
+        h('button', { className: 'small', textContent: 'Edit', onclick: () => openForm(p) }),
+        h('button', { className: 'small danger', textContent: 'Delete', onclick: () => confirm(`Delete the provider "${p.name}"? Its models leave your list too.`) && act('/api/provider/delete', { name: p.name }, `deleted ${p.name}`) })),
+      h('div', { className: 'byname' }, name, h('button', { className: 'small byname-go', textContent: 'Add', onclick: go })),
+      // what's listed first; loading and errors under it (the models already shown stay where they are)
+      typed.length || ids.length ? h('div', { className: 'rows' }, typed, ids.map(item)) : null,
+      m.error ? h('div', { className: 'cat-note', style: 'color:var(--err)' }, `can't list its models: ${shortError(m.error)} `, h('button', { className: 'small', textContent: 'Try again', onclick: () => loadModels(p.name, true) }), h('div', { className: 'muted', style: 'margin-top:4px', textContent: 'Or add a model by its exact name, above.' })) : null,
+      m.loading ? h('div', { className: 'cat-note', textContent: 'Loading its models…' }) : null)
+  }))
+}
+// --- Your models page: the list as a table; sorted by several columns at once (each a tie-break
+// for the ones before it), the sort kept in this browser ---
+const can = (t) => ({ tools: t.tested ? t.tested.mode === 'tools' : t.known?.tools !== false, thinking: Boolean(t.tested ? t.tested.thinking : t.known?.thinking), images: Boolean(t.tested ? t.tested.vision : t.known?.images) })
+// how: text (A to Z first), cheap (lowest first), else most first
+const COLS = {
+  model: { label: 'Model', how: 'text', get: (t) => t.model },
+  provider: { label: 'Provider', how: 'text', get: (t) => t.provider },
+  context: { label: 'Context', get: (t) => t.tested?.context ?? t.known?.context ?? 0 },
+  abilities: { label: 'Abilities', get: (t) => Object.values(can(t)).filter(Boolean).length },
+  tools: { label: 'Tools', get: (t) => can(t).tools },
+  thinking: { label: 'Thinking', get: (t) => can(t).thinking },
+  images: { label: 'Images', get: (t) => can(t).images },
+  input: { label: 'In $/M', how: 'cheap', get: (t) => t.price?.input ?? null },
+  output: { label: 'Out $/M', how: 'cheap', get: (t) => t.price?.output ?? null },
+}
+let SORT = (() => {
+  try {
+    return JSON.parse(localStorage.getItem('heart.sort') ?? '[]').filter((x) => COLS[x?.key])
+  } catch {
+    return []
+  }
+})()
+const firstDir = (key) => (COLS[key].how ? 'up' : 'down') // up: A to Z, low to high
+function setSort(next) {
+  SORT = next
+  try {
+    localStorage.setItem('heart.sort', JSON.stringify(SORT))
+  } catch {}
+  drawMine(S)
+}
+// a column's header: first click adds it (after those already sorted by), the second flips it, the third drops it
+function clickSort(key) {
+  const at = SORT.find((x) => x.key === key)
+  if (!at) return setSort([...SORT, { key, dir: firstDir(key) }])
+  if (at.dir === firstDir(key)) return setSort(SORT.map((x) => (x === at ? { key, dir: at.dir === 'up' ? 'down' : 'up' } : x)))
+  setSort(SORT.filter((x) => x !== at))
+}
+function sorted(order) {
+  const cmp = (a, b, { key, dir }) => {
+    let x = COLS[key].get(a)
+    let y = COLS[key].get(b)
+    if (x === y) return 0
+    if (x == null) return 1 // unknown (no price): last, either way
+    if (y == null) return -1
+    const r = typeof x === 'string' ? byName(x, y) : Number(x) - Number(y)
+    return dir === 'up' ? r : -r
+  }
+  return order.map((t, i) => ({ t, i })).sort((a, b) => SORT.reduce((r, s) => r || cmp(a.t, b.t, s), 0) || a.i - b.i).map((x) => x.t)
+}
+const dirText = (key, dir) => (COLS[key].how === 'text' ? (dir === 'up' ? 'A→Z' : 'Z→A') : COLS[key].how === 'cheap' ? (dir === 'up' ? 'cheapest first' : 'priciest first') : dir === 'down' ? 'most first' : 'least first')
+function drawMine(s) {
+  const order = s.order
+  $('n-mine').textContent = order.length || ''
+  const view = sorted(order)
+  const same = view.every((t, i) => t === order[i])
+  // the order you see, saved as yours; the sort then goes (your own order from here on: drag on)
+  const keep = (list, moved) => {
+    SORT = []
+    try {
+      localStorage.setItem('heart.sort', '[]')
+    } catch {}
+    saveOrder(list, list[0] !== order[0] ? `${moved ? '' : 'order saved: '}HeartCode now uses ${list[0].provider} · ${list[0].model}` : 'order saved')
+  }
+  // a row dragged (in the order shown, sorted or not)
+  const move = (i, j) => {
+    if (i === j) return
+    const list = [...view]
+    const [t] = list.splice(i, 1)
+    list.splice(j, 0, t)
+    keep(list, true)
+  }
+  const yes = (v) => h('span', { className: v ? 'yes' : 'no', textContent: v ? '✓' : '–' })
+  const src = (t) => {
+    const x = t.tested
+    if (!x) return h('div', { className: 'src', textContent: 'looking it up…' })
+    if (x.source === 'assumed') return h('div', { className: 'src warn', title: "models.dev doesn't know it: Retry, or set up what it can do" }, 'not found', retry(t), h('button', { className: 'small', textContent: 'Set up', onclick: () => openSetup(t) }))
+    return h('div', { className: 'src' }, Object.keys(x.set ?? {}).length ? 'set by you' : x.source === 'models.dev' ? 'models.dev' : FROM[x.source], h('button', { className: 'small', textContent: 'Edit', onclick: () => openSetup(t) }))
+  }
+  const head = (key, num) => {
+    const at = SORT.findIndex((x) => x.key === key)
+    return h('button', { type: 'button', className: (at >= 0 ? 'on ' : '') + (num ? 'num' : ''), title: `sort by ${COLS[key].label.toLowerCase()}`, onclick: () => clickSort(key) },
+      COLS[key].label, at >= 0 ? ` ${SORT[at].dir === 'up' ? '↑' : '↓'}${SORT.length > 1 ? at + 1 : ''}` : '')
+  }
+  put($('mt'),
+    h('div', { className: 'mt-top' },
+      h('div', { className: 'sorts' }, SORT.length
+        ? ['Sorted by ', SORT.map(({ key, dir }, k) => h('span', { className: 'chip' }, `${k + 1}. ${COLS[key].label}: ${dirText(key, dir)}`, h('button', { type: 'button', textContent: '✕', 'aria-label': `stop sorting by ${COLS[key].label}`, onclick: () => setSort(SORT.filter((x) => x.key !== key)) })))]
+        : order.length > 1 ? 'In your order: HeartCode uses #1, then the next when one fails. Drag a row to move it, or click a column to sort.' : ''),
+      SORT.length ? h('button', { className: 'small', textContent: 'Clear sort', onclick: () => setSort([]) }) : null,
+      SORT.length ? h('button', { className: 'small primary', textContent: same ? 'This is your order' : 'Use this order', disabled: same, onclick: () => keep(view) }) : null,
+      order.length ? h('button', { className: 'small', textContent: 'Retry all', title: 'look all of them up in models.dev again', onclick: () => lookUp() }) : null),
+    order.length
+      ? h('div', { className: 'mt-scroll' }, h('div', { className: 'mt' },
+          h('div', { className: 'mt-h' }, h('span'), h('span', { textContent: '#' }), head('model'), head('provider'), head('context', true), head('abilities', true), head('tools'), head('thinking'), head('images'), head('input', true), head('output', true), h('span', { textContent: 'From' }), h('span')),
+          h('ol', { className: 'mtable' + (order.length < 2 ? '' : ' drag') }, view.map((t) => {
+            const c = can(t)
+            const ctx = COLS.context.get(t)
+            return h('li', { className: 'in', 'data-key': `${t.provider}/${t.model}` },
+              h('span', { className: 'grip', textContent: '⋮⋮', 'aria-hidden': 'true' }),
+              h('span', { className: 'n', textContent: `#${order.indexOf(t) + 1}`, title: SORT.length ? 'its place in your order now' : '' }),
+              h('span', { className: 'm', textContent: t.model }),
+              h('span', { className: 'p', textContent: t.provider }),
+              h('span', { className: 'num', textContent: ctx ? `${t.tested?.sure === false ? '~' : ''}${kTok(ctx)}` : '–' }),
+              h('span', { className: 'num', textContent: `${Object.values(c).filter(Boolean).length} of 3` }),
+              yes(c.tools), yes(c.thinking), yes(c.images),
+              h('span', { className: 'num', textContent: t.price?.input != null ? usd(t.price.input) : '–' }),
+              h('span', { className: 'num', textContent: t.price?.output != null ? usd(t.price.output) : '–' }),
+              src(t),
+              h('button', { className: 'danger', textContent: '✕', title: 'take it off the list', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) }))
+          }))))
+      : h('div', { className: 'mt-empty' }, 'No models in your list yet. ', h('a', { href: '#providers', textContent: 'Choose some under Providers & models' }), '.'))
+  sortable($('mt').querySelector('.mtable'), move)
+}
+
+// your list changed: the rows and counts it touches, in place
+function markCatalog() {
+  for (const r of $('p-list').querySelectorAll('.mrow')) {
+    const at = placeOf(r.dataset.provider, r.dataset.model)
+    r.classList.toggle('taken', at !== undefined)
+    r.lastElementChild.replaceWith(rowTail(r.dataset.provider, r.dataset.model))
+  }
+  for (const sec of $('p-list').querySelectorAll('section[data-provider]')) {
+    const n = S.order.filter((t) => t.provider === sec.dataset.provider).length
+    const tag = sec.querySelector('.inlist')
+    tag.hidden = !n
+    tag.textContent = `${n} in your list${S.order[0]?.provider === sec.dataset.provider ? ' · #1' : ''}`
+  }
+}
+
+function drawUsing(s) {
+  const o = s.order
+  $('using').hidden = page() === 'providers' // there it's on the page itself
+  put($('using'), o.length ? [h('span', { className: 'k', textContent: 'HeartCode uses' }), h('b', { textContent: o[0].model }), h('span', { className: 'k', textContent: `${o[0].provider}${o.length > 1 ? ` · ${o.length - 1} fallback${o.length > 2 ? 's' : ''}` : ''}` })] : [h('span', { className: 'k', textContent: 'No model chosen yet' }), h('a', { href: '#providers', textContent: 'Choose one' })])
+}
+
+// --- General ---
+const PERM_INFO = { all: ['Everything', 'Edits files and runs commands without asking'], commands: ['Edits only', 'Edits files; asks before running commands'], ask: ['Ask first', 'Asks before every edit and command'] }
+const THEME_INFO = { dark: ["Your terminal's background", ['#1f2328', '#d4d4d8', '#ff6b9d', '#7aa2f7']], light: ['White background', ['#fafbfc', '#24292f', '#d6336c', '#0969da']], midnight: ['Deep blue background', ['#1a1b26', '#c0caf5', '#ff7ab2', '#7aa2f7']], mono: ['No colors: bold and dim', ['#000000', '#bbbbbb', '#ffffff', '#777777']] }
+const TOGGLE_INFO = { autoCompact: 'Compact long conversations', director: 'Let the model set things up', format: 'Format files after edits', lsp: 'Language server checks' }
+function choices(id, list, cur, name) {
+  put($(id), list.map(([v, title, desc, colors]) => h('label', { className: 'choice' + (v === cur ? ' on' : '') },
+    h('input', { type: 'radio', name: id, checked: v === cur, onchange: () => act('/api/setting', { name, value: v }, `${title}: saved`) }),
+    colors ? h('div', { className: 'swatch' }, colors.map((c) => h('i', { style: `background:${c}` }))) : null,
+    h('b', { textContent: title }), h('span', { textContent: desc }))))
+}
+function drawGeneral(s) {
+  choices('g-perm', ['all', 'commands', 'ask'].map((p) => [p, ...PERM_INFO[p]]), s.settings.permissions, 'permissions')
+  choices('g-theme', s.choices.theme.map((t) => [t, t[0].toUpperCase() + t.slice(1), ...(THEME_INFO[t] ?? ['', null])]), s.settings.theme, 'theme')
+  put($('g-effort'), s.choices.effort.map((e) => h('option', { value: e, textContent: { default: "The model's own setting", low: 'Low: quick, less thinking', medium: 'Medium', high: 'High: thinks the longest' }[e] ?? e })))
+  $('g-effort').value = s.settings.effort
+  if (document.activeElement !== $('g-context')) $('g-context').value = s.settings.context ?? ''
+  put($('g-toggles'), Object.entries(s.choices.toggles).map(([k, d]) => h('label', { className: 'opt' },
+    h('div', { className: 't' }, h('b', { textContent: TOGGLE_INFO[k] ?? k }), h('span', { textContent: d[0].toUpperCase() + d.slice(1) })),
+    sw({ checked: s.settings[k], onchange: (e) => act('/api/setting', { name: k, value: e.target.checked }, `${TOGGLE_INFO[k] ?? k}: ${e.target.checked ? 'on' : 'off'}`) }))))
+  if (document.activeElement !== $('v-text')) $('v-text').value = s.voice
+}
+$('g-effort').onchange = (e) => act('/api/setting', { name: 'effort', value: e.target.value }, 'effort saved')
+$('g-context').onchange = (e) => act('/api/setting', { name: 'context', value: e.target.value.trim() ? Number(e.target.value) : null }, 'context window saved')
+$('v-save').onclick = () => act('/api/voice', { text: $('v-text').value }, 'voice saved')
+
+// --- Logging: the two switches, how much of each request; the requests logged (live) ---
+const logSwitch = (s, k, title, about) => h('label', { className: 'opt' },
+  h('div', { className: 't' }, h('b', { textContent: title }), h('span', { textContent: about })),
+  sw({ checked: s.settings[k], 'aria-label': title, onchange: (e) => act('/api/setting', { name: k, value: e.target.checked }, `${title}: ${e.target.checked ? 'on' : 'off'}`) }))
+function drawLogging(s) {
+  put($('l-run'), logSwitch(s, 'log', 'Keep a log of every run', `From now on: a folder per run in ${s.logs.runs}, a file per tab (tab-1.log, tab-2.log…).`))
+  put($('l-req'), logSwitch(s, 'logRequests', 'Log every request and reply', `Right away: a file per request in ${s.logs.requests}, a folder per run.`))
+  $('l-detail').value = s.settings.logDetail
+  if (document.activeElement !== $('l-days')) $('l-days').value = s.settings.logDays
+  $('l-detail').disabled = !s.settings.logRequests
+}
+$('l-days').onchange = (e) => {
+  const days = Number(e.target.value)
+  if (!Number.isInteger(days) || days < 1) return toast('a whole number of days, 1 or more', true), (e.target.value = S.settings.logDays)
+  act('/api/setting', { name: 'logDays', value: days }, `logs kept for ${days} day${days === 1 ? '' : 's'}; older ones deleted`)
+}
+$('l-detail').onchange = (e) => act('/api/setting', { name: 'logDetail', value: e.target.value }, 'saved: from the next request')
+
+let REQS = null // the requests logged, newest first
+let reqOpen = null // the one shown in full: "run/file"
+const reqFilter = () => document.querySelector('input[name="l-filter"]:checked').value
+const reqShown = (r) => ({ all: true, failed: r.result === 'failed', fallback: r.place > 1 })[reqFilter()]
+for (const r of document.querySelectorAll('input[name="l-filter"]')) r.onchange = () => {
+  for (const c of document.querySelectorAll('#l-filter label')) c.classList.toggle('on', c.querySelector('input').checked)
+  drawReqs()
+}
+const when = (iso) => {
+  const d = new Date(iso)
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })} ${time}`
+}
+const secs = (ms) => (ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
+const tokensOf = (u) => (u ? `${u.prompt_tokens ?? '?'} in · ${u.completion_tokens ?? '?'} out` : '')
+// what went wrong, in the server's words when it said some (an error's JSON body), else the message
+const whyOf = (r) => {
+  try {
+    const e = JSON.parse(r.errorBody).error
+    if (e) return `${r.status ? `${r.status}: ` : ''}${typeof e === 'string' ? e : e.message ?? JSON.stringify(e)}`
+  } catch {}
+  return r.error
+}
+const resultTag = (r) => h('span', { className: `tag ${r.result === 'ok' ? 'ok' : r.result === 'failed' ? 'err' : ''}`, textContent: r.result === 'ok' ? 'ok' : r.result === 'failed' ? `failed${r.status ? ` ${r.status}` : ''}` : 'stopped' })
+const placeTag = (r) => (r.place > 1 ? h('span', { className: 'tag brand', textContent: `#${r.place} of ${r.of} · fallback` }) : r.of > 1 ? h('span', { className: 'tag', textContent: `#1 of ${r.of}` }) : null)
+function reqRow(r) {
+  const key = `${r.run}/${r.file}`
+  return h('button', { className: `rq ${r.result}${reqOpen === key ? ' on' : ''}`, 'data-key': key, onclick: () => openReq(r) },
+    h('div', { className: 'l1' }, resultTag(r), h('span', { className: 'm', textContent: r.model }), placeTag(r)),
+    h('div', { className: 'l2' },
+      h('span', { textContent: when(r.at) }), h('span', { textContent: r.provider ?? '' }), h('span', { textContent: secs(r.ms) }),
+      r.usage ? h('span', { textContent: tokensOf(r.usage) }) : null,
+      r.purpose && r.purpose !== 'chat' ? h('span', { textContent: r.purpose === 'test' ? 'model test' : r.purpose }) : null,
+      r.tab ? h('span', { textContent: `tab ${r.tab}` }) : null),
+    r.result === 'failed' && r.error ? h('div', { className: 'why', textContent: whyOf(r), title: r.error }) : null)
+}
+function drawReqs() {
+  if (!REQS) return put($('l-list'), h('div', { className: 'empty', textContent: 'Loading…' }))
+  const shown = REQS.filter(reqShown)
+  const failed = REQS.filter((r) => r.result === 'failed').length
+  $('n-failed').textContent = failed ? `${failed} failed` : ''
+  put($('l-list'), shown.length ? shown.map(reqRow) : h('div', { className: 'empty', textContent: REQS.length ? 'None of these.' : S?.settings.logRequests ? 'Nothing yet: requests show here as HeartCode sends them.' : 'Nothing logged. Switch on "Log every request and reply" above.' }))
+}
+async function openReq(r) {
+  reqOpen = `${r.run}/${r.file}`
+  for (const b of $('l-list').querySelectorAll('.rq')) b.classList.toggle('on', b.dataset.key === reqOpen)
+  let d
+  try {
+    d = await api('/api/request', { run: r.run, file: r.file })
+  } catch (e) {
+    return put($('l-detail-pane'), h('div', { className: 'empty', textContent: `Can't read it: ${e.message}` }))
+  }
+  const row = (k, v) => (v === undefined || v === null || v === '' ? null : [h('dt', { textContent: k }), h('dd', { textContent: String(v) })])
+  const pre = (text) => h('pre', { textContent: typeof text === 'string' ? text : JSON.stringify(text, null, 2) })
+  const msgs = d.request?.messages ?? []
+  put($('l-detail-pane'),
+    h('div', { className: 'l1', style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, resultTag(d), h('b', { className: 'mono', textContent: d.model }), placeTag(d)),
+    h('dl', { className: 'kv' },
+      row('When', new Date(d.at).toLocaleString()), row('Provider', d.provider), row('Address', d.url),
+      row('Where in your list', d.of > 1 ? `#${d.place} of ${d.of}${d.place > 1 ? ' (a fallback: the ones before it failed)' : ''}` : null),
+      row('For', d.purpose === 'test' ? 'testing the model' : d.purpose === 'btw' ? 'a /btw question' : 'the conversation'), row('Tab', d.tab),
+      row('Took', secs(d.ms)), row('First token after', secs(d.firstTokenMs)), row('Tokens', tokensOf(d.usage)), row('Finished because', d.finishReason),
+      row('HTTP status', d.status), row('File', `${S?.logs.requests ?? ''}/${r.run}/${r.file}`)),
+    d.error ? [h('h3', { textContent: 'Error' }), pre(whyOf(d))] : null,
+    d.errorBody && d.errorBody !== d.error ? h('details', {}, h('summary', { textContent: 'The whole error' }), pre(`${d.error}\n\n${d.errorBody}`)) : null,
+    d.request === undefined && d.requestChars !== undefined ? h('p', { className: 'hint', textContent: `Saved as a summary: ${d.messages} messages, ${d.requestChars} characters sent; ${d.replyChars} characters and ${d.toolCalls} tool calls back. Choose "Everything" above to keep what was sent and what came back.` }) : null,
+    d.reply ? [h('h3', { textContent: 'Reply' }),
+      d.reply.toolCalls?.length ? h('div', {}, h('div', { className: 'muted', textContent: `${d.reply.toolCalls.length} tool call${d.reply.toolCalls.length > 1 ? 's' : ''}` }), pre(d.reply.toolCalls.map((t) => `${t.function?.name}(${t.function?.arguments ?? ''})`).join('\n'))) : null,
+      d.reply.content ? pre(d.reply.content) : null,
+      d.reply.reasoning ? h('details', {}, h('summary', { textContent: 'Thinking' }), pre(d.reply.reasoning)) : null] : null,
+    d.request ? [h('h3', { textContent: `Sent: ${msgs.length} message${msgs.length === 1 ? '' : 's'}${d.request.tools?.length ? `, ${d.request.tools.length} tools` : ''}` }),
+      msgs.map((m, i) => h('details', { open: i === msgs.length - 1 }, h('summary', { textContent: `${m.role}${m.tool_calls ? ' (tool calls)' : ''}${m.name ? ` · ${m.name}` : ''}` }), pre(m.content ?? m.tool_calls ?? ''))),
+      h('details', {}, h('summary', { textContent: 'The whole request (JSON)' }), pre(d.request))] : null)
+}
+
+// --- prompts: a list, and the chosen one to edit ---
+let promptQuery = ''
+$('r-search').oninput = (e) => ((promptQuery = e.target.value.toLowerCase()), S && drawPrompts(S))
+function drawPrompts(s) {
+  const match = (p) => !promptQuery || `${p.id} ${p.title ?? ''} ${p.note}`.toLowerCase().includes(promptQuery)
+  const item = (p) => ({ id: p.id, title: p.title ? p.title.replace(/^System prompt /, 'System ') : p.id.split('/')[1], sub: p.title ? p.id : p.note.split('\n')[0], badge: p.changed ? h('span', { className: 'tag brand', textContent: 'yours' }) : null, p })
+  const groups = [{ title: 'System prompts', items: s.prompts.filter((p) => p.title && match(p)).map(item) }]
+  for (const file of ['agent', 'guided', 'compact', 'probe']) groups.push({ title: { agent: 'Tools, notes and replies', guided: 'Guided mode (models without tool calls)', compact: 'Summaries', probe: 'Model tests' }[file], items: s.prompts.filter((p) => !p.title && p.id.startsWith(file + '/') && match(p)).map(item) })
+  masterDetail('prompts', $('r-items'), $('r-detail'), groups, (x) => {
+    if (!x) return h('div', { className: 'card empty', textContent: 'No prompt matches.' })
+    const p = x.p
+    const ta = editor('prompts', p.id, p.text)
+    return h('div', { className: 'card' },
+      h('div', { className: 'row', style: 'justify-content:space-between;align-items:center' }, h('h2', { style: 'margin:0', textContent: p.title ?? p.id }), p.changed ? h('span', { className: 'tag brand', textContent: 'yours' }) : h('span', { className: 'tag', textContent: "HeartCode's" })),
+      h('div', { className: 'mono muted', style: 'margin:2px 0 10px', textContent: p.id }),
+      p.note ? h('p', { className: 'sub', textContent: p.note, style: 'white-space:pre-wrap' }) : null,
+      ta,
+      h('div', { className: 'actions' },
+        h('button', { className: 'primary', textContent: 'Save', onclick: () => saveItem('prompts', p.id, '/api/prompt', { id: p.id, text: ta.value }, 'saved: used from the next message') }),
+        DRAFTS.prompts[p.id] !== undefined ? h('button', { className: 'ghost', textContent: 'Undo my changes', onclick: () => (saved('prompts', p.id), drawPrompts(S)) }) : null,
+        h('span', { className: 'spacer' }),
+        p.changed ? h('button', { textContent: "Reset to HeartCode's", onclick: () => confirm("Put HeartCode's prompt back? Yours is deleted.") && saveItem('prompts', p.id, '/api/prompt', { id: p.id, text: null }, "HeartCode's prompt again") }) : null))
+  })
+}
+
+// --- MCP ---
+const mcpKind = () => document.querySelector('input[name="c-kind"]:checked').value
+for (const r of document.querySelectorAll('input[name="c-kind"]')) r.onchange = () => {
+  for (const c of document.querySelectorAll('#c-kind label')) c.classList.toggle('on', c.querySelector('input').checked)
+  $('c-what-label').textContent = mcpKind() === 'url' ? 'URL' : 'Command'
+  $('c-what').placeholder = mcpKind() === 'url' ? 'https://mcp.example.com/mcp' : 'npx -y @modelcontextprotocol/server-github'
+}
+$('c-add').onclick = async () => {
+  const r = await act('/api/mcp/add', { name: $('c-name').value, [mcpKind()]: $('c-what').value }, `added ${$('c-name').value.trim()}: it starts from the next message`)
+  if (r) $('c-name').value = $('c-what').value = ''
+}
+function drawMcp(s) {
+  put($('c-list'), h('h2', { textContent: 'Servers' }), h('p', { className: 'sub', textContent: 'Built in, and yours. Switch one off to keep it without using it.' }),
+    s.mcp.length ? s.mcp.map((m) => h('div', { className: 'opt' },
+      h('div', { className: 't' }, h('b', {}, m.name, ' ', h('span', { className: 'tag', textContent: m.from })), m.description ? h('span', { textContent: m.description }) : null, h('div', { className: 'mono muted', style: 'word-break:break-all;margin-top:3px', textContent: m.what })),
+      m.from === 'yours' ? h('button', { className: 'small danger', textContent: 'Remove', onclick: () => confirm(`Remove the MCP server ${m.name}?`) && act('/api/mcp/remove', { name: m.name }, `removed ${m.name}`) }) : null,
+      sw({ checked: m.on, 'aria-label': `${m.name} on`, onchange: (e) => act('/api/mcp/toggle', { name: m.name, on: e.target.checked }, `${m.name}: ${e.target.checked ? 'on' : 'off'}`) }))) : h('div', { className: 'empty', textContent: 'No MCP servers.' }))
+  const f = s.files.find((x) => x.name === 'mcp.json')
+  const ta = editor('files', 'mcp.json', f.text, { placeholder: f.example })
+  put($('c-file'), ta, h('div', { className: 'actions' }, h('button', { className: 'primary', textContent: 'Save mcp.json', onclick: () => saveItem('files', 'mcp.json', '/api/file', { name: 'mcp.json', text: ta.value }, 'saved mcp.json: the servers start from the next message') })))
+  $('n-mcp').textContent = s.mcp.filter((m) => m.on).length || ''
+}
+
+// --- skills: a form (name, who uses it, what it's for, the prompt); SKILL.md is made from it ---
+const USES = [['both', 'You and the model', 'type /name, or the model uses it when it fits'], ['me', 'Only you', 'only when you type /name'], ['model', 'Only the model', "when it fits; you don't type it"]]
+function parseSkill(text) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text)
+  const out = { description: '', use: 'both', extra: [], body: (m ? m[2] : text).replace(/^\s*\n/, '') }
+  for (const line of (m?.[1] ?? '').split('\n')) {
+    const kv = /^([\w-]+):\s*(.*)$/.exec(line.trim())
+    if (kv && (kv[1] === 'description' || kv[1] === 'use')) out[kv[1]] = kv[2].replace(/^["']|["']$/g, '')
+    else if (line.trim()) out.extra.push(line) // the rest (name, argument-hint…) stays as it was
+  }
+  return out
+}
+const skillText = (k) => `---\n${k.description.trim() ? `description: ${k.description.trim().replace(/\n/g, ' ')}\n` : ''}use: ${k.use}\n${k.extra.map((l) => l + '\n').join('')}---\n\n${k.body.trim()}\n`
+const NEW = { name: '', description: '', use: 'both', extra: [], body: '' }
+$('k-new').onclick = () => ((SEL.skills = '+new'), S && drawSkills(S))
+function skillForm(id, start, { isNew, readOnly }) {
+  const d = DRAFTS.skills[id] ?? { ...start, extra: [...start.extra] } // your unsaved changes, else as saved
+  const touch = () => (DRAFTS.skills[id] = d) // a change: kept (and dotted in the list) until it's saved
+  const field = (key, props) => h('input', { type: 'text', value: d[key], readOnly, oninput: (e) => ((d[key] = e.target.value), touch()), ...props })
+  const uses = h('div', { className: 'choices' }, USES.map(([v, t, sub]) => h('label', { className: 'choice' + (d.use === v ? ' on' : '') },
+    h('input', { type: 'radio', name: `use-${id}`, checked: d.use === v, disabled: readOnly, onchange: () => ((d.use = v), touch(), uses.querySelectorAll('.choice').forEach((c) => c.classList.toggle('on', c.querySelector('input').checked))) }),
+    h('b', { textContent: t }), h('span', { textContent: sub }))))
+  const body = grow(h('textarea', { className: 'editor', spellcheck: false, readOnly, value: d.body, placeholder: 'What the model should do. $ARGUMENTS is what you type after /name: "/review the login page" gives "the login page".', oninput: (e) => ((d.body = e.target.value), touch()) }), 220)
+  return { d, el: [
+    h('div', { className: 'row' },
+      isNew ? h('div', { className: 'grow' }, h('label', { className: 'f', textContent: "Name: you'll type /name" }), field('name', { placeholder: 'review' })) : null,
+      h('div', { className: 'grow', style: 'flex:3' }, h('label', { className: 'f', textContent: 'What it does (the model reads this to know when to use it)' }), field('description', { placeholder: 'Reviews the changes for bugs and unclear code' }))),
+    h('label', { className: 'f', textContent: 'Who uses it' }), uses,
+    h('label', { className: 'f', textContent: 'The prompt' }), body,
+  ] }
+}
+function drawSkills(s) {
+  if (!s.skills.length) SEL.skills = '+new' // none yet: the form is the page (one way in, no empty card)
+  $('k-new').hidden = SEL.skills === '+new'
+  const mine = s.skills.filter((k) => k.mine)
+  const theirs = s.skills.filter((k) => !k.mine)
+  const item = (k) => ({ id: k.name, title: '/' + k.name, sub: k.description, k })
+  masterDetail('skills', $('k-items'), $('k-detail'), [{ title: mine.length && theirs.length ? 'Yours' : '', items: mine.map(item) }, { title: 'From projects', items: theirs.map(item) }], (x) => {
+    if (x === '+new') {
+      const f = skillForm('+new', NEW, { isNew: true })
+      const first = !s.skills.length
+      return h('div', { className: 'card' }, h('h2', { textContent: first ? 'Make your first skill' : 'New skill' }),
+        first ? h('p', { className: 'sub', textContent: 'A skill is a prompt you use again and again, like "review this" or "write the release notes". Skills from Claude Code and others: /import in HeartCode.' }) : null,
+        f.el,
+        h('div', { className: 'actions' },
+          h('button', { className: 'primary', textContent: 'Create skill', onclick: async () => {
+            const slug = f.d.name.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
+            if (!f.d.body.trim()) return toast('Write the prompt first', true)
+            SEL.skills = slug // the new one, chosen in the list once it's there
+            if (!(await saveItem('skills', '+new', '/api/skill', { name: f.d.name, text: skillText(f.d) }, `created /${slug}`))) SEL.skills = '+new'
+          } }),
+          first ? null : h('button', { className: 'ghost', textContent: 'Cancel', onclick: () => (saved('skills', '+new'), (SEL.skills = null), drawSkills(S)) })))
+    }
+    const k = x.k
+    const f = skillForm(k.name, parseSkill(k.text), { readOnly: !k.mine })
+    return h('div', { className: 'card' },
+      h('div', { className: 'row', style: 'justify-content:space-between;align-items:center' }, h('h2', { style: 'margin:0', className: 'mono', textContent: '/' + k.name }), k.mine ? null : h('span', { className: 'tag', textContent: 'from a project: read only' })),
+      f.el,
+      k.mine ? h('div', { className: 'actions' },
+        h('button', { className: 'primary', textContent: 'Save', onclick: () => saveItem('skills', k.name, '/api/skill', { name: k.name, was: k.name, text: skillText(f.d) }, `saved /${k.name}`) }),
+        h('span', { className: 'spacer' }),
+        h('button', { className: 'danger', textContent: 'Delete', onclick: () => confirm(`Delete the skill /${k.name}?`) && saveItem('skills', k.name, '/api/skill/delete', { name: k.name }, `deleted /${k.name}`) })) : null)
+  })
+  $('n-skills').textContent = s.skills.length || ''
+}
+
+// --- advanced files ---
+function drawFiles(s) {
+  $('f-home').textContent = s.home
+  const files = s.files.filter((f) => f.name !== 'mcp.json')
+  masterDetail('files', $('f-items'), $('f-detail'), [{ items: files.map((f) => ({ id: f.name, title: f.name, sub: f.about, badge: f.text.trim() ? null : h('span', { className: 'tag', textContent: 'none yet' }), f })) }], (x) => {
+    if (!x) return null
+    const f = x.f
+    const ta = editor('files', f.name, f.text, { placeholder: f.example })
+    return h('div', { className: 'card' },
+      h('div', { className: 'row', style: 'justify-content:space-between;align-items:center' }, h('h2', { style: 'margin:0', className: 'mono', textContent: f.name }), f.text.trim() ? null : h('span', { className: 'tag', textContent: 'none yet' })),
+      h('p', { className: 'sub', style: 'margin:6px 0 12px', textContent: f.about }),
+      !f.text.trim() && DRAFTS.files[f.name] === undefined ? h('div', { className: 'hint', style: 'margin:-4px 0 10px' }, 'Empty: the example is shown in grey. ', h('button', { className: 'small', textContent: 'Start from the example', onclick: () => ((DRAFTS.files[f.name] = f.example + '\n'), drawFiles(S)) })) : null,
+      ta,
+      h('div', { className: 'actions' }, h('button', { className: 'primary', textContent: `Save ${f.name}`, onclick: () => saveItem('files', f.name, '/api/file', { name: f.name, text: ta.value }, ta.value.trim() ? `saved ${f.name}` : `${f.name} deleted`) })))
+  })
+}
+
+function render(s) {
+  S = s
+  drawProviders(s)
+  drawMine(s)
+  drawUsing(s)
+  drawGeneral(s)
+  drawLogging(s)
+  if (REQS) drawReqs()
+  drawPrompts(s)
+  drawMcp(s)
+  drawSkills(s)
+  drawFiles(s)
+}
+
+showPage()
+drawPresets()
+if (!token) put($('page-providers'), h('h1', { textContent: 'Open the link HeartCode printed' }), h('p', { className: 'lead', textContent: 'It has the key to this page: /settings in HeartCode, or heart settings.' }))
+else {
+  api('/api/state').then(render, (e) => toast(e.message, true))
+  api('/api/requests').then(({ items }) => ((REQS = items), drawReqs()), () => ((REQS = []), drawReqs()))
+}
+// A model's test, as it goes: the server streams each change; only its line in your list changes.
+if (token) {
+  const events = new EventSource(`/api/events?t=${token}`)
+  // a request logged: at the top of the list, nothing else redrawn
+  events.addEventListener('request', (e) => {
+    const r = JSON.parse(e.data)
+    if (!REQS) return
+    REQS.unshift(r)
+    if (REQS.length === 1 || !reqShown(r)) return drawReqs()
+    $('l-list').prepend(reqRow(r))
+    const failed = REQS.filter((x) => x.result === 'failed').length
+    $('n-failed').textContent = failed ? `${failed} failed` : ''
+  })
+  events.addEventListener('test', (e) => {
+    const d = JSON.parse(e.data)
+    const t = S?.order.find((x) => `${x.provider}/${x.model}` === d.key)
+    if (!t) return
+    Object.assign(t, { tested: d.tested ?? t.tested, known: d.known ?? t.known })
+    document.querySelector(`#inuse li[data-key="${CSS.escape(d.key)}"] .test`)?.replaceWith(testLine(t))
+    drawMine(S)
+  })
+}
+</script>
+</body>
+</html>

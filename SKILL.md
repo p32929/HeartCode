@@ -1,0 +1,163 @@
+---
+name: heartcode
+description: Run a coding task with HeartCode, a coding agent for any OpenAI-compatible model (OpenRouter, Groq, Ollama, LM Studio, your own server…), from a script or another AI agent. Use it to hand a task to a different or cheaper model, get a second opinion on code, or run work in an isolated git worktree. Headless: `heart -p`, JSON out, exit code 0 or 1.
+---
+
+# HeartCode, for AI agents
+
+HeartCode is a coding agent in the terminal. Interactively it takes the whole screen, which an
+agent can't drive. Use it **headless**: `heart -p` runs one task without the screen, prints the
+answer (or JSON) and exits. Its flags and output match Claude Code's `claude -p`.
+
+## Check it's there
+
+```sh
+heart --version          # installed? (else: node /path/to/heart_cli/bin/heart.js --version)
+heart providers          # the providers set up, and their URLs (keys are masked)
+heart models --json      # the models to pass to -m: "default" first (the user's list, with fallbacks), then each model
+heart models --all --json   # every provider's models too (slower: asks each provider)
+```
+
+Read `--json`, not the text: the text layout is for people and may change.
+
+```json
+{ "models": [
+    { "place": null, "provider": null, "model": "default", "role": "default", "rotates": true, "about": "your models in order: #1, then the next when one fails (-m default, or no -m)" },
+    { "place": 1, "provider": "groq", "model": "openai/gpt-oss-120b", "role": "in use", "rotates": false },
+    { "place": 2, "provider": "openrouter", "model": "qwen/qwen3-coder", "role": "fallback", "rotates": false } ],
+  "providers": [
+    { "name": "groq", "baseUrl": "https://api.groq.com/openai/v1", "list": true, "models": ["…"] },
+    { "name": "local", "baseUrl": "http://127.0.0.1:9/v1", "list": true, "models": [], "error": "cannot reach …" } ] }
+```
+
+Each entry in `models` is something to pass to `-m`, in order:
+
+- **`default`** (always first; `place` and `provider` are `null`): the user's list. `rotates: true`
+  when they have more than one model: #1 is used, and the next one in order when it fails.
+- **the user's models** (`place` 1, 2, …): `role` is `in use` for #1 and `fallback` for the rest;
+  `rotates: false`, since a model named on its own is used alone.
+
+No model set up yet: `models` is empty (and `heart -p` fails with "no model set up").
+`heart models [--all] <filter>` keeps only the entries whose `model` contains `<filter>`.
+
+`providers` (only with `--all`): every provider's models. `list: false`: the user switched that
+provider's list off, and `models` are the ones they added by name. A provider that can't be
+reached has an `error` and is skipped; the command still exits `0`.
+
+**Which model to pass:**
+
+| `-m` | What runs |
+|---|---|
+| `default`, or no `-m` | the user's list: #1, and the next one in order when it fails (rate limits, outages…). Use this unless you need one particular model. |
+| a model from the list: `-m "<provider> <model>"` (`-m "groq openai/gpt-oss-120b"`), or `-m <model>` alone | that model alone: never another one, also when it fails (it's tried again, up to `--max-retries`) |
+
+`--provider <name>` and `-u <url>` (a server for this run) also mean one model, alone.
+
+`heart` is installed by `npm start` in the HeartCode folder. `heartcode` is the same command.
+Needs Node.js 20 or newer. No providers? See "Setting up a model" below.
+
+## Run a task
+
+```sh
+heart -p --output-format json -C /path/to/project "fix the failing test in math.test.js"
+```
+
+- `-C <folder>`: the project to work in (default: the current folder). A folder, not a file.
+- The prompt is the last argument, or stdin: `echo "explain src/agent.js" | heart -p`.
+- Exit code: `0` it finished, `1` it failed (no model, the model kept failing, `--max-turns` hit).
+
+`--output-format json` prints one object on stdout:
+
+```json
+{ "type": "result", "subtype": "success", "is_error": false, "result": "Fixed it: …",
+  "num_turns": 6, "duration_ms": 41200, "total_cost_usd": 0.0031,
+  "usage": { "input_tokens": 18000, "output_tokens": 900 }, "session_id": "20261027-…" }
+```
+
+Read `is_error` and `result`. `subtype` is `success`, `error_during_execution` or
+`error_max_turns`. Without `--output-format`, stdout is just the answer text, and an error
+goes to stderr. Logs never go to stdout.
+
+## Continue the same conversation
+
+Pass the `session_id` from the last result:
+
+```sh
+heart -p --output-format json --resume 20261027-… "now add a test for the empty case"
+heart -p --continue "…"          # or: the last session in this folder
+```
+
+## Keep it safe
+
+Headless never asks anyone. What the permission mode would ask about is declined, and the
+model is told why.
+
+| You want | Flags |
+|---|---|
+| Answers only, no changes (review, explain, find) | `--allowedTools Read,Grep,Glob` |
+| Edits, but no shell commands | `--permission-mode commands` |
+| Everything (edits and commands) | `--permission-mode all` (the default unless the user set another) |
+| Changes kept apart from the user's files | `--worktree=<name>` (in a git repo): it works in `.heartcode/worktrees/<name>` on the branch `heartcode/<name>`; kept if anything changed (merge it from there), removed if nothing did |
+| A cap on how long it works | `--max-turns 30` (model steps), `--max-retries 3` (a failing provider) |
+| Nothing written to the user's `~/.heart` (sessions, logs, settings) | `--temp` |
+
+Tool names: HeartCode's own (`read_file`, `edit_file`, `write_file`, `run_command`, `search`,
+`list_files`, `web_fetch`, `web_search`…) or Claude Code's (`Read`, `Edit`, `Write`, `Bash`,
+`Grep`, `Glob`, `WebFetch`, `WebSearch`). `--disallowedTools Bash` takes one away.
+
+## Choose the model
+
+```sh
+heart -p -m default "…"                         # the user's list, with its fallbacks (the same as no -m)
+heart -p -m "groq openai/gpt-oss-120b" "…"     # that provider and model alone, for this run
+heart -p --provider ollama -m qwen3-coder "…"   # the same, written apart
+heart -p --effort high "…"                      # how hard a thinking model thinks
+```
+
+What a model can do (tool calls, context size, thinking, images) comes from models.dev, at once;
+nothing is sent to the model to find out. A model models.dev doesn't know works with plain
+assumptions, and the user can set it up on the settings page. Models that can't call tools still
+work, in a slower guided mode.
+
+## Setting up a model
+
+Ask the user which provider and model to use, and for the key. Never invent one. Then:
+
+```sh
+# for one run only (nothing saved); the key from the environment, not the command line
+HEART_BASE_URL=https://api.groq.com/openai/v1 HEART_API_KEY=… HEART_MODEL=openai/gpt-oss-120b heart -p "…"
+
+# saved for every run (writes ~/.heart/config.json)
+HEART_API_KEY=… heart -u https://api.groq.com/openai/v1 -m openai/gpt-oss-120b --save -p "hello"
+```
+
+A model server on this machine (Ollama on :11434, LM Studio on :1234, llama.cpp on :8080) is
+found on its own. The user can also set everything up in a browser: `heart settings`.
+
+## More context for the task
+
+| Flag | |
+|---|---|
+| `--append-system-prompt "<text>"` | added to HeartCode's system prompt for this run |
+| `--mcp-config <file or JSON>` | more MCP servers (repeatable); `--strict-mcp-config`: only those |
+| `--skills-dir <folder>` | more skills (repeatable) |
+| `--no-memory` | don't read or write HeartCode's memory notes |
+
+A project's own `HEARTCODE.md` (or `AGENTS.md`, `CLAUDE.md`) is read like instructions.
+
+## Long tasks: a stream of events
+
+```sh
+heart -p --input-format stream-json --output-format stream-json
+```
+
+Stdin: one message per line, `{"type":"user","message":{"role":"user","content":"…"}}`.
+Stop the running one with `{"type":"control_request","request_id":"1","request":{"subtype":"interrupt"}}`.
+Stdout: one JSON event per line, `system`/`init`, then `assistant` (text, thinking, `tool_use`),
+`user` (`tool_result`), and a `result` after each message. It runs until stdin closes.
+
+## Don't
+
+- Don't run `heart` without `-p` from an agent: it's a full-screen app and waits for a person.
+- Don't put API keys on the command line where other processes can see them; use `HEART_API_KEY`.
+- Don't run `heart settings` unless the user asked: it starts a web page and runs until stopped.
