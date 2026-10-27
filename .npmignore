@@ -1,0 +1,26 @@
+# Left out of the npm package: only bin/, src/, prompts/, README.md, SKILL.md, LICENSE and
+# package.json are needed to run HeartCode. (With this file, npm doesn't read .gitignore, so
+# its entries are here too.)
+
+# development only
+bench/
+later/
+scripts/
+docs/
+TODO.md
+test/
+
+# from .gitignore
+logs/
+node_modules/
+.heartcode/
+.DS_Store
+.gitignore
+
+# local files
+*.log
+*.tgz
+.env
+.env.*
+.vscode/
+.idea/
