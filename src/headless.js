@@ -93,15 +93,29 @@ export async function runHeadless(app, opts) {
   const model = `${app.cfg.provider}/${s.client.model}`
 
   // usage and request count, over everything this message sends (tool loop, compaction, memory)
+  // (also your other models', when this one hands them a job: modelUsage has each)
   let usage = { input_tokens: 0, output_tokens: 0 }
+  let byModel = {}
   let requests = 0
-  const chat = s.client.chat.bind(s.client)
-  s.client.chat = async (...a) => {
-    const r = await chat(...a)
-    requests++
-    usage.input_tokens += r.usage?.prompt_tokens ?? 0
-    usage.output_tokens += r.usage?.completion_tokens ?? 0
-    return r
+  const count = (client, key) => {
+    const chat = client.chat.bind(client)
+    client.chat = async (...a) => {
+      const r = await chat(...a)
+      const m = (byModel[key] ??= { inputTokens: 0, outputTokens: 0 })
+      if (client === s.client) requests++
+      usage.input_tokens += r.usage?.prompt_tokens ?? 0
+      usage.output_tokens += r.usage?.completion_tokens ?? 0
+      m.inputTokens += r.usage?.prompt_tokens ?? 0
+      m.outputTokens += r.usage?.completion_tokens ?? 0
+      return r
+    }
+  }
+  count(s.client, model)
+  const engineFor = s.engineFor
+  if (engineFor) s.engineFor = async (t) => {
+    const e = await engineFor(t)
+    count(e.client, `${t.provider}/${t.model}`)
+    return e
   }
 
   let said = false // the model's text was already sent as an assistant message
@@ -129,6 +143,7 @@ export async function runHeadless(app, opts) {
     const t0 = Date.now()
     const spent = app.chat.usage?.cost ?? 0
     usage = { input_tokens: 0, output_tokens: 0 }
+    byModel = {}
     requests = 0
     said = false
     current = { ctl: new AbortController() }
@@ -148,7 +163,7 @@ export async function runHeadless(app, opts) {
     }
     const subtype = current.maxTurns ? 'error_max_turns' : error ? 'error_during_execution' : 'success' // as Claude Code names them
     current = null
-    const result = { type: 'result', subtype, is_error: Boolean(error), result: error ?? answer, num_turns: Math.max(1, requests), duration_ms: Date.now() - t0, total_cost_usd: (app.chat.usage?.cost ?? 0) - spent, usage, modelUsage: { [model]: { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens } }, session_id }
+    const result = { type: 'result', subtype, is_error: Boolean(error), result: error ?? answer, num_turns: Math.max(1, requests), duration_ms: Date.now() - t0, total_cost_usd: (app.chat.usage?.cost ?? 0) - spent, usage, modelUsage: { [model]: { inputTokens: 0, outputTokens: 0 }, ...byModel }, session_id }
     if (out === 'stream-json') {
       if (!error && answer && !said) emit({ type: 'assistant', message: { role: 'assistant', model, content: [{ type: 'text', text: answer }] }, session_id }) // guided mode
       emit(result)

@@ -44,6 +44,7 @@ export function newFileIn(task, files) {
 // Obvious next steps are taken without asking: a weak model's effort goes into
 // writing code, not into navigating. Returns an action, or null to ask.
 export function autoAction(st) {
+  if (st.delegated) return 'finish' // another model did the task: say what it did
   if (st.newFile && st.wantsChange) return 'create'
   if (st.failing && st.canRun && !st.runs && !st.edits) return 'run' // see the failure first
   if (st.lastRun !== null && st.lastRun !== 0 && !st.editsSinceRun && st.wantsChange && st.fixes < 3) return 'edit'
@@ -61,7 +62,7 @@ export function nextActions(st) {
   if (!st.reads && st.hasFiles) first = ['read', 'search']
   else if (st.wantsChange && !st.edits) first = st.hasFiles ? ['edit', 'create', 'read'] : ['create']
   else first = ['finish', 'edit', 'run']
-  return [...new Set([...first, ...ACTIONS.map(([n]) => n)])]
+  return [...new Set([...first, ...ACTIONS.map(([n]) => n)])].filter((n) => n !== 'delegate' || st.canDelegate)
 }
 
 // A reply may be plain text or (when enforced) JSON like {"path": "a.js"}.
@@ -193,7 +194,7 @@ class Guided {
     this.notes = []
     this.changed = new Set()
     this.files = listFiles(s.root)
-    this.st = { reads: 0, edits: 0, editsSinceRun: 0, runs: 0, fixes: 0, lastRun: null, hasFiles: this.files.length > 0, canRun: suggestCommands(s.root).length > 0 }
+    this.st = { reads: 0, edits: 0, editsSinceRun: 0, runs: 0, fixes: 0, lastRun: null, hasFiles: this.files.length > 0, canRun: suggestCommands(s.root).length > 0, canDelegate: Boolean(s.team?.().some((t) => t.tools)) }
   }
 
   async yesNo(question, fallback) {
@@ -583,6 +584,16 @@ class Guided {
     const a = await this.ui.ask(`${c.cyan('heartcode asks:')} ${q}\n${c.magenta('> ')}`)
     this.note(null, `you asked the user: ${q}`, `The user answered: ${a ?? '(no answer)'}`)
     return `ask:${q}`
+  }
+
+  // Another of your models, one with tool calls, does the whole task; what it did goes in the notes.
+  async delegate() {
+    const team = this.s.team().filter((t) => t.tools)
+    const t = (/\.(png|jpe?g|gif|webp)\b/i.test(this.task) && team.find((x) => x.images)) || team[0]
+    const done = await this.s.subagent({ description: 'the task', prompt: this.task, model: `${t.provider} ${t.model}` }, this.signal)
+    this.note('delegate', `what ${t.model} did for the task`, done)
+    this.st.delegated = true
+    return 'delegate'
   }
 
   async finish() {

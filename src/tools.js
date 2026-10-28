@@ -115,6 +115,22 @@ export function readFileTool(root, p, start, end, maxLines = 400) {
   return numberLines(lines.slice(s - 1, e), s) + more
 }
 
+// An image file: shown to a model that can see images (after the tool results, as MCP screenshots
+// are); for one that can't, where to send it.
+const IMAGE = /\.(png|jpe?g|gif|webp)$/i
+function readImage(s, p) {
+  const abs = resolveIn(s.root, p)
+  const rel = path.relative(s.root, abs) || p
+  if (!fs.existsSync(abs)) return readFileTool(s.root, p)
+  if (s.strat?.vision) {
+    const ext = path.extname(abs).slice(1).toLowerCase()
+    ;(s.pendingImages ??= []).push(`data:image/${ext === 'jpg' ? 'jpeg' : ext};base64,${fs.readFileSync(abs).toString('base64')}`)
+    return `${rel}: the image is attached in the next message`
+  }
+  const seer = s.team?.().find((t) => t.images)
+  return `${rel} is an image, and you can't see images.${seer ? ` Ask a model that can: the agent tool with model "${seer.provider} ${seer.model}", and the image's path in the prompt.` : ''}`
+}
+
 export function searchFiles(root, query, sub = '', limit = 50) {
   const ci = query === query.toLowerCase()
   let re
@@ -468,7 +484,11 @@ export function extraTools(s) {
   }
   // the patch format OpenAI's models are trained on (they also write it as a shell command, below)
   if (/gpt|codex|\bo\d/i.test(s.client?.model ?? '')) out.push({ name: 'apply_patch', description: prompt('agent/tool-apply_patch'), parameters: obj({ input: str }, ['input']) })
-  if (!s.isSub && s.subagent) out.push({ name: 'agent', description: prompt('agent/tool-agent'), parameters: obj({ description: str, prompt: str }, ['description', 'prompt']) })
+  if (!s.isSub && s.subagent) {
+    const team = s.team?.() ?? []
+    const model = { type: 'string', description: prompt('agent/tool-agent-model') }
+    out.push({ name: 'agent', description: prompt('agent/tool-agent'), parameters: obj({ description: str, prompt: str, ...(team.length && { model }) }, ['description', 'prompt']) })
+  }
   return [...out, ...(s.director && !s.appendSystem ? s.director.toolDefs(s) : [])] // manage (director.js); not when a program gives the instructions (--append-system-prompt)
 }
 
@@ -811,7 +831,7 @@ async function tool(name, args, s, signal) {
     }
     switch (name) {
       case 'read_file':
-        return readFileTool(root, args.path, args.start_line, args.end_line)
+        return IMAGE.test(String(args.path ?? '')) ? readImage(s, args.path) : readFileTool(root, args.path, args.start_line, args.end_line)
       case 'list_files': {
         const files = listFiles(root).filter((f) => !args.filter || f.includes(args.filter))
         return files.slice(0, 500).join('\n') + (files.length > 500 ? `\n… ${files.length - 500} more` : '') || 'no files'

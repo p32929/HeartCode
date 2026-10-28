@@ -452,6 +452,13 @@ class App {
     return [...COMMANDS, ...mine]
   }
 
+  // A command: "/name …" with the name of a built-in command or a skill you can type. Anything else
+  // starting with "/" (a path like /Users/me/shot.png) is a message for the model.
+  isCommand(line) {
+    const name = /^\/([\w-]+)(?=\s|$)/.exec(line)?.[1]
+    return Boolean(name) && (name === 'quit' || this.commands().some(([n]) => n === `/${name}`))
+  }
+
   help() {
     const mine = this.commands().slice(COMMANDS.length)
     return helpText(mine.length ? [...SECTIONS, ['your skills', mine]] : SECTIONS)
@@ -585,6 +592,8 @@ class App {
     this.useRotation()
     Object.assign(this.s, { noFormat: cfg.format === false, noLsp: cfg.lsp === false })
     Object.assign(this.s, { mcp: this.mcp, memory: this.memory, skills: this.skills, director: this.director })
+    this.s.team = () => this.team() // your other models: a job this one can't do goes to one of them
+    this.s.engineFor = (t) => this.engine(t.provider, t.model, ui)
     if (this.allowTools?.length) this.s.allowTools = toolNames(this.allowTools) // headless --allowedTools
     if (this.denyTools?.length) this.s.denyTools = toolNames(this.denyTools)
     if (this.cfg.maxTurns) this.s.maxTurns = this.cfg.maxTurns
@@ -609,6 +618,19 @@ class App {
     if (name !== this.cfg.adhoc) saveConfig(this.cfg)
     this.ui.print(`${c.green('using')} ${name} · ${c.cyan(model)}`)
     await this.session()
+  }
+
+  // Your other models (not the one in use) and what each can do, from its saved profile or
+  // models.dev: nothing is sent to them to find out.
+  team() {
+    const now = this.s?.client.rotation?.list[this.s.client.rotation.at] ?? this.myModels()[0]
+    return this.myModels()
+      .filter((t) => !(t.provider === now?.provider && t.model === now?.model))
+      .map((t) => {
+        const cl = this.client(t.provider, t.model)
+        const st = strategy(loadProfile(cl) || profileFrom(cl, limitsOf(t.provider, cl.baseUrl, t.model)))
+        return { ...t, tools: st.actions === 'tools', images: st.vision, thinking: st.thinking, context: st.context }
+      })
   }
 
   // Your models, in order: this one (#1), then the fallbacks (chosen on /settings, where every
@@ -1235,6 +1257,7 @@ async function repl(app, f = {}) {
   let ctl = null
   ui.onEscape = () => ctl?.abort()
   ui.onBtw = (q) => app.btw(q, true) // /btw typed while it works
+  ui.isCommand = (l) => app.isCommand(l)
   ui.voiceConfig = () => ({ voice: cfg.voice, providers: cfg.providers })
   // Ctrl+C: stops what's running; clears the input if there's text; otherwise asks before quitting
   // (a second Ctrl+C within 2s quits, also when something is stuck).
@@ -1303,7 +1326,7 @@ async function repl(app, f = {}) {
     ctl = new AbortController()
     app.signal = ctl.signal // Esc stops whatever this line started (a task, a probe, …)
     ui.busy() // the spinner stays until this line's work is done
-    if (t.startsWith('/')) {
+    if (app.isCommand(t)) {
       try {
         if ((await slash(app, t)) === 'exit') {
           if (app.tabs) app.tabs.quitting = true

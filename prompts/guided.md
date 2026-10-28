@@ -36,6 +36,7 @@ edit: change an existing file
 create: make a new file
 run: run a shell command (tests, build, scripts)
 ask: ask the user a question
+delegate: hand the task to another of your models, one that can use tools itself
 finish: stop and give your final answer to the user
 
 ## next-action

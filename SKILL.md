@@ -132,6 +132,11 @@ nothing is sent to the model to find out. A model models.dev doesn't know works 
 assumptions, and the user can set it up on the settings page. Models that can't call tools still
 work, in a slower guided mode.
 
+The model in use knows the user's other models and what each can do, and hands a job it can't do
+(see an image, call tools…) to one that can: an attached image goes to a model that sees images, an
+image's path to one through its `agent` tool, and a model without tool calls can hand the task to one
+with them. Their tokens are in `usage`, and each model's in `modelUsage`.
+
 ## Setting up a model
 
 Ask the user which provider and model to use, and for the key. Never invent one. Then:

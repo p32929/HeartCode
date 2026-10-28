@@ -376,6 +376,7 @@ export class UI {
     this.out = output
     this.queue = []
     this.ahead = [] // messages typed (and sent with Enter) while HeartCode was working
+    this.isCommand = (l) => l.startsWith('/') // the app's: only real commands (a path like /Users/… is a message)
     this.keys = { ...DEFAULT_KEYS, ...loadKeys() }
     this.waiters = []
     this.closed = false
@@ -736,7 +737,7 @@ export class UI {
       if (/^\/btw\b/.test(line) && this.onBtw) this.onBtw(line.replace(/^\/btw\b/, '').trim()) // answered now, beside the task
       else if (line) {
         this.ahead.push(line)
-        this.print(`${c.faint(' ↳')} ${c.muted(line.split('\n')[0])} ${c.faint(/^\//.test(line) ? '(runs when this is done)' : '(goes to the model at its next step, or runs next)')}`)
+        this.print(`${c.faint(' ↳')} ${c.muted(line.split('\n')[0])} ${c.faint(this.isCommand(line) ? '(runs when this is done)' : '(goes to the model at its next step, or runs next)')}`)
       }
       return this.render()
     }
@@ -841,8 +842,8 @@ export class UI {
 
   // Messages typed while working that can go to the running task now (not commands); taken.
   takeAhead() {
-    const out = this.ahead.filter((l) => !l.startsWith('/'))
-    this.ahead = this.ahead.filter((l) => l.startsWith('/'))
+    const out = this.ahead.filter((l) => !this.isCommand(l))
+    this.ahead = this.ahead.filter((l) => this.isCommand(l))
     return out
   }
 

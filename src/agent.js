@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import { log } from './log.js'
 import { prompt, userInstructions } from './prompts.js'
 import { newChat } from './sessions.js'
@@ -12,13 +13,16 @@ import { c } from './ui.js'
 
 const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
 
-// "@shot.png" in a task attaches that image.
+// An image the message names is attached: "@shot.png", or a path anywhere (/Users/me/Downloads/a.png,
+// ~/a.png; dragged in: quoted, or with "\ " for spaces), when the file is there. The path stays in the text.
+const IMAGE_PATH = /(^|\s)@?(?:(["'])([^"'\n]+?\.(?:png|jpe?g|gif|webp))\2|((?:\\ |[^\s"'])+?\.(?:png|jpe?g|gif|webp)))(?=$|[\s,;:!?).])/gi
 export function extractImages(task, root) {
   const images = []
-  const text = task.replace(/(^|\s)@(\S+\.(png|jpe?g|gif|webp))\b/gi, (m, pre, file, ext) => {
+  const text = task.replace(IMAGE_PATH, (m, pre, q, quoted, bare) => {
+    const file = (quoted ?? bare.replace(/\\ /g, ' ')).replace(/^~(?=\/)/, os.homedir())
     const abs = path.resolve(root, file)
-    if (!fs.existsSync(abs)) return m
-    images.push(`data:${MIME[ext.toLowerCase()]};base64,${fs.readFileSync(abs).toString('base64')}`)
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return m
+    images.push(`data:${MIME[path.extname(abs).slice(1).toLowerCase()]};base64,${fs.readFileSync(abs).toString('base64')}`)
     return `${pre}${file}`
   })
   return { text, images }
@@ -137,7 +141,9 @@ export class Session {
     let { text, images } = extractImages(task, this.root)
     images = [...images, ...extra]
     if (images.length && !this.strat.vision) {
-      this.ui.warn(`${this.client.model} can't read images (per its probe); ignoring ${images.length} image(s)`)
+      const seer = this.team?.().find((t) => t.images) // another of your models that can: it describes them
+      if (seer) text += await this.describeImages(images, seer, text, signal)
+      else this.ui.warn(`${this.client.model} can't read images (per its probe); ignoring ${images.length} image(s)`)
       images = []
     }
     log('task', `${text} (${this.strat.actions} mode, ${images.length} image(s))`)
@@ -152,17 +158,40 @@ export class Session {
   // own, no memory, no director) does one job; its final reply is the tool's result. Its steps show
   // under the main conversation's, its file changes count for /rewind like the main agent's.
   // ponytail: helpers run one after another; run several at once if waiting on them gets long.
+  // model: another of your models (team) does it, for what this one can't do (see images, call tools…).
   async subagent(args, signal) {
     const task = String(args.prompt ?? args.task ?? '').trim()
     if (!task) return 'error: give the helper its job in "prompt"'
-    const label = clip(String(args.description ?? '').trim() || task.split('\n')[0], 40)
-    const helper = new Session({ client: this.client, profile: this.profile, strat: this.strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
+    let { client, profile, strat } = this
+    const want = String(args.model ?? '').trim()
+    if (want) {
+      const team = this.team?.() ?? []
+      const t = team.find((x) => `${x.provider} ${x.model}` === want) ?? team.find((x) => x.model === want || want.endsWith(` ${x.model}`))
+      if (!t) return `error: no model "${want}". Yours: ${team.map((x) => `${x.provider} ${x.model}`).join(', ') || 'none besides this one'}`
+      ;({ client, profile, strat } = await this.engineFor(t))
+    }
+    const label = clip((want ? `${client.model}: ` : '') + (String(args.description ?? '').trim() || task.split('\n')[0]), 60)
+    const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
     Object.assign(helper, { isSub: true, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
     helper.track = (rel, before) => this.track(rel, before)
     log('agent', `helper "${label}": ${task}`)
-    const answer = await runNative(helper, task, [], signal)
+    const answer = await (strat.actions === 'tools' ? runNative : runGuided)(helper, task, [], signal)
     log('agent', `helper "${label}" done`, answer)
     return answer?.trim() || '(the helper finished without a reply)'
+  }
+
+  // Images for a model that can't see them: another of yours (seer) describes each, for the task.
+  async describeImages(images, seer, task, signal) {
+    const { client } = await this.engineFor(seer)
+    const out = []
+    for (const [i, url] of images.entries()) {
+      this.ui.spinner(`${seer.model} is looking at image ${i + 1}`)
+      const res = await client.chat({ messages: [{ role: 'user', content: [{ type: 'text', text: prompt('guided/describe-image', { task }) }, { type: 'image_url', image_url: { url } }] }] }, { signal })
+      out.push(`Image ${i + 1}:\n${res.content.trim()}`)
+      this.ui.step('image', `${seer.model} described image ${i + 1}`)
+    }
+    log('images', `described by ${seer.provider} ${seer.model}`, out)
+    return `\n\n${prompt('agent/images-described', { model: seer.model, descriptions: out.join('\n\n') })}`
   }
 
   // /btw: a side question, answered from the conversation so far. Nothing goes into the
@@ -282,12 +311,22 @@ const SYSTEM = (s) => {
     s.memory && prompt('agent/memory', { tags: s.memory.tagSummary() || '(none yet)' }),
     s.mcpInstructions && prompt('agent/mcp-instructions', { instructions: s.mcpInstructions }), // what the MCP servers say about their tools
     s.director && !s.appendSystem && s.director.app.cfg.director !== false && prompt('agent/director'),
+    !s.isSub && teamPrompt(s),
     s.isSub && prompt('agent/subagent'),
     s.appendSystem && prompt('agent/caller'),
     s.appendSystem,
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+// Your other models and what each can do, for the agent tool's model (only when there are any).
+const teamPrompt = (s) => {
+  const team = s.team?.() ?? []
+  if (!team.length) return ''
+  const can = (t) => [t.tools ? 'tool calls' : 'no tool calls', t.images && 'images', t.thinking && 'thinking', `${Math.round(t.context / 1000)}k context`].filter(Boolean).join(', ')
+  const you = [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking'].filter(Boolean).join(', ')
+  return prompt('agent/team', { models: team.map((t) => `- ${t.provider} ${t.model}: ${can(t)}`).join('\n'), you })
 }
 
 const sizeOf = (m) =>
@@ -684,7 +723,7 @@ function attachNamed(s, task) {
     } catch {
       continue
     }
-    if (body.startsWith('error')) continue
+    if (body.startsWith('error') || body.startsWith(`${f} is a binary file`)) continue // an image: read_file shows it, or says who can see it
     const id = `named_${Date.now().toString(36)}_${calls.length}`
     calls.push({ id, type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: f }) } })
     const msg = { role: 'tool', tool_call_id: id, content: body }
