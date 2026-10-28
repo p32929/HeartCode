@@ -7,7 +7,7 @@ behind your back: only Node.js (20 or newer) and HeartCode's own code. What you 
 what you can read.
 
 <!-- image: HeartCode in the terminal, answering a message -->
-![HeartCode in the terminal](docs/images/heartcode.png)
+![HeartCode in the terminal](https://res.cloudinary.com/m0jnrul4/image/upload/v1793165332/Screenshot_2026-10-28_at_9.28.26_AM.png)
 
 ## Why I made it
 
@@ -59,24 +59,18 @@ cd ~/code/my-app
 heart
 ```
 
-<!-- image: HeartCode's first screen -->
-![HeartCode's first screen](docs/images/start.png)
-
 ### 3. Open the settings page
 
 Type `/settings`. The settings page opens in your browser. It runs on your machine only
 (127.0.0.1, with a secret key in its link).
 
 <!-- image: the settings page -->
-![The settings page](docs/images/settings.png)
+![The settings page](https://res.cloudinary.com/m0jnrul4/image/upload/v1793165673/Dark_HeartCode_Models_Dashboard.png)
 
 ### 4. Providers & models
 
 1. **Add a provider**: its name, base URL and API key. Pick one of the presets to fill in the URL.
 2. **Choose the models to use**: click a model to add it to your list. I use the free models.
-
-<!-- image: Providers & models, with a provider added and models chosen -->
-![Providers and models](docs/images/providers.png)
 
 ### 5. Your models
 
@@ -90,15 +84,12 @@ If a model says *not found* in models.dev, **Retry** looks it up again, or **Set
 HeartCode what it can do.
 
 <!-- image: Your models, sorted -->
-![Your models](docs/images/your-models.png)
+![Your models](https://res.cloudinary.com/m0jnrul4/image/upload/v1793165634/HeartCode-Settings-10-28-2026_09_33_AM.png)
 
 ### 6. Turn on logging (optional)
 
 On the **Logging** page: a log of each run, and each request with its reply, in files of their
 own. Logs older than 30 days are deleted (you can change that).
-
-<!-- image: the Logging page -->
-![Logging](docs/images/logging.png)
 
 ### 7. Back to HeartCode
 
@@ -110,14 +101,11 @@ Your changes are already in.
 **Turn off** is selected: press Enter. The page stops and HeartCode is yours again.
 
 <!-- image: the "settings page is on" dialog -->
-![The settings dialog](docs/images/settings-dialog.png)
+![The settings dialog](https://res.cloudinary.com/m0jnrul4/image/upload/v1793165735/Screenshot_2026-10-28_at_9.35.28_AM.png)
 
 ### 9. Send "Hi" as a test
 
 Type `Hi` and press Enter. Wait for the reply: your model works.
-
-<!-- image: the first reply -->
-![The first reply](docs/images/hi.png)
 
 ### 10. Start using it
 
