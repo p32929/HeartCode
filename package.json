@@ -1,6 +1,6 @@
 {
   "name": "heartcode",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A coding CLI for any local or OpenAI-compatible model, including small models without tool calling.",
   "type": "module",
   "bin": {

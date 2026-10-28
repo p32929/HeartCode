@@ -167,10 +167,10 @@ export class Session {
     if (want) {
       const team = this.team?.() ?? []
       const t = team.find((x) => `${x.provider} ${x.model}` === want) ?? team.find((x) => x.model === want || want.endsWith(` ${x.model}`))
-      if (!t) return `error: no model "${want}". Yours: ${team.map((x) => `${x.provider} ${x.model}`).join(', ') || 'none besides this one'}`
-      ;({ client, profile, strat } = await this.engineFor(t))
+      if (t) ({ client, profile, strat } = await this.engineFor(t))
+      else if (want !== client.model && !want.endsWith(` ${client.model}`)) return `error: no model "${want}". Yours: ${[client.model, ...team.map((x) => `${x.provider} ${x.model}`)].join(', ')}`
     }
-    const label = clip((want ? `${client.model}: ` : '') + (String(args.description ?? '').trim() || task.split('\n')[0]), 60)
+    const label = clip(`${client.model}: ${String(args.description ?? '').trim() || task.split('\n')[0]}`, 60)
     const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
     Object.assign(helper, { isSub: true, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
     helper.track = (rel, before) => this.track(rel, before)
@@ -545,7 +545,7 @@ async function runNative(s, task, images, signal) {
     fitMessages(s.messages, budget())
     pairTools(s.messages)
     ui.spinner('thinking')
-    const out = ui.response()
+    const out = ui.response(client.model) // named: helpers think too (theirs are named in helperUI)
     const stream = strat.toolsStream
     let res
     try {
@@ -604,12 +604,25 @@ async function runNative(s, task, images, signal) {
       continue
     }
 
+    // Helpers (agent) asked for in one reply work at the same time: the same model or several.
+    // ponytail: no cap on how many at once; add one if a provider's rate limit makes them crawl.
+    const argsOf = (call) => {
+      try {
+        return JSON.parse(call.function.arguments || '{}')
+      } catch {
+        return null
+      }
+    }
+    const together = new Map()
+    for (const call of res.toolCalls) {
+      const args = argsOf(call)
+      if (call.function.name !== 'agent' || !args || !allowed(s, 'agent') || res.toolCalls.filter((x) => x.function.name === 'agent').length < 2) continue
+      ui.step('agent', clip([args.model && `${args.model}:`, args.description].filter(Boolean).join(' '), 80))
+      together.set(call.id, runTool('agent', args, s, signal))
+    }
     for (const call of res.toolCalls) {
       const name = call.function.name
-      let args = null
-      try {
-        args = JSON.parse(call.function.arguments || '{}')
-      } catch {}
+      const args = argsOf(call)
       const detail = !args
         ? ''
         : args.server
@@ -619,12 +632,12 @@ async function runNative(s, task, images, signal) {
             : name === 'manage'
               ? [args.action, args.kind, args.name].filter(Boolean).join(' ')
               : name === 'agent'
-                ? (args.description ?? '')
+                ? [args.model && `${args.model}:`, args.description].filter(Boolean).join(' ')
                 : name === 'todo' || name === 'ask_user'
                   ? ''
                   : (args.path ?? args.url ?? args.query ?? args.filter ?? args.name ?? '')
-      if (name !== 'run_command') ui.step(name, clip(detail, 80))
-      const out = !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal) : 'error: the tool arguments were not valid JSON'
+      if (name !== 'run_command' && !together.has(call.id)) ui.step(name, clip(detail, 80))
+      const out = together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal) : 'error: the tool arguments were not valid JSON'
       if (name === 'read_file' || name === 'search' || name === 'list_files' || name === 'web_fetch' || name === 'web_search') ui.result(`${out.split('\n').length} lines`)
       else if (name === 'agent' && !out.startsWith('error')) ui.result(`${s.ui.permission === 'plan' ? 'planned' : 'done'}: ${clip(out.split('\n').find((l) => l.trim()) ?? '', 100)}`)
       else if (out.startsWith('error')) ui.result(clip(out, 120))
@@ -657,13 +670,36 @@ async function notDone(s, signal, again) {
 
 // A helper agent's view of the screen: its steps are labelled, and its replies (which go to the
 // main agent) aren't shown as answers. Everything else is the main UI's.
+// Its thinking is shown whole when its reply is in (helpers working at once don't mix), named.
+// Questions to the user (confirm, pick, ask) wait their turn: helpers working at once ask one by one.
+const asking = new WeakMap() // ui → the question being asked
 function helperUI(ui, label) {
-  const quiet = { think() {}, text() {}, end() {} }
+  const response = () => {
+    const t0 = Date.now()
+    let thought = ''
+    return {
+      think: (t) => (thought += t ?? ''),
+      text() {},
+      end() {
+        if (!thought.trim()) return
+        const secs = ((Date.now() - t0) / 1000).toFixed(1)
+        ui.print(c.faint(c.italic(`  ✻ ${label} thought for ${secs}s`)) + (ui.showThinking ? `\n${c.think(c.italic(thought.trim().replace(/^/gm, '    ')))}` : ''))
+      },
+    }
+  }
+  const inTurn = (k) => (...a) => {
+    const next = (asking.get(ui) ?? Promise.resolve()).then(() => ui[k](...a))
+    asking.set(ui, next.catch(() => {}))
+    return next
+  }
   const own = {
     step: (name, detail) => ui.step(`  ${label} › ${name}`, detail),
     result: (text) => ui.result(`  ${text}`),
-    response: () => quiet,
+    response,
     spinner: (text) => ui.spinner(`${label} · ${text}`),
+    confirm: inTurn('confirm'),
+    pick: inTurn('pick'),
+    ask: inTurn('ask'),
   }
   return new Proxy(ui, { get: (t, k) => (k in own ? own[k] : typeof t[k] === 'function' ? t[k].bind(t) : t[k]), set: (t, k, v) => ((t[k] = v), true) })
 }

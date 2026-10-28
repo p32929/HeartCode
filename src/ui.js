@@ -399,7 +399,8 @@ export class UI {
   }
 
   // One model reply: thinking (dim, its own block) kept apart from the answer.
-  response() {
+  // who: the model thinking, named over its thinking (helpers say their own: helperUI in agent.js)
+  response(who) {
     const t0 = Date.now()
     const secs = () => ((Date.now() - t0) / 1000).toFixed(1)
     const write = (x) => this.write(x)
@@ -407,7 +408,7 @@ export class UI {
     let text = null
     let thought = false
     const summary = () => {
-      if (thought && !this.showThinking) this.print(c.faint(c.italic(`✻ thought for ${secs()}s`)))
+      if (thought && !this.showThinking) this.print(c.faint(c.italic(`✻ ${who ? `${who} ` : ''}thought for ${secs()}s`)))
     }
     return {
       think: (t) => {
@@ -416,7 +417,7 @@ export class UI {
         if (!this.showThinking) return this.spinner(`thinking · ${secs()}s`)
         if (!think) {
           this.gap()
-          this.print(c.faint(c.italic('✻ Thinking…')))
+          this.print(c.faint(c.italic(`✻ ${who ? `${who} is thinking` : 'Thinking'}…`)))
           think = new Block(write, { style: (x) => c.think(c.italic(x)) })
         }
         think.push(t)
@@ -705,7 +706,13 @@ export class UI {
         m.off = rl.line
         return this.refreshMenu()
       }
-      if (m.on && key.name === 'tab') return it && this.#accept(it)
+      // Tab only completes the text: the menu closes (no list of a command's choices pops up); Enter runs it
+      if (m.on && key.name === 'tab') {
+        if (!it) return
+        this.#accept(it)
+        m.off = rl.line
+        return this.refreshMenu()
+      }
       if (it && key.name === 'return' && rl.line.slice(it.start, it.end) !== it.value) {
         this.#accept(it)
         if (it.insertOnly) return

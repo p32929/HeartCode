@@ -509,7 +509,7 @@ class App {
   modelChoices(typed, start, end) {
     const mine = this.myModels()
     const twice = (m) => mine.filter((t) => t.model === m).length > 1
-    const items = mine.map((t, i) => ({ value: twice(t.model) ? `${t.provider} ${t.model}` : t.model, desc: `${t.provider} · #${i + 1}${i === 0 ? ' · in use' : ''}`, start, end }))
+    const items = mine.map((t, i) => ({ value: twice(t.model) ? `${t.provider} ${t.model}` : t.model, desc: `${t.provider} · #${i + 1}${i === 0 ? ' · in use' : ''} · ${this.canText(t)}`, start, end }))
     return rank(items, typed).slice(0, 200)
   }
 
@@ -626,11 +626,21 @@ class App {
     const now = this.s?.client.rotation?.list[this.s.client.rotation.at] ?? this.myModels()[0]
     return this.myModels()
       .filter((t) => !(t.provider === now?.provider && t.model === now?.model))
-      .map((t) => {
-        const cl = this.client(t.provider, t.model)
-        const st = strategy(loadProfile(cl) || profileFrom(cl, limitsOf(t.provider, cl.baseUrl, t.model)))
-        return { ...t, tools: st.actions === 'tools', images: st.vision, thinking: st.thinking, context: st.context }
-      })
+      .map((t) => ({ ...t, ...this.abilities(t) }))
+  }
+
+  // What a model can do, from its saved profile or models.dev (guessed: neither knows it).
+  abilities(t) {
+    const cl = this.client(t.provider, t.model)
+    const p = loadProfile(cl) || profileFrom(cl, limitsOf(t.provider, cl.baseUrl, t.model))
+    const st = strategy(p)
+    return { tools: st.actions === 'tools', images: st.vision, thinking: st.thinking, context: st.context, guessed: p.source === 'assumed' && !p.set }
+  }
+
+  // "tools · images · thinking · 1M", for the model lists.
+  canText(t) {
+    const a = this.abilities(t)
+    return [a.tools ? 'tools' : 'no tools', a.images && 'images', a.thinking && 'thinking', kTokens(a.context) + (a.guessed ? '?' : '')].filter(Boolean).join(' · ')
   }
 
   // Your models, in order: this one (#1), then the fallbacks (chosen on /settings, where every
@@ -658,7 +668,7 @@ class App {
       if (!Object.keys(cfg.providers).length && (await this.detectLocal())) return this.session()
       return ui.print(NO_MODELS)
     }
-    const items = mine.map((t, i) => ({ label: t.model, group: t.provider, t, current: i === 0, desc: [i === 0 ? '#1 · in use' : `#${i + 1} · fallback`, loadProfile(this.client(t.provider, t.model)) && '✓ tested'].filter(Boolean).join(' · ') }))
+    const items = mine.map((t, i) => ({ label: t.model, group: t.provider, t, current: i === 0, desc: [i === 0 ? '#1 · in use' : `#${i + 1} · fallback`, this.canText(t)].join(' · ') }))
     const it = await ui.pick('Choose a model (more on /settings)', items, { filter })
     if (it && !it.current) await this.useMine(it.t)
   }
@@ -1258,6 +1268,7 @@ async function repl(app, f = {}) {
   ui.onEscape = () => ctl?.abort()
   ui.onBtw = (q) => app.btw(q, true) // /btw typed while it works
   ui.isCommand = (l) => app.isCommand(l)
+  loadPrices().then(() => ui.render?.()) // models.dev: what each model can do, for the model lists
   ui.voiceConfig = () => ({ voice: cfg.voice, providers: cfg.providers })
   // Ctrl+C: stops what's running; clears the input if there's text; otherwise asks before quitting
   // (a second Ctrl+C within 2s quits, also when something is stuck).
