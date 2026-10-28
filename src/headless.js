@@ -12,14 +12,14 @@
 // told to the model. Logs and warnings go to stderr (and HEART_LOG), never stdout.
 import readline from 'node:readline'
 import { log } from './log.js'
-import { clip, TOOL_DEFS, extraTools } from './tools.js'
+import { clip, TOOL_DEFS, extraTools, loadMcpTools } from './tools.js'
 import { allowed } from './agent.js'
 
 // Claude Code's tool names → HeartCode's (for --allowedTools / --disallowedTools).
 const CLAUDE_TOOLS = { Read: 'read_file', Grep: 'search', Glob: 'list_files', LS: 'list_files', Edit: 'edit_file', MultiEdit: 'edit_file', Write: 'write_file', NotebookEdit: 'edit_file', Bash: 'run_command' }
 export function toolNames(list) {
   const names = list.flatMap((x) => String(x).split(/[,\s]+/)).filter(Boolean).map((t) => t.replace(/\(.*$/, '')) // ponytail: "Bash(git:*)" allows every command, not just git
-  return new Set(names.map((t) => (t.startsWith('mcp__') ? 'mcp' : (CLAUDE_TOOLS[t] ?? t))))
+  return new Set(names.map((t) => CLAUDE_TOOLS[t] ?? t)) // mcp__server__tool and mcp__server as they are (tools.js allowed)
 }
 
 // --permission-mode, in HeartCode's terms or Claude Code's.
@@ -119,8 +119,9 @@ export async function runHeadless(app, opts) {
         emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: e.id, content: e.output, is_error: e.output.startsWith('error') }] }, session_id })
       }
     }
+    if (s.strat.actions === 'tools' && s.mcp?.names.length) await loadMcpTools(s) // their tools are in the list, as in Claude Code's
     const tools = s.strat.actions === 'tools' ? [...TOOL_DEFS, ...extraTools(s)].map((f) => f.name).filter((n) => allowed(s, n)) : []
-    emit({ type: 'system', subtype: 'init', session_id, model, cwd: app.root, tools, mcp_servers: app.mcp.names.map((name) => ({ name, status: 'pending' })), permissionMode: app.ui.permission, apiKeySource: 'none' })
+    emit({ type: 'system', subtype: 'init', session_id, model, cwd: app.root, tools, mcp_servers: app.mcp.names.map((name) => ({ name, status: s.mcpCatalog?.has(name) ? 'connected' : 'pending' })), permissionMode: app.ui.permission, apiKeySource: 'none' })
   }
 
   let current = null // the message running now: { ctl }

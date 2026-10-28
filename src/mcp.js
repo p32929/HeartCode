@@ -5,11 +5,15 @@
 // A local server talks over its stdin/stdout, one message per line. A remote one over Streamable
 // HTTP (or the older HTTP+SSE: "type": "sse", a URL ending in /sse, or when HTTP is refused), and
 // signs in with OAuth when it asks (oauth.js). ${VAR} in a URL or header is the environment's VAR.
-// A server starts the first time the model uses it, and stops when HeartCode exits.
+// A server's tools are offered to the model as tools of their own (mcp__server__tool), from the
+// list it gave the last time it ran (kept in ~/.heart/mcp-tools.json, with its instructions): so a
+// server starts the first time the model uses it, or once to say its tools; it stops when
+// HeartCode exits.
 import { spawn } from 'node:child_process'
+import crypto from 'node:crypto'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { HOME, readJson, readConfig } from './config.js'
+import { HOME, readJson, readConfig, writeJson } from './config.js'
 import { log } from './log.js'
 import { savedToken, signIn } from './oauth.js'
 
@@ -102,6 +106,7 @@ class Server {
         }
       } else r = await this.#spawn(init)
       this.protocol = r?.protocolVersion
+      this.instructions = typeof r?.instructions === 'string' ? r.instructions.trim() : ''
       this.#send({ jsonrpc: '2.0', method: 'notifications/initialized' })
     })().catch((e) => {
       this.stop() // failed to start: the next use tries again
@@ -276,12 +281,14 @@ class Server {
         this.tools.push(...(r.tools ?? []))
         cursor = r.nextCursor
       } while (cursor)
+      this.hub.remember(this)
     }
     return this.tools
   }
 
   async call(tool, args, signal) {
     await this.start(signal)
+    if (!this.tools) this.listTools().catch(() => {}) // started from the saved list: what it has now, for next time
     return this.request('tools/call', { name: tool, arguments: args ?? {} }, 300_000, signal)
   }
 
@@ -300,6 +307,9 @@ class Server {
     this.ready = null
   }
 }
+
+const TOOLS_FILE = path.join(HOME, 'mcp-tools.json')
+const keyOf = (cfg) => crypto.createHash('sha256').update(JSON.stringify(cfg)).digest('hex').slice(0, 16)
 
 // All configured servers for a project; nothing runs until a server is first used.
 // onSignIn(name, url): set by the screen, to show a remote server's sign-in page (none headless).
@@ -322,6 +332,42 @@ export class Mcp {
 
   get(name) {
     return this.servers.get(name)
+  }
+
+  // Each server's { tools, instructions }, for the model: the list saved the last time it ran
+  // (with the same config), else asked for now, waiting at most `wait` ms; a server that hasn't
+  // answered by then (it may still be starting: npx downloads it the first time) or failed to
+  // start isn't in the result. It's tried again next time, and its list is saved once it answers.
+  async catalog(signal, wait = 15_000) {
+    const saved = readJson(TOOLS_FILE, {})
+    const out = new Map()
+    const asks = []
+    for (const [name, sv] of this.servers) {
+      const hit = sv.tools ? { tools: sv.tools, instructions: sv.instructions ?? '' } : saved[name]?.key === keyOf(sv.cfg) ? saved[name] : null
+      if (hit) out.set(name, { tools: hit.tools, instructions: hit.instructions ?? '' })
+      else if (!sv.failed) asks.push(sv.listTools(signal).then((tools) => out.set(name, { tools, instructions: sv.instructions ?? '' }), (e) => {
+        if (e.name === 'AbortError') return
+        sv.failed = true // not waited for again in this run; still usable through the mcp tool
+        log('mcp', `${name}: could not list its tools: ${e.message}`)
+      }))
+    }
+    if (asks.length) {
+      let timer
+      await Promise.race([Promise.all(asks), new Promise((r) => (timer = setTimeout(r, wait)))])
+      clearTimeout(timer)
+    }
+    return out
+  }
+
+  // A server's tools, saved for the next run (the config's hash, not the config: it may hold keys).
+  remember(sv) {
+    const saved = readJson(TOOLS_FILE, {})
+    saved[sv.name] = { key: keyOf(sv.cfg), tools: sv.tools, instructions: sv.instructions ?? '', at: new Date().toISOString() }
+    try {
+      writeJson(TOOLS_FILE, saved)
+    } catch (e) {
+      log('mcp', `could not save ${sv.name}'s tools: ${e.message}`)
+    }
   }
 
   stopAll() {

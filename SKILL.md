@@ -52,10 +52,14 @@ reached has an `error` and is skipped; the command still exits `0`.
 | a model from the list: `-m "<provider> <model>"` (`-m "groq openai/gpt-oss-120b"`), or `-m <model>` alone | that model alone: never another one, also when it fails (a rate limit or an outage is tried again, up to `--max-retries`) |
 
 **Failures:** a rate limit, a server error, a timeout or a lost connection is waited out and tried
-again (or handed to the next model in the list), up to `--max-retries` (10). An error waiting can't
-fix (a model name the server doesn't know, a wrong key, a request it refuses) is never sent again:
-the run stops with that error and exit code `1`. With the default list it moves on to the next
-model only if the user set its fallback rule to "at any error".
+again (or handed to the next model in the list), up to `--max-retries` (10). With the default
+list, a model that can't be used (a wrong key, no access to it, a name the server doesn't know:
+401, 403, 404) also makes way for the next one, and so does one that keeps replying with nothing.
+The run stops with that error and exit code `1` when every model in the list fails that way, when
+a single model (`-m <model>`) does, or at a request the server refuses (400), which is never sent
+again (unless the user set the fallback rule to "at any error"). A provider that refuses a part
+of the request HeartCode can do without (the model's thinking sent back, keys in the tools'
+schemas) gets it again without that part.
 
 `--provider <name>` and `-u <url>` (a server for this run) also mean one model, alone.
 
@@ -97,7 +101,7 @@ heart -p --continue "…"          # or: the last session in this folder
 ## Keep it safe
 
 Headless never asks anyone. What the permission mode would ask about is declined, and the
-model is told why.
+model is told why. An MCP tool its server marks read-only is never asked about.
 
 | You want | Flags |
 |---|---|
@@ -110,7 +114,9 @@ model is told why.
 
 Tool names: HeartCode's own (`read_file`, `edit_file`, `write_file`, `run_command`, `search`,
 `list_files`, `web_fetch`, `web_search`…) or Claude Code's (`Read`, `Edit`, `Write`, `Bash`,
-`Grep`, `Glob`, `WebFetch`, `WebSearch`). `--disallowedTools Bash` takes one away.
+`Grep`, `Glob`, `WebFetch`, `WebSearch`). `--disallowedTools Bash` takes one away. MCP servers'
+tools are named as in Claude Code: `mcp__<server>__<tool>`; `mcp__<server>` means all of one
+server's tools, `mcp` all of them.
 
 ## Choose the model
 
@@ -139,14 +145,16 @@ HEART_API_KEY=… heart -u https://api.groq.com/openai/v1 -m openai/gpt-oss-120b
 ```
 
 A model server on this machine (Ollama on :11434, LM Studio on :1234, llama.cpp on :8080) is
-found on its own. The user can also set everything up in a browser: `heart settings`.
+found on its own. The user can also set everything up in a browser: `heart settings`, where
+**Test** (or **Test all**) under *Your models* sends a model a short message to show it really
+answers. A run that fails with a wrong key or an unknown model: ask the user to test it there.
 
 ## More context for the task
 
 | Flag | |
 |---|---|
-| `--append-system-prompt "<text>"` | added to HeartCode's system prompt for this run |
-| `--mcp-config <file or JSON>` | more MCP servers (repeatable); `--strict-mcp-config`: only those |
+| `--append-system-prompt "<text>"` | your instructions for this run, at the end of the system prompt. HeartCode's own part then says less (no role of its own, no "stay in the project folder", no way of finishing of its own) and tells the model to follow yours where they differ; its `manage` tool is left out, and nothing from the run's messages is saved to its memory |
+| `--mcp-config <file or JSON>` | more MCP servers (repeatable); `--strict-mcp-config`: only those. Each server's tools are tools of their own for the model, `mcp__<server>__<tool>`, as in Claude Code, and what the server says about using them goes in the system prompt |
 | `--skills-dir <folder>` | more skills (repeatable) |
 | `--no-memory` | don't read or write HeartCode's memory notes |
 
@@ -160,7 +168,8 @@ heart -p --input-format stream-json --output-format stream-json
 
 Stdin: one message per line, `{"type":"user","message":{"role":"user","content":"…"}}`.
 Stop the running one with `{"type":"control_request","request_id":"1","request":{"subtype":"interrupt"}}`.
-Stdout: one JSON event per line, `system`/`init`, then `assistant` (text, thinking, `tool_use`),
+Stdout: one JSON event per line, `system`/`init` (its `tools` include the MCP servers' tools,
+`mcp_servers` says which are `connected`), then `assistant` (text, thinking, `tool_use`),
 `user` (`tool_result`), and a `result` after each message. It runs until stdin closes.
 
 ## Don't

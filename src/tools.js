@@ -4,6 +4,7 @@ import { slug } from './memory.js'
 import { fillArgs } from './skills.js'
 import { prompt } from './prompts.js'
 import path from 'node:path'
+import os from 'node:os'
 import { spawn, execFileSync } from 'node:child_process'
 import { applyEdit } from './edit.js'
 import { readJson } from './config.js'
@@ -19,10 +20,27 @@ const IGNORE = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'cover
 export const clip = (s, n) => (String(s).length > n ? String(s).slice(0, n) + '…' : String(s))
 export const tail = (s, n) => (s.length > n ? '…' + s.slice(-n) : s)
 
+// Tool output too long for the conversation is saved here (one folder per chat), where read_file
+// and search can read it although it's outside the project.
+export const OUTPUTS = path.join(os.tmpdir(), 'heartcode-outputs')
+export function saveOutput(chatId, name, text) {
+  try {
+    const dir = path.join(OUTPUTS, String(chatId ?? 'chat'))
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, `${Date.now().toString(36)}-${String(name).replace(/[^\w-]/g, '_').slice(0, 60)}.txt`)
+    fs.writeFileSync(file, text)
+    return file
+  } catch (e) {
+    log('tool', `could not save the output: ${e.message}`)
+    return ''
+  }
+}
+
 export function resolveIn(root, p) {
   const clean = String(p ?? '').trim().replace(/^["'`]+|["'`]+$/g, '')
   if (!clean) throw new Error('no path given')
   let abs = path.resolve(root, clean)
+  if (abs.startsWith(OUTPUTS + path.sep)) return abs // a saved tool output
   // "num.js:" or "num.js," from a sloppy model: the file without the stray mark, if that one exists
   const trimmed = path.resolve(root, clean.replace(/[:;,.]+$/, ''))
   if (trimmed !== abs && !fs.existsSync(abs) && fs.existsSync(trimmed)) abs = trimmed
@@ -105,13 +123,15 @@ export function searchFiles(root, query, sub = '', limit = 50) {
   } catch {
     re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), ci ? 'i' : '')
   }
-  const prefix = sub ? path.relative(root, resolveIn(root, sub)) : ''
+  const abs = sub ? resolveIn(root, sub) : ''
+  const saved = abs.startsWith(OUTPUTS + path.sep) // a tool output saved outside the project
+  const prefix = sub && !saved ? path.relative(root, abs) : ''
   const hits = []
-  for (const f of listFiles(root)) {
+  for (const f of saved ? [abs] : listFiles(root)) {
     if (prefix && f !== prefix && !f.startsWith(prefix + '/')) continue
     let buf
     try {
-      buf = fs.readFileSync(path.join(root, f))
+      buf = fs.readFileSync(path.resolve(root, f))
     } catch {
       continue
     }
@@ -388,12 +408,51 @@ export function readOnlyCommand(cmd) {
   return c.split(/\s*(?:&&|\|\||;|\|)\s*/).every((part) => READ_ONLY.test(part))
 }
 
-// The one tool for all MCP servers, and the skill loader; each only when there's something to offer.
+// MCP servers' tools as the model sees them: each its own tool, mcp__server__tool (Claude Code's
+// names), with its description and arguments, the way the model would see them in Claude Code.
+// Servers whose tools aren't known yet (still starting, failed), or too many tools at once, go
+// through the one mcp tool instead. Sets s.mcpDirect (name → { server, tool, def }), s.mcpMeta
+// (servers behind the mcp tool) and s.mcpInstructions (what the servers say about using them).
+export const MAX_MCP_TOOLS = 100
+export async function loadMcpTools(s, signal) {
+  if (!s.mcp?.names.length) return Object.assign(s, { mcpDirect: new Map(), mcpMeta: [], mcpInstructions: '' })
+  const catalog = await s.mcp.catalog(signal)
+  // the servers with the fewest tools first, while they fit
+  const known = [...catalog].sort((a, b) => a[1].tools.length - b[1].tools.length)
+  const direct = new Map()
+  const notes = []
+  for (const [server, { tools, instructions }] of known) {
+    if (direct.size + tools.length > MAX_MCP_TOOLS) continue
+    for (const t of tools) direct.set(mcpName(server, t.name), { server, tool: t.name, def: t })
+    if (instructions) notes.push(`### ${server}\n${instructions}`)
+  }
+  const shown = new Set([...direct.values()].map((d) => d.server))
+  return Object.assign(s, { mcpDirect: direct, mcpMeta: s.mcp.names.filter((n) => !shown.has(n)), mcpInstructions: notes.join('\n\n'), mcpCatalog: catalog })
+}
+// Tool names may only have letters, digits, _ and - (64 at most).
+export const mcpName = (server, tool) => `mcp__${server}__${tool}`.replace(/[^\w-]/g, '_').slice(0, 64)
+// A schema as providers take it: an object, without the keys some refuse ($schema).
+function cleanSchema(x) {
+  if (Array.isArray(x)) return x.map(cleanSchema)
+  if (!x || typeof x !== 'object') return x
+  return Object.fromEntries(Object.entries(x).filter(([k]) => k !== '$schema').map(([k, v]) => [k, cleanSchema(v)]))
+}
+function mcpDefs(s) {
+  return [...(s.mcpDirect?.values() ?? [])].map(({ server, tool, def }) => {
+    const schema = cleanSchema(def.inputSchema ?? {})
+    return { name: mcpName(server, tool), description: clip(String(def.description ?? `${tool} (${server})`).trim(), 2000), parameters: { ...schema, type: 'object', properties: schema.properties ?? {} } }
+  })
+}
+
+// The MCP servers' tools, the one tool for the rest, and the skill loader; each only when there's
+// something to offer.
 export function extraTools(s) {
-  const out = []
-  if (s.mcp?.names.length) {
-    const servers = s.mcp.names.map((n) => `${n}: ${s.mcp.get(n).cfg.description || 'no description'}`).join('\n')
-    out.push({ name: 'mcp', description: prompt('agent/tool-mcp', { servers }), parameters: obj({ server: str, tool: str, arguments: { type: 'object' } }, ['server', 'tool']) })
+  const out = mcpDefs(s)
+  const meta = s.mcpMeta ?? s.mcp?.names ?? []
+  if (meta.length) {
+    // no description: the names of its tools, when known, say what it's for
+    const about = (n) => s.mcp.get(n).cfg.description || (s.mcpCatalog?.get(n) ? `tools: ${clip(s.mcpCatalog.get(n).tools.map((t) => t.name).join(', '), 300)}` : 'no description')
+    out.push({ name: 'mcp', description: prompt('agent/tool-mcp', { servers: meta.map((n) => `${n}: ${about(n)}`).join('\n') }), parameters: obj({ server: str, tool: str, arguments: { type: 'object' } }, ['server', 'tool']) })
   }
   if (s.memory) {
     out.push({
@@ -410,7 +469,7 @@ export function extraTools(s) {
   // the patch format OpenAI's models are trained on (they also write it as a shell command, below)
   if (/gpt|codex|\bo\d/i.test(s.client?.model ?? '')) out.push({ name: 'apply_patch', description: prompt('agent/tool-apply_patch'), parameters: obj({ input: str }, ['input']) })
   if (!s.isSub && s.subagent) out.push({ name: 'agent', description: prompt('agent/tool-agent'), parameters: obj({ description: str, prompt: str }, ['description', 'prompt']) })
-  return [...out, ...(s.director?.toolDefs(s) ?? [])] // manage (director.js)
+  return [...out, ...(s.director && !s.appendSystem ? s.director.toolDefs(s) : [])] // manage (director.js); not when a program gives the instructions (--append-system-prompt)
 }
 
 // todo: the model's checklist for this message, shown to the user each time it changes.
@@ -533,8 +592,17 @@ async function mcpTool(s, args, signal) {
     const t = tools.find((x) => x.name === a.name)
     return t ? `${t.name}: ${t.description ?? ''}\nArguments (JSON schema): ${JSON.stringify(t.inputSchema ?? {})}` : `error: ${server.name} has no tool "${a.name}"; tool "list" shows its tools`
   }
-  const ok = await s.ui.confirm(`Use ${server.name} → ${tool}?`, 'command')
-  if (ok !== true) return `The user declined this call.${typeof ok === 'string' ? ' User feedback: ' + ok : ''}`
+  return callMcp(s, server, tool, a, signal)
+}
+
+// One MCP tool call. Asked about like a command, unless the server marks the tool read-only.
+async function callMcp(s, server, tool, a, signal) {
+  if (!allowed(s, mcpName(server.name, tool))) return `error: the tool ${mcpName(server.name, tool)} is not allowed here`
+  const def = (server.tools ?? s.mcpCatalog?.get(server.name)?.tools)?.find((t) => t.name === tool)
+  if (!def?.annotations?.readOnlyHint) {
+    const ok = await s.ui.confirm(`Use ${server.name} → ${tool}?`, 'command')
+    if (ok !== true) return `The user declined this call.${typeof ok === 'string' ? ' User feedback: ' + ok : ''}`
+  }
   s.ui.spinner(`${server.name} · ${tool}`)
   const r = await server.call(tool, a, signal)
   const parts = r.content ?? []
@@ -714,8 +782,28 @@ function normalize(args) {
   return out
 }
 
+// The MCP tool a name means: mcp__server__tool (offered, or a server behind the mcp tool), or a
+// bare tool name only one server has ("click").
+function mcpTarget(s, name) {
+  const d = s.mcpDirect?.get(name)
+  if (d) return { server: s.mcp.get(d.server), tool: d.tool }
+  const m = /^mcp__(.+?)__(.+)$/.exec(name)
+  if (m && s.mcp?.get(m[1])) return { server: s.mcp.get(m[1]), tool: m[2] }
+  const same = [...(s.mcpDirect?.values() ?? [])].filter((x) => x.tool === name)
+  return same.length === 1 ? { server: s.mcp.get(same[0].server), tool: name } : null
+}
+
+// Tools the caller allowed (--allowedTools) or took away (--disallowedTools); all by default. An
+// MCP tool goes by its own name, its server's (mcp__server, as in Claude Code) or "mcp" (all of them).
+export function allowed(s, name) {
+  const names = name.startsWith('mcp__') ? [name, name.split('__').slice(0, 2).join('__'), 'mcp'] : [name]
+  if (names.some((n) => s.denyTools?.has(n))) return false
+  if (!s.allowTools) return true
+  return names.some((n) => s.allowTools.has(n)) || (name === 'mcp' && [...s.allowTools].some((n) => n.startsWith('mcp__')))
+}
+
 async function tool(name, args, s, signal) {
-  args = normalize(args)
+  if (!name.startsWith('mcp__') && !mcpTarget(s, name)) args = normalize(args) // an MCP tool's arguments are its own
   try {
     const { root } = s
     if (s.ui.permission === 'plan') {
@@ -764,8 +852,11 @@ async function tool(name, args, s, signal) {
         const k = s.skills?.get(String(args.name ?? ''))
         return k && k.use !== 'me' ? fillArgs(k.body, '') : `error: no skill "${args.name}". Skills: ${[...(s.skills?.values() ?? [])].filter((x) => x.use !== 'me').map((x) => x.name).join(', ') || 'none'}`
       }
-      default:
+      default: {
+        const m = mcpTarget(s, name)
+        if (m) return await callMcp(s, m.server, m.tool, args, signal)
         return (await s.director?.tool(name, args, s, signal)) ?? `error: there is no tool named ${name}`
+      }
     }
   } catch (e) {
     if (e.name === 'AbortError') throw e

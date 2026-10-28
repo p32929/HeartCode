@@ -6,6 +6,9 @@ export const est = (text) => Math.ceil(String(text ?? '').length / 3.5)
 // An error that may go away by itself: a rate limit, a server error or overload, a timeout, no
 // connection (no status). Anything else (a wrong model name, key or request) won't.
 export const outage = (e) => !e.status || [408, 409, 429].includes(e.status) || e.status >= 500
+// The model can't be used as it's set up (a wrong key, no access to it, no such model): waiting
+// won't help, but the next one in the list may work.
+export const unusable = (e) => [401, 403, 404].includes(e.status)
 // A request's messages, estimated: an image's data isn't text (about 800 tokens, not its base64)
 export function estMessages(messages) {
   let images = 0
@@ -143,6 +146,16 @@ export class Client {
   get target() {
     return this.rotation?.list[this.rotation.at] ?? null
   }
+  // The model in use answers but gives nothing usable (agent.js: empty replies, again and again):
+  // the next one in the list takes over. False when there's no list.
+  moveOn(why) {
+    const r = this.rotation
+    if (!r) return false
+    r.at = (r.at + 1) % r.list.length
+    log('rotate', `${why} → ${r.list[r.at].provider} · ${r.list[r.at].model}`)
+    this.#use(r.list[r.at])
+    return true
+  }
   // A new message: back to #1 (unless it stays on the one that worked)
   newMessage() {
     const r = this.rotation
@@ -156,7 +169,7 @@ export class Client {
   #rotate(e, tries) {
     const r = this.rotation
     if (!r) return false
-    if (!(r.on === 'any' || (r.on === 'failure' && outage(e)) || (r.on === 'retries' && tries >= r.retries))) return false
+    if (!(r.on === 'any' || (r.on === 'failure' && (outage(e) || unusable(e))) || (r.on === 'retries' && (tries >= r.retries || unusable(e))))) return false
     r.at = (r.at + 1) % r.list.length
     log('rotate', `${e.message.slice(0, 200)} → ${r.list[r.at].provider} · ${r.list[r.at].model}`)
     this.#use(r.list[r.at])
@@ -186,7 +199,7 @@ export class Client {
       usage: reply?.usage,
       finishReason: reply?.finishReason,
       request: req,
-      reply: reply && { content: reply.content, reasoning: reply.reasoning, toolCalls: reply.toolCalls },
+      reply: reply && { content: reply.content, reasoning: reply.reasoning, toolCalls: reply.toolCalls, ...(reply.raw && { raw: reply.raw }) }, // raw: the stream as it came, for a reply with nothing in it
     })
   }
 
@@ -357,10 +370,11 @@ export class Client {
         if (e.name === 'AbortError' || opts.signal?.aborted) throw e
         if (tooLarge(e)) throw e // the caller shrinks the conversation and sends again
         if (this.retryIf && !this.retryIf(e, attempt)) throw e
-        // A wrong model name, key or request (404, 401, 400…): the same request fails the same way
-        // every time, so it isn't sent again. It stops here, unless the model list moves on at any
-        // error (the settings page); and a whole round of those stops too, rather than going round.
-        if (!outage(e) && this.rotation?.on !== 'any') throw e
+        // A bad request (400…): the same request fails the same way every time, so it isn't sent
+        // again. It stops here, unless the model list moves on at any error (the settings page). A
+        // model that can't be used (a wrong key or name: 401, 403, 404) makes way for the next one
+        // in the list; a whole round of those stops too, rather than going round.
+        if (!outage(e) && !(unusable(e) && this.rotation) && this.rotation?.on !== 'any') throw e
         hard &&= !outage(e)
         tries++
         if (this.#rotate(e, tries)) {
@@ -400,6 +414,14 @@ export class Client {
   // One request. Without `once`, rate limits and server errors get three quiet retries.
   async #chat(body, { onToken, onReasoning, onToolDelta, signal, once } = {}) {
     const req = { model: this.model, ...body }
+    // The model's thinking on its earlier steps (agent.js keeps it as reasoning_content): sent by the
+    // name this provider sends it by (reasoning_content: DeepSeek, vLLM…; reasoning: OpenRouter,
+    // Ollama), or not at all if it refused it once.
+    if (req.messages?.some((m) => m.reasoning_content)) {
+      const field = this.quirks.noReasoningBack ? null : (this.quirks.reasoningField ?? 'reasoning_content')
+      req.messages = req.messages.map(({ reasoning_content, ...m }) => (reasoning_content && field ? { ...m, [field]: reasoning_content } : m))
+    }
+    if (this.quirks.simpleSchemas && req.tools) req.tools = req.tools.map((t) => ({ ...t, function: { ...t.function, parameters: simpleSchema(t.function.parameters) } }))
     if (this.quirks.noTemperature) delete req.temperature
     if (this.effort && !this.quirks.noEffort) req.reasoning_effort = this.effort
     if (req.stream && !this.quirks.noStreamUsage) req.stream_options = { include_usage: true } // token counts for the status bar
@@ -423,19 +445,38 @@ export class Client {
         }
       }
     } catch (e) {
-      // Some APIs reject parameters older servers need; learn once and retry.
-      if (e.status === 400 && /temperature/.test(e.message) && 'temperature' in body && !this.quirks.noTemperature) {
+      // Some APIs reject parameters older servers need; learn once and retry. (Refused: 400, or 422
+      // from the ones that check requests against a schema, like Mistral.)
+      const refused = e.status === 400 || e.status === 422
+      const said = e.body ?? e.message
+      if (refused && /temperature/.test(e.message) && 'temperature' in body && !this.quirks.noTemperature) {
         this.quirks.noTemperature = true
         log('quirk', 'server rejects temperature')
         return this.#chat(body, { onToken, onReasoning, onToolDelta, signal, once })
       }
       for (const [quirk, param] of [['noEffort', 'reasoning_effort'], ['noStreamUsage', 'stream_options']]) {
-        if (e.status === 400 && param in req && new RegExp(param).test(e.message) && !this.quirks[quirk]) {
+        if (refused && param in req && new RegExp(param).test(e.message) && !this.quirks[quirk]) {
           this.quirks[quirk] = true
           log('quirk', `server rejects ${param}; dropping it`)
           return this.#chat(body, { onToken, onReasoning, onToolDelta, signal, once })
         }
       }
+      // The thinking sent back, or the tools' arguments (JSON schemas with keys a provider doesn't
+      // take: Gemini's "Unknown name additionalProperties"), refused: sent without it, or with
+      // simpler schemas, from now on with this model.
+      const reasoningSent = !this.quirks.noReasoningBack && body.messages?.some((m) => m.reasoning_content)
+      const noReasoning = () => {
+        this.quirks.noReasoningBack = true
+        log('quirk', 'server rejects the thinking sent back; not sending it')
+        return this.#chat(body, { onToken, onReasoning, onToolDelta, signal, once })
+      }
+      if (refused && reasoningSent && /reasoning(?!_effort)/i.test(said)) return noReasoning()
+      if (refused && body.tools?.length && !this.quirks.simpleSchemas && /schema|function_declarations|parameters|additionalProperties|exclusiveM|minItems|unknown name|invalid.{0,40}(tool|function)|tools\[/i.test(said)) {
+        this.quirks.simpleSchemas = true
+        log('quirk', 'server rejects the tools\' schemas; sending simpler ones')
+        return this.#chat(body, { onToken, onReasoning, onToolDelta, signal, once })
+      }
+      if (refused && reasoningSent && /extra|unknown|unrecognized|not permitted|additional propert/i.test(said)) return noReasoning()
       throw e
     }
     // Tokens the last request used (prompt + reply): what the status bar shows against the context size.
@@ -458,7 +499,8 @@ export class Client {
       const data = await res.json()
       const choice = data.choices?.[0] ?? {}
       const msg = choice.message ?? {}
-      return count(done(msg.content ?? '', msg.reasoning_content ?? msg.reasoning ?? '', msg.tool_calls ?? [], data.usage, choice.finish_reason))
+      this.#reasoningField(msg)
+      return count(done(textOf(msg.content), msg.reasoning_content ?? msg.reasoning ?? msg.thinking ?? '', msg.tool_calls ?? [], data.usage, choice.finish_reason))
     }
 
     const reader = res.body.getReader()
@@ -471,6 +513,7 @@ export class Client {
     let usage
     let finishReason
     const calls = []
+    let raw = '' // the stream as it came (its start), kept for a reply that turns out empty
     const emit = (v) => {
       if (onToken && v.startsWith(emitted) && v.length > emitted.length) {
         onToken(v.slice(emitted.length))
@@ -486,6 +529,7 @@ export class Client {
       while ((nl = buf.indexOf('\n')) !== -1) {
         const line = buf.slice(0, nl).trim()
         buf = buf.slice(nl + 1)
+        if (raw.length < 100_000 && line) raw += line + '\n'
         if (!line.startsWith('data:')) continue
         const payload = line.slice(5).trim()
         if (payload === '[DONE]') continue
@@ -500,8 +544,10 @@ export class Client {
         const ch = chunk.choices?.[0]
         if (!ch) continue
         if (ch.finish_reason) finishReason = ch.finish_reason
-        const d = ch.delta ?? {}
-        const r = d.reasoning_content || d.reasoning
+        const d = ch.delta ?? ch.message ?? {} // some proxies send the whole message in a chunk
+        this.#reasoningField(d)
+        if (Array.isArray(d.content)) d.content = textOf(d.content)
+        const r = d.reasoning_content || d.reasoning || d.thinking
         if (r) {
           reasoning += r
           onReasoning?.(r)
@@ -527,9 +573,47 @@ export class Client {
     }
     const result = done(content, reasoning, calls.filter(Boolean), usage, finishReason)
     emit(result.content)
+    if (!result.content.trim() && !result.toolCalls.length && !result.reasoning) {
+      result.raw = raw // nothing read from it: what came, for the requests log
+      log('reply', `${this.model}: an empty reply${usage?.completion_tokens ? ` of ${usage.completion_tokens} tokens` : ''}; the stream:`, raw.slice(0, 4000))
+    }
     return count(result)
   }
+
+  // The name this provider gives the model's thinking, to send it back by the same one.
+  #reasoningField(d) {
+    if (this.quirks.reasoningField) return
+    if (d.reasoning_content) this.quirks.reasoningField = 'reasoning_content'
+    else if (typeof d.reasoning === 'string' && d.reasoning) this.quirks.reasoningField = 'reasoning'
+  }
 }
+
+// A tool's arguments as the most limited providers take them (Gemini's function declarations):
+// only types, properties, required, items, enum and descriptions; a choice of types (anyOf, oneOf,
+// ["string", "null"]) becomes its first real one.
+const KEEP = new Set(['type', 'properties', 'required', 'items', 'enum', 'description'])
+export function simpleSchema(x) {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return x
+  const alt = x.anyOf ?? x.oneOf
+  if (alt?.length) {
+    const pick = alt.find((a) => a?.type !== 'null') ?? alt[0]
+    return simpleSchema({ ...pick, ...(x.description && { description: x.description }) })
+  }
+  const out = {}
+  for (const [k, v] of Object.entries(x)) {
+    if (!KEEP.has(k)) continue
+    if (k === 'properties') out.properties = Object.fromEntries(Object.entries(v ?? {}).map(([n, s]) => [n, simpleSchema(s)]))
+    else if (k === 'items') out.items = simpleSchema(Array.isArray(v) ? v[0] : v)
+    else if (k === 'type' && Array.isArray(v)) out.type = v.find((y) => y !== 'null') ?? 'string'
+    else out[k] = v
+  }
+  out.type ??= out.properties ? 'object' : 'string'
+  if (Array.isArray(out.required) && out.properties) out.required = out.required.filter((r) => r in out.properties)
+  return out
+}
+
+// Message content as text: a string, or a list of parts ({ type: 'text', text }).
+const textOf = (c) => (Array.isArray(c) ? c.map((p) => (typeof p === 'string' ? p : (p?.text ?? ''))).join('') : (c ?? ''))
 
 function done(raw, reasoning, toolCalls, usage, finishReason) {
   const calls = toolCalls.filter((c) => c?.function?.name)

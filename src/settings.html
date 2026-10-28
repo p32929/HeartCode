@@ -221,10 +221,14 @@
   .olist .test.failed { color: var(--err); }
   .olist .test.testing, .olist .test.waiting { color: var(--accent); }
   .olist .test button { padding: 0 7px; font-size: 11px; }
+  .olist .tried { font-size: 11.5px; line-height: 1.45; margin-top: 2px; overflow-wrap: anywhere; }
+  .olist .tried.ok { color: var(--ok); }
+  .olist .tried.bad { color: var(--err); }
+  .olist .tried.going { color: var(--accent); }
   .spin { width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .mine-top { padding: 16px 18px 6px; }
-  .mine-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .mine-title { display: flex; align-items: center; justify-content: space-between; gap: 6px 8px; flex-wrap: wrap; }
   .mine-title h2 { margin: 0 0 6px; flex: 1; white-space: nowrap; }
   .mine-title button { white-space: nowrap; }
   .olist { list-style: none; margin: 0; padding: 6px 12px 12px; flex: 1; overflow-y: auto; }
@@ -801,6 +805,47 @@ function testLine(t) {
   return h('div', { className: 'test ' + cls }, h('span', { className: 'msg', textContent: text }), action)
 }
 
+// Test: one short message to the model, to see that it really answers (the key, access to it, its
+// name, the server). The result stays under it until the page is reloaded.
+const TRIES = {} // "provider/model" → { going } | { ok, ms, reply } | { ok: false, error }
+const keyOf = (t) => `${t.provider}/${t.model}`
+function triedLine(t) {
+  const r = TRIES[keyOf(t)]
+  if (!r) return null
+  const secs = r.ms != null ? ` · ${(r.ms / 1000).toFixed(1)}s` : ''
+  const [cls, text] = r.going ? ['going', 'testing: sending it a short message…'] : r.ok ? ['ok', `✓ works: it answered "${r.reply}"${secs}`] : ['bad', `✗ doesn't work: ${r.error}${secs}`]
+  return h('div', { className: 'tried ' + cls, textContent: text })
+}
+function showTried(t) {
+  const li = document.querySelector(`#inuse li[data-key="${CSS.escape(keyOf(t))}"]`)
+  if (!li) return
+  li.querySelector('.tried')?.remove()
+  const line = triedLine(t)
+  if (line) li.querySelector('.what').append(line)
+}
+async function tryModel(t) {
+  TRIES[keyOf(t)] = { going: true }
+  showTried(t)
+  const r = (await act('/api/try', { provider: t.provider, model: t.model })) ?? { ok: false, error: 'the settings page did not answer' }
+  TRIES[keyOf(t)] = r
+  showTried(t)
+  return r
+}
+let testingAll = false
+async function tryAll() {
+  if (testingAll) return
+  testingAll = true
+  const list = [...(S?.order ?? [])]
+  let good = 0
+  toast(`testing ${list.length} model${list.length === 1 ? '' : 's'}, one at a time…`)
+  try {
+    for (const t of list) if ((await tryModel(t)).ok) good++
+  } finally {
+    testingAll = false
+  }
+  toast(`${good} of ${list.length} work${good === list.length ? '' : `; ${list.length - good} don't (see under each)`}`, good < list.length)
+}
+
 // models.dev looked up again: one model (its Retry), or all of yours (Retry all)
 const retry = (t) => h('button', { className: 'small', textContent: 'Retry', title: 'look it up in models.dev again', onclick: (e) => (e.stopPropagation(), lookUp(t)) })
 async function lookUp(t) {
@@ -919,6 +964,7 @@ function drawProviders(s) {
         h('h2', { textContent: 'Your models' }),
         h('button', { className: 'small', textContent: 'Table', style: order.length ? '' : 'visibility:hidden', title: 'all of them in a table, to compare and sort', onclick: () => (location.hash = 'models') }),
         h('button', { className: 'small', textContent: 'Retry all', title: 'look all of them up in models.dev again', style: order.length ? '' : 'visibility:hidden', onclick: () => lookUp() }),
+        h('button', { className: 'small', textContent: 'Test all', title: 'send each a short message, one at a time, to see which really answer', style: order.length ? '' : 'visibility:hidden', onclick: () => tryAll() }),
         h('button', { className: 'small danger', textContent: 'Remove all', title: 'take every model off this list', style: order.length ? '' : 'visibility:hidden', onclick: () => confirm(`Take all ${order.length} model${order.length === 1 ? '' : 's'} off your list? HeartCode then has none to use until you choose one. (They stay under their providers.)`) && saveOrder([], 'all removed: no model chosen now') })),
       h('p', { className: 'sub', style: 'margin:0', textContent: order.length > 1 ? 'HeartCode uses #1. If it fails, it tries #2, then #3… and round again. Drag to change the order.' : order.length ? `HeartCode uses this one. Click more ${side} to add fallbacks: tried, in order, when one fails.` : `The models HeartCode uses, in the order it tries them. Click one ${side} to start.` })),
     order.length ? h('ol', { className: 'olist' }, order.map((t, i) => h('li', {
@@ -930,7 +976,8 @@ function drawProviders(s) {
       h('div', { className: 'what' },
         h('div', { className: 'm', textContent: t.model }),
         h('div', { className: 'p', textContent: `${t.provider} · ${i === 0 ? 'in use' : 'fallback'}` }),
-        testLine(t)),
+        testLine(t), triedLine(t)),
+      h('button', { textContent: 'Test', title: 'send it a short message to see that it really answers (your key, access to it, its name)', 'aria-label': `test ${t.model}`, onclick: (e) => (e.stopPropagation(), tryModel(t)) }),
       h('button', { className: 'danger', textContent: '✕', title: 'take it off the list', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) })),
       ), h('li', { className: 'next', textContent: `#${order.length + 1} · click a model ${side} to add it here (a fallback)` }))
       : h('div', { className: 'mine-empty' }, h('b', { textContent: 'No model chosen yet' }), `Click a model ${side}: it becomes #1, the one HeartCode uses.`),
@@ -940,7 +987,7 @@ function drawProviders(s) {
         h('select', { id: 'r-on', style: 'flex:1', onchange: (e) => save(order, 'saved', { on: e.target.value }) },
           [['failure', 'at its first failure'], ['retries', 'after some tries of the same model'], ['any', 'at any error']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.on === v }))),
         s.rotation.on === 'retries' ? h('input', { type: 'number', 'aria-label': 'tries', title: 'tries of the same model first', style: 'width:76px', min: 1, max: 20, value: s.rotation.retries, onchange: (e) => save(order, 'saved', { retries: Number(e.target.value) }) }) : null),
-      h('div', { className: 'hint', textContent: { failure: 'A rate limit, server error, timeout or lost connection moves on at once. Errors like "model not found" or a wrong key stop.', retries: 'The same model is tried again (with a short wait) that many times first.', any: 'Also errors like "model not found" or a bad request move on.' }[s.rotation.on] }),
+      h('div', { className: 'hint', textContent: { failure: 'A rate limit, server error, timeout or lost connection moves on at once, and so does a model it can\'t use (a wrong key, no access, "model not found"). Other errors, like a bad request, stop.', retries: 'The same model is tried again (with a short wait) that many times first.', any: 'Also errors like "model not found" or a bad request move on.' }[s.rotation.on] }),
       h('label', { className: 'f', for: 'r-next', textContent: 'A new message starts with' }),
       h('select', { id: 'r-next', onchange: (e) => save(order, 'saved', { next: e.target.value }) },
         [['first', '#1 again'], ['stay', 'the model that answered last']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.next === v })))) : null)

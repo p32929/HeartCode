@@ -12,6 +12,7 @@ import { HOME, saveConfig, readJson, writeJson } from './config.js'
 import { DEFAULT_SERVERS } from './mcp.js'
 import { sections, BUILTIN_PROMPTS } from './prompts.js'
 import { Client } from './client.js'
+import { clip } from './tools.js'
 import { loadProfile, strategy, profilePath, profileFrom } from './probe.js'
 import { loadPrices, priceOf, limitsOf } from './usage.js'
 import { THEMES, PERMISSIONS } from './ui.js'
@@ -156,6 +157,17 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
   }
 
 
+  // A failed request in a few words: its status and what the server said (its JSON's message).
+  const whyFailed = (e) => {
+    let said = String(e.body ?? '').trim()
+    try {
+      const j = [JSON.parse(said)].flat()[0]
+      said = j?.error?.message ?? (typeof j?.error === 'string' ? j.error : null) ?? (typeof j?.detail === 'string' ? j.detail : null) ?? j?.message ?? j?.title ?? said
+    } catch {}
+    if (!said || /^\s*</.test(said)) said = e.message.replace(/^\d+ from \S+: /, '')
+    return clip(`${e.status ? `${e.status}: ` : ''}${said}`, 300)
+  }
+
   const state = () => ({
     providers: Object.entries(cfg.providers)
       .filter(([n]) => n !== cfg.adhoc)
@@ -296,6 +308,22 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
     // models.dev again (one model, or all of yours): its list fetched anew, and each model's profile
     // takes what it says now (one it didn't know before becomes "from models.dev"; your own settings
     // for it stay above). A running HeartCode takes it at once.
+    // Test: one short message to the model, to see that it answers (key, access, name, the server
+    // itself). In the requests log as a model test. Never throws: { ok, ms, reply } or { ok: false, error }.
+    'POST /api/try': async ({ provider, model } = {}) => {
+      const c = clientFor({ provider, model: String(model ?? '') })
+      if (!c || !model) return { ok: false, error: `no provider "${provider}"` }
+      c.purpose = 'test'
+      const t0 = Date.now()
+      try {
+        const r = await c.chat({ messages: [{ role: 'user', content: 'Reply with just the word OK.' }], stream: true }, { signal: AbortSignal.timeout(90_000) })
+        const reply = (r.content || '').trim()
+        if (!reply && !r.toolCalls.length) return { ok: false, ms: Date.now() - t0, error: `it answered with nothing${r.usage?.completion_tokens ? ` (${r.usage.completion_tokens} tokens it said it wrote)` : ''}` }
+        return { ok: true, ms: Date.now() - t0, reply: reply.slice(0, 80) }
+      } catch (e) {
+        return { ok: false, ms: Date.now() - t0, status: e.status ?? null, error: e.name === 'TimeoutError' ? 'no answer within 90 seconds' : whyFailed(e) }
+      }
+    },
     'POST /api/models-dev': async ({ provider, model } = {}) => {
       await loadPrices({ force: true })
       const list = provider && model ? [{ provider, model: String(model) }] : state().order.map(({ provider, model }) => ({ provider, model }))

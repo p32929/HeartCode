@@ -5,7 +5,7 @@ import { newChat } from './sessions.js'
 import path from 'node:path'
 import { est, Client } from './client.js'
 import { runGuided } from './guided.js'
-import { TOOL_DEFS, PLAN_HIDDEN, extraTools, runTool, listFiles, namedFiles, readFileTool, clip } from './tools.js'
+import { TOOL_DEFS, PLAN_HIDDEN, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput } from './tools.js'
 import { loadHooks, runHooks } from './hooks.js'
 import { takeConfigErrors } from './config.js'
 import { c } from './ui.js'
@@ -144,7 +144,7 @@ export class Session {
     const answer = this.strat.actions === 'tools' ? await runNative(this, text, images, signal) : await runGuided(this, text, images, signal)
     log('task', 'answer:', answer)
     this.history.push({ task: text, answer })
-    if (this.memory && this.strat.actions === 'tools') await this.afterTask(text, answer, signal)
+    if (this.memory && this.strat.actions === 'tools' && !this.appendSystem) await this.afterTask(text, answer, signal) // a program's instructions (--append-system-prompt) aren't the user's to remember
     return answer
   }
 
@@ -208,7 +208,7 @@ export class Session {
     try {
       if (!writes && REMEMBER.test(task)) {
         this.ui.spinner('remembering')
-        await this.memoryTask(this.#extractPrompt(`${task}\n${answer}`), prompt('agent/memory-exchange', { task, answer: clip(answer, 2000) }), signal)
+        await this.memoryTask(this.#extractPrompt(`${task}\n${answer}`), prompt('agent/memory-exchange', { task: clip(task, 4000), answer: clip(answer, 2000) }), signal)
       }
     } catch (e) {
       if (e.name === 'AbortError') throw e
@@ -228,7 +228,14 @@ export class Session {
     const tools = extraTools({ memory: this.memory }).map((f) => ({ type: 'function', function: f }))
     const messages = [{ role: 'system', content: system }, { role: 'user', content: user }]
     for (let step = 0; step < steps; step++) {
-      const res = await this.client.chat({ messages, tools }, { signal })
+      const was = this.client.purpose
+      this.client.purpose = 'memory' // in the requests log
+      let res
+      try {
+        res = await this.client.chat({ messages, tools }, { signal })
+      } finally {
+        this.client.purpose = was
+      }
       messages.push({ role: 'assistant', content: res.content || '', ...(res.toolCalls.length && { tool_calls: res.toolCalls }) })
       if (!res.toolCalls.length) return res.content.trim()
       for (const call of res.toolCalls) {
@@ -264,15 +271,20 @@ export class Session {
 // The user's HEARTCODE.md / AGENTS.md instructions are added when there are any.
 // In director mode the director part is added.
 // No list of the project's files: the model looks up what the task needs (list_files, search).
+// A program's own instructions (--append-system-prompt: Nibedita, a script) come last, and HeartCode's
+// own say less then (caller): no role of its own, no "stay in the folder", no way to finish of its
+// own, no director; they're told to follow the program's where they differ.
 const SYSTEM = (s) => {
   const instructions = userInstructions(s.root)
   return [
-    prompt('agent/system', { root: s.root, files: '', more: '' }),
+    prompt('agent/system', { root: s.root, files: '', more: '', caller: Boolean(s.appendSystem) }),
     instructions && prompt('agent/instructions', { instructions }),
     s.memory && prompt('agent/memory', { tags: s.memory.tagSummary() || '(none yet)' }),
-    s.director && s.director.app.cfg.director !== false && prompt('agent/director'),
+    s.mcpInstructions && prompt('agent/mcp-instructions', { instructions: s.mcpInstructions }), // what the MCP servers say about their tools
+    s.director && !s.appendSystem && s.director.app.cfg.director !== false && prompt('agent/director'),
     s.isSub && prompt('agent/subagent'),
-    s.appendSystem, // from the caller (--append-system-prompt)
+    s.appendSystem && prompt('agent/caller'),
+    s.appendSystem,
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -280,7 +292,8 @@ const SYSTEM = (s) => {
 
 const sizeOf = (m) =>
   (Array.isArray(m.content) ? m.content.reduce((n, p) => n + (p.type === 'text' ? est(p.text) : 800), 0) : est(m.content)) +
-  (m.tool_calls ? est(JSON.stringify(m.tool_calls)) : 0)
+  (m.tool_calls ? est(JSON.stringify(m.tool_calls)) : 0) +
+  (m.reasoning_content ? est(m.reasoning_content) : 0)
 export const size = (messages) => messages.reduce((n, m) => n + sizeOf(m), 0)
 // Words that suggest the user said something to remember (then HeartCode asks the model to save it).
 const REMEMBER = /\b(always|never|prefer|remember|don'?t|do not|instead of|from now on|we use|convention|make sure|keep in mind)\b/i
@@ -410,6 +423,13 @@ export function pairTools(messages) {
 
 async function runNative(s, task, images, signal) {
   const { client, strat, ui } = s
+  if (s.mcp?.names.length) {
+    ui.spinner('getting the MCP servers\' tools')
+    await loadMcpTools(s, signal) // before the system prompt: it has their instructions
+  }
+  // The model's thinking goes back with its steps while it works on a message (it keeps its plan
+  // from one tool call to the next), not into later messages.
+  for (const m of s.messages ?? []) delete m.reasoning_content
   // The system prompt is rebuilt for every message: files come and go, and a resumed chat's is
   // from back then (it once told the model the project was empty after it had made files).
   // Unchanged, it stays the same text, so a provider's prompt cache still holds.
@@ -457,6 +477,7 @@ async function runNative(s, task, images, signal) {
   let nudged = 0 // reminders sent this message about open todo items or a Stop hook
 
   let empty = 0 // replies in a row with neither text nor tool calls
+  let movedOn = 0 // models given up on for that, in this message
   // No step limit: a long fix takes many steps, and Esc stops it. A caller can set one (--max-turns).
   for (let step = 0; ; step++) {
     if (s.maxTurns && step >= s.maxTurns) {
@@ -506,7 +527,7 @@ async function runNative(s, task, images, signal) {
       out.text(res.content)
     }
     out.end()
-    s.messages.push({ role: 'assistant', content: res.content || '', ...(res.toolCalls.length && { tool_calls: res.toolCalls }) })
+    s.messages.push({ role: 'assistant', content: res.content || '', ...(res.toolCalls.length && { tool_calls: res.toolCalls }), ...(res.reasoning && res.toolCalls.length && { reasoning_content: res.reasoning }) }) // client.js sends it by the name the provider uses, or not at all
     // a tool call written out as text instead of made (some models do, after a long conversation): made
     const leak = !res.toolCalls.length && leakedCall(res.content)
     if (leak && tools.some((t) => t.function.name === leak.name)) {
@@ -523,6 +544,14 @@ async function runNative(s, task, images, signal) {
       if (empty++ < 3) {
         log('task', `empty reply ${empty}; ${empty === 1 ? 'asking again' : 'asking the model to continue'}`)
         if (empty > 1 && s.messages.at(-1)?.content !== prompt('agent/empty-reply')) s.messages.push({ role: 'user', content: prompt('agent/empty-reply') })
+        continue
+      }
+      // still nothing: the next model in your list carries on (each one once), before giving up
+      const was = client.model
+      if (movedOn < (client.rotation?.list.length ?? 1) - 1 && client.moveOn(`${was}: ${empty} empty replies in a row`)) {
+        movedOn++
+        empty = 0
+        ui.warn(`${was} keeps replying with nothing; going on with ${client.model}`)
         continue
       }
       return finalAnswer(s, signal)
@@ -560,11 +589,12 @@ async function runNative(s, task, images, signal) {
       if (name === 'read_file' || name === 'search' || name === 'list_files' || name === 'web_fetch' || name === 'web_search') ui.result(`${out.split('\n').length} lines`)
       else if (name === 'agent' && !out.startsWith('error')) ui.result(`${s.ui.permission === 'plan' ? 'planned' : 'done'}: ${clip(out.split('\n').find((l) => l.trim()) ?? '', 100)}`)
       else if (out.startsWith('error')) ui.result(clip(out, 120))
-      const msg = { role: 'tool', tool_call_id: call.id, content: clip(out, Math.min(12_000, strat.context)) }
+      const msg = { role: 'tool', tool_call_id: call.id, content: fitResult(s, name, out) }
       if (name === 'read_file' && args && !args.start_line && !args.end_line && !out.startsWith('error')) replaceCopy(s, args.path, msg)
       s.messages.push(msg)
       s.onEvent?.({ type: 'tool', id: call.id, name, output: out })
     }
+    trimOldResults(s)
     // screenshots from MCP tools: tool results are text only, so images follow as a message
     if (s.pendingImages?.length) {
       s.messages.push({ role: 'user', content: [{ type: 'text', text: prompt('agent/tool-images') }, ...s.pendingImages.map((url) => ({ type: 'image_url', image_url: { url } }))] })
@@ -599,10 +629,35 @@ function helperUI(ui, label) {
   return new Proxy(ui, { get: (t, k) => (k in own ? own[k] : typeof t[k] === 'function' ? t[k].bind(t) : t[k]), set: (t, k, v) => ((t[k] = v), true) })
 }
 
-// Tools the caller allowed (--allowedTools) or took away (--disallowedTools); all by default.
-export const allowed = (s, name) => (!s.allowTools || s.allowTools.has(name)) && !s.denyTools?.has(name)
+export { allowed }
 
 const shortened = new WeakSet() // kept outside the messages: providers reject unknown message fields
+
+// How long a tool result may be in the conversation: a tenth of the window, 4k to 100k characters
+// (Claude Code allows about 25k tokens). A longer one: its start, and the whole of it saved to a
+// file the model can read in parts (read_file, search), as Claude Code does.
+export function fitResult(s, name, out) {
+  const max = Math.max(4000, Math.min(100_000, Math.floor((s.strat.context * 3.5 * 0.1) / (s.strat.ratio ?? 1))))
+  if (out.length <= max) return out
+  const file = saveOutput(s.chat?.id, name, out)
+  log('tool', `${name}: ${out.length} characters, ${max} shown${file ? `; all of it in ${file}` : ''}`)
+  return `${out.slice(0, max)}\n…\n${prompt('agent/output-cut', { shown: max, total: out.length, file })}`
+}
+
+// A long task's conversation fills up with old tool output (a browser's page snapshots, each out of
+// date by the next). Past 12 long results, all but the newest 4 are cut to their start, each saved
+// to a file first. All at once, so a provider's prompt cache (the conversation's unchanged start)
+// is broken rarely, not at every step.
+export function trimOldResults(s, keep = 4, most = 12) {
+  const long = s.messages.filter((m) => m.role === 'tool' && typeof m.content === 'string' && m.content.length > 2000 && !shortened.has(m) && !/^\[older output/.test(m.content))
+  if (long.length <= most) return
+  for (const m of long.slice(0, -keep)) {
+    const file = saveOutput(s.chat?.id, 'older', m.content)
+    m.content = `${prompt('agent/output-old', { total: m.content.length, file })}\n${m.content.slice(0, 600)}\n…`
+    shortened.add(m)
+  }
+  log('tool', `older tool output cut: ${long.length - keep} results`)
+}
 
 // A file read again: the older copy in the conversation becomes a one-line note.
 function replaceCopy(s, file, msg) {
