@@ -17,7 +17,7 @@ import { loadProfile, strategy, profilePath, profileFrom } from './probe.js'
 import { loadPrices, priceOf, limitsOf } from './usage.js'
 import { THEMES, PERMISSIONS } from './ui.js'
 import { loadSkills, frontMatter } from './skills.js'
-import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays } from './log.js'
+import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays, logSize, clearLogs } from './log.js'
 
 const PAGE = new URL('./settings.html', import.meta.url)
 const EFFORTS = ['default', 'low', 'medium', 'high']
@@ -189,6 +189,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
 
   const routes = {
     'GET /api/state': () => state(),
+    'GET /api/log-size': () => logSize(),
+    'POST /api/clear-logs': () => ({ gone: clearLogs(), size: logSize() }),
     'POST /api/provider': ({ name, baseUrl, apiKey, keepKey, was }) => {
       name = safeName(name)
       if (!name) throw new Error('a name is needed')

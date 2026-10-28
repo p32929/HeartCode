@@ -42,6 +42,9 @@
   .page { display: none; }
   .page.on { display: block; }
   .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
+  .disk { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .disk b { font-size: 22px; }
+  .disk .k { color: var(--muted); font-size: 12.5px; }
   h1 { font-size: 24px; margin: 0 0 4px; }
   .lead { color: var(--muted); margin: 0; max-width: 760px; }
   h2 { font-size: 15px; margin: 0 0 4px; }
@@ -412,7 +415,7 @@
 
     <!-- Logging -->
     <section class="page" id="page-logging">
-      <div class="head"><div><h1>Logging</h1><p class="lead">What HeartCode writes down, for finding out what went wrong. Off unless you switch it on.</p></div></div>
+      <div class="head"><div><h1>Logging</h1><p class="lead">What HeartCode writes down, for finding out what went wrong. Off unless you switch it on.</p></div><div class="disk" id="l-disk"></div></div>
       <div class="card">
         <div class="log-opts">
           <div>
@@ -606,6 +609,7 @@ function showPage() {
   for (const p of PAGES) $('page-' + p).classList.toggle('on', p === page())
   for (const a of document.querySelectorAll('nav a')) a.classList.toggle('on', a.dataset.page === page())
   if (S) drawUsing(S)
+  if (page() === 'logging') drawDisk()
   scrollTo(0, 0)
   fillHeight()
   document.querySelector('nav a.on')?.scrollIntoView({ inline: 'center', block: 'nearest' }) // on a phone the pages scroll sideways
@@ -805,7 +809,7 @@ function testLine(t) {
   const edit = (label) => h('button', { className: 'small', textContent: label, onclick: (e) => (e.stopPropagation(), openSetup(t)) })
   const [cls, text, action] =
     !x ? ['none', 'looking it up in models.dev…', null]
-      : x.source === 'assumed' ? ['warn', 'not in models.dev', edit('Set up')] // its Retry: on the Your models page, and Retry all
+      : x.source === 'assumed' ? ['warn', 'not in models.dev', edit('Set up')] // its Retry: on the Your models page, and Refresh from models.dev
       : ['ok', `✓ ${testedText(x)} · ${Object.keys(x.set ?? {}).length ? 'yours' : FROM[x.source]}`, edit('Edit')]
   const about = x?.source === 'assumed' ? "not in models.dev: Retry, or set up what it can do" : text
   return h('div', { className: 'test ' + cls }, h('span', { className: 'msg', textContent: text, title: about }), action)
@@ -876,7 +880,7 @@ async function tryAll() {
   toast(`${good} of ${list.length} work${good === list.length ? '' : `; ${list.length - good} don't (Works? says why, on hover)`}`, good < list.length)
 }
 
-// models.dev looked up again: one model (its Retry), or all of yours (Retry all)
+// models.dev looked up again: one model (its Retry), or all of yours (Refresh from models.dev)
 const retry = (t) => h('button', { className: 'small', textContent: 'Retry', title: 'look it up in models.dev again', onclick: (e) => (e.stopPropagation(), lookUp(t)) })
 async function lookUp(t) {
   toast(t ? `looking up ${t.model} in models.dev…` : 'looking up your models in models.dev…')
@@ -993,7 +997,7 @@ function drawProviders(s) {
       h('div', { className: 'mine-title' },
         h('h2', { textContent: 'Your models' }),
         h('button', { className: 'small', textContent: 'Table', style: order.length ? '' : 'visibility:hidden', title: 'all of them in a table, to compare and sort', onclick: () => (location.hash = 'models') }),
-        h('button', { className: 'small', textContent: 'Retry all', title: 'look all of them up in models.dev again', style: order.length ? '' : 'visibility:hidden', onclick: () => lookUp() }),
+        h('button', { className: 'small', textContent: 'Refresh from models.dev', title: 'ask models.dev again what each model can do: context, tools, thinking, images, price', style: order.length ? '' : 'visibility:hidden', onclick: () => lookUp() }),
         h('button', { className: 'small danger', textContent: 'Remove all', title: 'take every model off this list', style: order.length ? '' : 'visibility:hidden', onclick: () => confirm(`Take all ${order.length} model${order.length === 1 ? '' : 's'} off your list? HeartCode then has none to use until you choose one. (They stay under their providers.)`) && saveOrder([], 'all removed: no model chosen now') })),
       h('p', { className: 'sub', style: 'margin:0', textContent: order.length > 1 ? 'HeartCode uses #1. If it fails, it tries #2, then #3… and round again. Drag to change the order.' : order.length ? `HeartCode uses this one. Click more ${side} to add fallbacks: tried, in order, when one fails.` : `The models HeartCode uses, in the order it tries them. Click one ${side} to start.` })),
     order.length ? h('div', { className: 'ohead' }, h('span'), h('span', { textContent: '#' }), h('span', { textContent: 'Model' }), h('span', { textContent: 'Provider' }), h('span', { textContent: 'What it can do' }), h('span')) : null,
@@ -1274,7 +1278,7 @@ function drawMine(s) {
         : order.length > 1 ? 'In your order: HeartCode uses #1, then the next when one fails. Drag a row to move it, or click a column to sort.' : ''),
       SORT.length ? h('button', { className: 'small', textContent: 'Clear sort', onclick: () => setSort([]) }) : null,
       SORT.length ? h('button', { className: 'small primary', textContent: same ? 'This is your order' : 'Use this order', disabled: same, onclick: () => keep(view) }) : null,
-      order.length ? h('button', { className: 'small', textContent: 'Retry all', title: 'look all of them up in models.dev again', onclick: () => lookUp() }) : null,
+      order.length ? h('button', { className: 'small', textContent: 'Refresh from models.dev', title: 'ask models.dev again what each model can do: context, tools, thinking, images, price', onclick: () => lookUp() }) : null,
       order.length ? h('button', { className: 'small', textContent: 'Test all', title: 'send each a short message, several at once (2 per provider at most), to see which really answer', onclick: () => tryAll() }) : null),
     order.length
       ? h('div', { className: 'mt-scroll' }, h('div', { className: 'mt' },
@@ -1350,7 +1354,36 @@ $('v-save').onclick = () => act('/api/voice', { text: $('v-text').value }, 'voic
 const logSwitch = (s, k, title, about) => h('label', { className: 'opt' },
   h('div', { className: 't' }, h('b', { textContent: title }), h('span', { textContent: about })),
   sw({ checked: s.settings[k], 'aria-label': title, onchange: (e) => act('/api/setting', { name: k, value: e.target.checked }, `${title}: ${e.target.checked ? 'on' : 'off'}`) }))
+// How much room the logs take: asked again when the page shows, when it's redrawn, and (at most every
+// few seconds) while requests are being logged.
+const bytes = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e8 ? 0 : 1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} kB` : `${n} bytes`)
+let diskAt = 0
+let diskLater = null
+async function drawDisk() {
+  if (Date.now() - diskAt < 3000) return void (diskLater ??= setTimeout(() => ((diskLater = null), drawDisk()), 3000))
+  diskAt = Date.now()
+  try {
+    showDisk(await api('/api/log-size'))
+  } catch {}
+}
+function showDisk(d) {
+  put($('l-disk'),
+    h('div', { className: 'row', style: 'gap:10px;align-items:center' },
+      h('span', {}, h('span', { className: 'k', textContent: 'Logs on disk ' }), h('b', { textContent: bytes(d.total) })),
+      d.total ? h('button', { className: 'small danger', textContent: 'Delete all', title: 'delete every log (the ones being written right now stay)', onclick: clearAll }) : null),
+    h('div', { className: 'k', textContent: `requests ${bytes(d.requests)} · runs ${bytes(d.runs)}` }))
+}
+async function clearAll() {
+  if (!confirm('Delete all logs, of every run and every request? This can\'t be undone. (The ones being written right now stay.)')) return
+  const r = await act('/api/clear-logs', {})
+  if (!r) return
+  showDisk(r.size)
+  diskAt = Date.now()
+  api('/api/requests').then(({ items }) => ((REQS = items), drawReqs()), () => {})
+  toast(`deleted: logs on disk now ${bytes(r.size.total)}`)
+}
 function drawLogging(s) {
+  drawDisk()
   put($('l-run'), logSwitch(s, 'log', 'Keep a log of every run', `From now on: a folder per run in ${s.logs.runs}, a file per tab (tab-1.log, tab-2.log…).`))
   put($('l-req'), logSwitch(s, 'logRequests', 'Log every request and reply', `Right away: a file per request in ${s.logs.requests}, a folder per run.`))
   $('l-detail').value = s.settings.logDetail
@@ -1388,11 +1421,11 @@ const whyOf = (r) => {
   return r.error
 }
 const resultTag = (r) => h('span', { className: `tag ${r.result === 'ok' ? 'ok' : r.result === 'failed' ? 'err' : ''}`, textContent: r.result === 'ok' ? 'ok' : r.result === 'failed' ? `failed${r.status ? ` ${r.status}` : ''}` : 'stopped' })
-const placeTag = (r) => (r.place > 1 ? h('span', { className: 'tag brand', textContent: `#${r.place} of ${r.of} · fallback` }) : r.of > 1 ? h('span', { className: 'tag', textContent: `#1 of ${r.of}` }) : null)
+const placeTag = (r) => (r.place > 1 ? h('span', { className: 'tag brand', textContent: `#${r.place} of ${r.of} · fallback` }) : null) // #1: nothing to say
 function reqRow(r) {
   const key = `${r.run}/${r.file}`
   return h('button', { className: `rq ${r.result}${reqOpen === key ? ' on' : ''}`, 'data-key': key, onclick: () => openReq(r) },
-    h('div', { className: 'l1' }, resultTag(r), h('span', { className: 'm', textContent: r.model }), placeTag(r)),
+    h('div', { className: 'l1' }, resultTag(r), h('span', { className: 'm', textContent: r.model })), // where it is in your list: in its details
     h('div', { className: 'l2' },
       h('span', { textContent: when(r.at) }), h('span', { textContent: r.provider ?? '' }), h('span', { textContent: secs(r.ms) }),
       r.usage ? h('span', { textContent: tokensOf(r.usage) }) : null,
@@ -1597,6 +1630,7 @@ if (token) {
   // a request logged: at the top of the list, nothing else redrawn
   events.addEventListener('request', (e) => {
     const r = JSON.parse(e.data)
+    if (page() === 'logging') drawDisk() // the logs grew
     if (!REQS) return
     REQS.unshift(r)
     if (REQS.length === 1 || !reqShown(r)) return drawReqs()

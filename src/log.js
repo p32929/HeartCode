@@ -28,20 +28,54 @@ export function stamp(d = new Date()) {
 }
 // Logs older than `days` go: run folders, request folders, and the older one-file-per-run logs.
 // Returns how many went.
-export function pruneLogs(days = DAYS) {
-  const before = Date.now() - days * 86_400_000
+// When a log was last written to: a folder's newest file (writing into a file leaves its folder's
+// time as it was).
+function lastWritten(at) {
+  const s = fs.statSync(at)
+  if (!s.isDirectory()) return s.mtimeMs
+  let t = s.mtimeMs
+  for (const f of fs.readdirSync(at)) t = Math.max(t, fs.statSync(path.join(at, f), { throwIfNoEntry: false })?.mtimeMs ?? 0)
+  return t
+}
+
+export function pruneLogs(days = DAYS, before = Date.now() - days * 86_400_000) {
   let gone = 0
   for (const [dir, isLog] of [[path.join(LOGS, 'runs'), () => true], [REQUESTS, () => true], [LOGS, (f) => f.endsWith('.log')]]) {
     try {
       for (const f of fs.readdirSync(dir)) {
         const at = path.join(dir, f)
-        if (!isLog(f) || at === LOG_DIR || at === requestLog.dir || fs.statSync(at).mtimeMs >= before) continue
+        if (!isLog(f) || at === LOG_DIR || at === requestLog.dir || lastWritten(at) >= before) continue
         fs.rmSync(at, { recursive: true, force: true })
         gone++
       }
     } catch {}
   }
   return gone
+}
+// The settings page's Delete all: every log but the ones being written now (this run's, and any
+// touched in the last minute: another HeartCode's). Returns how many files and folders went.
+export const clearLogs = () => pruneLogs(0, Date.now() - 60_000)
+
+// How much room the logs take on disk, in bytes: { runs, requests, total } (runs: the run logs,
+// and older single log files).
+export function logSize() {
+  const sum = (dir) => {
+    let n = 0
+    try {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const at = path.join(dir, e.name)
+        n += e.isDirectory() ? sum(at) : (fs.statSync(at, { throwIfNoEntry: false })?.size ?? 0)
+      }
+    } catch {}
+    return n
+  }
+  let loose = 0
+  try {
+    for (const f of fs.readdirSync(LOGS)) if (f.endsWith('.log')) loose += fs.statSync(path.join(LOGS, f), { throwIfNoEntry: false })?.size ?? 0
+  } catch {}
+  const runs = sum(path.join(LOGS, 'runs')) + loose
+  const requests = sum(REQUESTS)
+  return { runs, requests, total: runs + requests }
 }
 export const logDays = (cfg) => (Number.isInteger(cfg.logDays) && cfg.logDays > 0 ? cfg.logDays : DAYS)
 
