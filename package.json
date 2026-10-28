@@ -2,6 +2,32 @@
   "name": "heartcode",
   "version": "0.1.5",
   "description": "A coding CLI for any local or OpenAI-compatible model, including small models without tool calling.",
+  "keywords": [
+    "ai",
+    "cli",
+    "coding-agent",
+    "ai-agent",
+    "llm",
+    "openai-compatible",
+    "openrouter",
+    "groq",
+    "ollama",
+    "lm-studio",
+    "gemini",
+    "mcp",
+    "terminal",
+    "developer-tools",
+    "claude-code-alternative"
+  ],
+  "homepage": "https://github.com/p32929/HeartCode#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/p32929/HeartCode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/p32929/HeartCode/issues"
+  },
+  "author": "p32929",
   "type": "module",
   "bin": {
     "heart": "bin/heart.js",
