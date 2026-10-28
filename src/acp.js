@@ -197,7 +197,7 @@ function events(ui, s, e) {
       ui.update({
         sessionUpdate: 'tool_call',
         toolCallId: t.id,
-        title: clip(`${name}${what ? ` ${what}` : ''}`, 120),
+        title: clip(`${e.helper ? `${e.helper} › ` : ''}${name}${what ? ` ${what}` : ''}`, 120), // a helper's steps: named
         kind: KIND[name] ?? 'other',
         status: 'pending',
         rawInput: args,

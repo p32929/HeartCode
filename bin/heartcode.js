@@ -253,10 +253,18 @@ class App {
       ui.print(c.dim(`↻ ${t.provider} · ${t.model} answered${i ? ` (#${i + 1} in your model list)` : ' (#1 again)'}`))
     }
     if (cfg.maxRetries !== undefined) client.retryIf = (e, attempt) => attempt < cfg.maxRetries // headless: then give up
-    const profile = await getProfile(client, ui, cfg.force, signal)
+    let profile = await getProfile(client, ui, cfg.force, signal)
     cfg.force = false
     if (strategy(profile, cfg).thinking) client.effort = cfg.effort
     const strat = strategy(profile, cfg)
+    // Another model in the list is asked from now on: its own abilities (sees images? its window…)
+    // and profile, not the first one's (whose profile was once saved under the next one's name).
+    client.onUse = (t) => {
+      profile = loadProfile(client) || profileFrom(client, limitsOf(t.provider, client.baseUrl, t.model))
+      Object.assign(strat, strategy(profile, cfg))
+      Object.assign(client, { tokenRatio: profile.tokenRatio ?? 1, knownGood: profile.largestAccepted ?? 0 })
+      log('rotate', `${t.provider} · ${t.model}: ${strat.actions}${strat.vision ? ', images' : ''}, ~${strat.context} tokens`)
+    }
     // What the window is, learned while working (context.js); kept in the profile for next time.
     const learned = () => {
       Object.assign(strat, (({ context, contextSure, ratio, reply }) => ({ context, contextSure, ratio, reply }))(strategy(profile, cfg)))
@@ -267,7 +275,7 @@ class App {
     client.onUsage = (used, estimate) => {
       const was = profile.largestAccepted
       const change = learnFromUsage(profile, used, estimate)
-      if (change === 'cut') ui.warn(`${model} silently cut a request to ~${profile.inputLimit} tokens: that's its window here; keeping the conversation within it`)
+      if (change === 'cut') ui.warn(`${client.model} silently cut a request to ~${profile.inputLimit} tokens: that's its window here; keeping the conversation within it`)
       if (change) log('context', `${change}: ${used} tokens counted, ~${estimate} estimated; window now ${strategy(profile, cfg).context}`, { was, largestAccepted: profile.largestAccepted, inputLimit: profile.inputLimit, tokenRatio: profile.tokenRatio })
       if (change) learned()
     }
@@ -277,12 +285,12 @@ class App {
       if (rate) profile.rateCap = { tokens: n, until: Date.now() + RATE_CAP_MS }
       else Object.assign(profile, { inputLimit: Math.min(profile.inputLimit ?? Infinity, n), inputLimitAt: Date.now() })
       learned()
-      ui.warn(rate ? `${provider} takes at most ~${n} tokens a minute on your account; shortening the conversation to fit (for today)` : `${model} takes at most ~${n} tokens per request here; shortening the conversation to fit`)
+      ui.warn(rate ? `${provider} takes at most ~${n} tokens a minute on your account; shortening the conversation to fit (for today)` : `${client.model} takes at most ~${n} tokens per request here; shortening the conversation to fit`)
     }
     // models.dev's published size for the model (a day old at most): used when the server doesn't say
     loadPrices().then(() => {
       const known = limitsOf(provider, client.baseUrl, model) ?? undefined
-      if (JSON.stringify(known) === JSON.stringify(profile.known)) return
+      if (profile.model !== model || JSON.stringify(known) === JSON.stringify(profile.known)) return // (a switched-to model: its own)
       profile.known = known
       if (known && profile.source === 'assumed') profile.source = 'models.dev' // it's listed now
       learned()
@@ -509,7 +517,7 @@ class App {
   modelChoices(typed, start, end) {
     const mine = this.myModels()
     const twice = (m) => mine.filter((t) => t.model === m).length > 1
-    const items = mine.map((t, i) => ({ value: twice(t.model) ? `${t.provider} ${t.model}` : t.model, desc: `${t.provider} · #${i + 1}${i === 0 ? ' · in use' : ''} · ${this.canText(t)}`, start, end }))
+    const items = mine.map((t, i) => ({ value: twice(t.model) ? `${t.provider} ${t.model}` : t.model, desc: this.modelDesc(t, i), start, end }))
     return rank(items, typed).slice(0, 200)
   }
 
@@ -637,6 +645,11 @@ class App {
     return { tools: st.actions === 'tools', images: st.vision, thinking: st.thinking, context: st.context, guessed: p.source === 'assumed' && !p.set }
   }
 
+  // A row of the model lists (the picker, the /select_model suggestions): "openrouter · #1 · in use · tools · 1M".
+  modelDesc(t, i) {
+    return `${t.provider} · #${i + 1}${i === 0 ? ' · in use' : ''} · ${this.canText(t)}`
+  }
+
   // "tools · images · thinking · 1M", for the model lists.
   canText(t) {
     const a = this.abilities(t)
@@ -668,7 +681,7 @@ class App {
       if (!Object.keys(cfg.providers).length && (await this.detectLocal())) return this.session()
       return ui.print(NO_MODELS)
     }
-    const items = mine.map((t, i) => ({ label: t.model, group: t.provider, t, current: i === 0, desc: [i === 0 ? '#1 · in use' : `#${i + 1} · fallback`, this.canText(t)].join(' · ') }))
+    const items = mine.map((t, i) => ({ label: t.model, t, current: i === 0, desc: this.modelDesc(t, i) }))
     const it = await ui.pick('Choose a model (more on /settings)', items, { filter })
     if (it && !it.current) await this.useMine(it.t)
   }

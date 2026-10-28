@@ -21,7 +21,8 @@ export const profilePath = (client) => {
 const PROBE_VERSION = 2
 export const loadProfile = (client) => {
   const p = readJson(profilePath(client), null)
-  return p?.version === PROBE_VERSION ? p : null
+  // another model's (a model list switch once saved the first model's profile under the next one's name)
+  return p?.version === PROBE_VERSION && (!p.model || p.model === client.model) ? p : null
 }
 
 // --- tiny PNG encoder, for the vision probe ---

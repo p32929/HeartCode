@@ -132,10 +132,12 @@ nothing is sent to the model to find out. A model models.dev doesn't know works 
 assumptions, and the user can set it up on the settings page. Models that can't call tools still
 work, in a slower guided mode.
 
-The model in use knows the user's other models and what each can do, and hands a job it can't do
-(see an image, call tools…) to one that can: an attached image goes to a model that sees images, an
-image's path to one through its `agent` tool, and a model without tool calls can hand the task to one
-with them. Their tokens are in `usage`, and each model's in `modelUsage`.
+The model in use knows the user's other models (what each can do, how often it failed this
+session) and works with them through its `agent` tool: it asks a model that can for what it
+can't do itself (a model that can't see asks one that can about a screenshot: "which tiles show a
+chair?"), several at once when there are many images or parts, and a helper that fails is handed to
+the next capable model until one does the job. Their tokens are in `usage`, and each model's in
+`modelUsage`.
 
 ## Setting up a model
 
@@ -176,6 +178,12 @@ Stop the running one with `{"type":"control_request","request_id":"1","request":
 Stdout: one JSON event per line, `system`/`init` (its `tools` include the MCP servers' tools,
 `mcp_servers` says which are `connected`), then `assistant` (text, thinking, `tool_use`),
 `user` (`tool_result`), and a `result` after each message. It runs until stdin closes.
+
+A helper's steps (the `agent` tool: another of the user's models, or the same one, doing a job;
+several can run at once) come as `assistant` and `user` lines too, as Claude Code sends a
+subagent's: `parent_tool_use_id` is the id of the `agent` call they belong to (`null` for the main
+conversation's), and `message.model` says which model it is (`provider/model`). The helper's last
+reply is that `agent` call's `tool_result`.
 
 ## Don't
 

@@ -23,12 +23,13 @@ export const tail = (s, n) => (s.length > n ? '…' + s.slice(-n) : s)
 // Tool output too long for the conversation is saved here (one folder per chat), where read_file
 // and search can read it although it's outside the project.
 export const OUTPUTS = path.join(os.tmpdir(), 'heartcode-outputs')
-export function saveOutput(chatId, name, text) {
+// data: text, or an image's bytes (ext: png…)
+export function saveOutput(chatId, name, data, ext = 'txt') {
   try {
     const dir = path.join(OUTPUTS, String(chatId ?? 'chat'))
     fs.mkdirSync(dir, { recursive: true })
-    const file = path.join(dir, `${Date.now().toString(36)}-${String(name).replace(/[^\w-]/g, '_').slice(0, 60)}.txt`)
-    fs.writeFileSync(file, text)
+    const file = path.join(dir, `${Date.now().toString(36)}-${String(name).replace(/[^\w-]/g, '_').slice(0, 60)}.${ext}`)
+    fs.writeFileSync(file, data)
     return file
   } catch (e) {
     log('tool', `could not save the output: ${e.message}`)
@@ -487,7 +488,8 @@ export function extraTools(s) {
   if (!s.isSub && s.subagent) {
     const team = s.team?.() ?? []
     const model = { type: 'string', description: prompt('agent/tool-agent-model') }
-    out.push({ name: 'agent', description: prompt('agent/tool-agent'), parameters: obj({ description: str, prompt: str, ...(team.length && { model }) }, ['description', 'prompt']) })
+    const images = { type: 'array', items: str, description: prompt('agent/tool-agent-images') }
+    out.push({ name: 'agent', description: prompt('agent/tool-agent'), parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }) }, ['description', 'prompt']) })
   }
   return [...out, ...(s.director && !s.appendSystem ? s.director.toolDefs(s) : [])] // manage (director.js); not when a program gives the instructions (--append-system-prompt)
 }
@@ -628,10 +630,21 @@ async function callMcp(s, server, tool, a, signal) {
   const parts = r.content ?? []
   const text = parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n')
   const images = parts.filter((p) => p.type === 'image' && p.data)
+  // image files the tool says it saved ("Saved screenshot to /…/shot.webp"): as if returned
+  const saved = [...new Set([...text.matchAll(/(?:^|[\s"'`(])((?:\/|~\/)[^\s"'`)]+\.(?:png|jpe?g|gif|webp))\b/gi)].map((m) => m[1].replace(/^~(?=\/)/, os.homedir())))].filter((f) => fs.existsSync(f))
+  if (saved.length) {
+    s.toolImages ??= new Set()
+    for (const f of saved) s.toolImages.add(f) // may be sent to a helper (agent images)
+    if (s.strat?.vision) images.push(...saved.map((f) => ({ data: fs.readFileSync(f).toString('base64'), mimeType: `image/${path.extname(f).slice(1).toLowerCase().replace('jpg', 'jpeg')}`, file: f })))
+  }
   let note = ''
   if (images.length && s.strat?.vision) {
     ;(s.pendingImages ??= []).push(...images.map((p) => `data:${p.mimeType ?? 'image/png'};base64,${p.data}`))
     note = `\n(${images.length} image(s) attached in the next message)`
+  } else if ((images.length || saved.length) && s.team?.().some((t) => t.images)) {
+    // saved, for a model that can see to be asked about (the agent tool's images)
+    const files = [...images.map((p, i) => saveOutput(s.chat?.id, `${tool}-${i + 1}`, Buffer.from(p.data, 'base64'), (p.mimeType ?? 'image/png').split('/')[1].replace('jpeg', 'jpg'))).filter(Boolean), ...saved]
+    note = `\n${prompt('agent/images-unseen', { files: files.join('\n') })}`
   } else if (images.length) note = `\n(${images.length} image(s) not shown: this model can't see images)`
   return `${r.isError ? 'error: ' : ''}${text || '(no text)'}${note}`
 }
@@ -782,11 +795,12 @@ async function applyPatch(s, text) {
 }
 
 // Every tool call goes through the user's PreToolUse and PostToolUse hooks (hooks.js).
-export async function runTool(name, args, s, signal) {
+// id: the tool call's (a helper's steps are sent as its, for other apps to show under it)
+export async function runTool(name, args, s, signal, id) {
   log('tool', name, args)
   const pre = await runHooks(s, 'PreToolUse', { tool_name: name, tool_input: args }, signal)
   if (pre.block) return prompt('agent/hook-blocked-tool', { reason: pre.block })
-  let out = await tool(name, args, s, signal)
+  let out = await tool(name, args, s, signal, id)
   const post = await runHooks(s, 'PostToolUse', { tool_name: name, tool_input: args, tool_response: out }, signal)
   if (post.block) out += `\n\n${prompt('agent/hook-after-tool', { reason: post.block })}`
   log('tool', `${name} result:`, clip(out, 4000))
@@ -822,7 +836,7 @@ export function allowed(s, name) {
   return names.some((n) => s.allowTools.has(n)) || (name === 'mcp' && [...s.allowTools].some((n) => n.startsWith('mcp__')))
 }
 
-async function tool(name, args, s, signal) {
+async function tool(name, args, s, signal, id) {
   if (!name.startsWith('mcp__') && !mcpTarget(s, name)) args = normalize(args) // an MCP tool's arguments are its own
   try {
     const { root } = s
@@ -865,7 +879,7 @@ async function tool(name, args, s, signal) {
       case 'web_fetch':
         return await webTool(s, name, args, signal)
       case 'agent':
-        return await s.subagent(args, signal)
+        return await s.subagent(args, signal, id)
       case 'ask_user':
         return await askUser(s, args)
       case 'skill': {

@@ -127,10 +127,11 @@ export async function runHeadless(app, opts) {
           ...(e.content ? [{ type: 'text', text: e.content }] : []),
           ...e.toolCalls.map((t) => ({ type: 'tool_use', id: t.id, name: t.function.name, input: parseArgs(t.function.arguments) })),
         ]
-        if (e.content) said = true
-        if (content.length) emit({ type: 'assistant', message: { role: 'assistant', model, content }, session_id })
+        if (e.content && !e.parent) said = true
+        // a helper's (agent) steps too, as Claude Code sends a subagent's: parent_tool_use_id is its agent call
+        if (content.length) emit({ type: 'assistant', message: { role: 'assistant', model: e.parent ? e.model : model, content }, parent_tool_use_id: e.parent ?? null, session_id })
       } else if (e.type === 'tool') {
-        emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: e.id, content: e.output, is_error: e.output.startsWith('error') }] }, session_id })
+        emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: e.id, content: e.output, is_error: e.output.startsWith('error') }] }, parent_tool_use_id: e.parent ?? null, session_id })
       }
     }
     if (s.strat.actions === 'tools' && s.mcp?.names.length) await loadMcpTools(s) // their tools are in the list, as in Claude Code's
@@ -165,7 +166,7 @@ export async function runHeadless(app, opts) {
     current = null
     const result = { type: 'result', subtype, is_error: Boolean(error), result: error ?? answer, num_turns: Math.max(1, requests), duration_ms: Date.now() - t0, total_cost_usd: (app.chat.usage?.cost ?? 0) - spent, usage, modelUsage: { [model]: { inputTokens: 0, outputTokens: 0 }, ...byModel }, session_id }
     if (out === 'stream-json') {
-      if (!error && answer && !said) emit({ type: 'assistant', message: { role: 'assistant', model, content: [{ type: 'text', text: answer }] }, session_id }) // guided mode
+      if (!error && answer && !said) emit({ type: 'assistant', message: { role: 'assistant', model, content: [{ type: 'text', text: answer }] }, parent_tool_use_id: null, session_id }) // guided mode
       emit(result)
     } else if (out === 'json') emit(result)
     else if (error) process.stderr.write(`heartcode: ${error}\n`)

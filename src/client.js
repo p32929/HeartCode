@@ -161,9 +161,12 @@ export class Client {
     const r = this.rotation
     if (r && r.next === 'first' && r.at) this.#use(r.list[(r.at = 0)])
   }
+  // onUse(target): the model the next request goes to changed (its abilities and profile follow)
   #use(t) {
+    const changed = this.model !== t.model || this.baseUrl !== normalizeBaseUrl(t.baseUrl)
     Object.assign(this, { baseUrl: normalizeBaseUrl(t.baseUrl), apiKey: t.apiKey, model: t.model, provider: t.provider })
     this.quirks = t.quirks ?? (t.quirks = {})
+    if (changed) this.onUse?.(t)
   }
   // After a failure: go on to the next model? (then it's tried at once)
   #rotate(e, tries) {

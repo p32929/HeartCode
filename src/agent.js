@@ -6,12 +6,37 @@ import { newChat } from './sessions.js'
 import path from 'node:path'
 import { est, Client } from './client.js'
 import { runGuided } from './guided.js'
-import { TOOL_DEFS, PLAN_HIDDEN, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput } from './tools.js'
+import { TOOL_DEFS, PLAN_HIDDEN, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, OUTPUTS } from './tools.js'
 import { loadHooks, runHooks } from './hooks.js'
 import { takeConfigErrors } from './config.js'
 import { c } from './ui.js'
 
 const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
+
+// Images for a helper (the agent tool's "images"), as data: URLs: image URLs (fetched), data: URLs,
+// or files: in the project, saved screenshots (OUTPUTS), or a path the user gave in a message.
+async function loadImages(list, s, signal) {
+  const out = []
+  for (const x of [].concat(list ?? []).map((v) => String(v).trim()).filter(Boolean)) {
+    if (x.startsWith('data:image/')) {
+      out.push(x)
+    } else if (/^https?:\/\//i.test(x)) {
+      const res = await fetch(x, { signal: AbortSignal.any([AbortSignal.timeout(30_000), ...(signal ? [signal] : [])]) })
+      const type = res.headers.get('content-type')?.split(';')[0].trim() ?? ''
+      if (!res.ok || !type.startsWith('image/')) throw new Error(`${x} is not an image (${res.status}${type ? `, ${type}` : ''})`)
+      out.push(`data:${type};base64,${Buffer.from(await res.arrayBuffer()).toString('base64')}`)
+    } else {
+      const abs = path.resolve(s.root, x.replace(/^~(?=\/)/, os.homedir()))
+      const ext = path.extname(abs).slice(1).toLowerCase()
+      if (!MIME[ext]) throw new Error(`${x} is not an image file (png, jpg, gif, webp)`)
+      if (!fs.existsSync(abs)) throw new Error(`${x} does not exist`)
+      const inside = (dir) => abs.startsWith(dir + path.sep)
+      if (!inside(s.root) && !inside(OUTPUTS) && !s.toolImages?.has(abs) && !s.chat.turns.some((t) => t.task.includes(x) || t.task.includes(abs))) throw new Error(`${x} is outside the project; only images in it, saved screenshots and ones the user named can be sent`)
+      out.push(`data:${MIME[ext]};base64,${fs.readFileSync(abs).toString('base64')}`)
+    }
+  }
+  return out
+}
 
 // An image the message names is attached: "@shot.png", or a path anywhere (/Users/me/Downloads/a.png,
 // ~/a.png; dragged in: quoted, or with "\ " for spaces), when the file is there. The path stays in the text.
@@ -157,27 +182,63 @@ export class Session {
   // The agent tool: a helper with a fresh conversation and the same tools (but no helpers of its
   // own, no memory, no director) does one job; its final reply is the tool's result. Its steps show
   // under the main conversation's, its file changes count for /rewind like the main agent's.
-  // ponytail: helpers run one after another; run several at once if waiting on them gets long.
-  // model: another of your models (team) does it, for what this one can't do (see images, call tools…).
-  async subagent(args, signal) {
+  // model: one of your models (this one when left out); images: for it to look at (it must see).
+  // A helper that fails or replies with nothing: the job goes to the next of your models that can
+  // do it, until one does. id: the agent tool call's; the helper's steps go to onEvent (headless,
+  // ACP) as that call's.
+  async subagent(args, signal, id) {
     const task = String(args.prompt ?? args.task ?? '').trim()
     if (!task) return 'error: give the helper its job in "prompt"'
-    let { client, profile, strat } = this
-    const want = String(args.model ?? '').trim()
-    if (want) {
-      const team = this.team?.() ?? []
-      const t = team.find((x) => `${x.provider} ${x.model}` === want) ?? team.find((x) => x.model === want || want.endsWith(` ${x.model}`))
-      if (t) ({ client, profile, strat } = await this.engineFor(t))
-      else if (want !== client.model && !want.endsWith(` ${client.model}`)) return `error: no model "${want}". Yours: ${[client.model, ...team.map((x) => `${x.provider} ${x.model}`)].join(', ')}`
+    let images
+    try {
+      images = await loadImages(args.images, this, signal)
+    } catch (e) {
+      if (e.name === 'AbortError') throw e
+      return `error: ${e.message}`
     }
-    const label = clip(`${client.model}: ${String(args.description ?? '').trim() || task.split('\n')[0]}`, 60)
+    const name = (t) => `${t.provider} ${t.model}`
+    const self = { provider: this.client.provider, model: this.client.model, images: this.strat.vision, self: true }
+    const all = [self, ...(this.team?.() ?? [])]
+    const want = String(args.model ?? '').trim()
+    const first = !want ? self : (all.find((t) => name(t) === want) ?? all.find((t) => t.model === want || want.endsWith(` ${t.model}`)))
+    if (!first) return `error: no model "${want}". Yours: ${all.map(name).join(', ')}`
+    const able = (t) => !images.length || t.images
+    const order = [first, ...all.filter((t) => t !== first)].filter(able)
+    if (!order.length) return 'error: none of your models can see images'
+    const failed = []
+    for (const [i, t] of order.entries()) {
+      let answer = ''
+      try {
+        answer = (await this.#helper(t, task, images, args.description, id, signal))?.trim()
+      } catch (e) {
+        if (e.name === 'AbortError' || signal?.aborted) throw e
+        failed.push(`${t.model}: ${clip(e.message, 150)}`)
+      }
+      if (answer) return t === first ? answer : `(${name(t)} did it${failed.length ? `; before it: ${failed.join('; ')}` : ''})\n\n${answer}`
+      if (failed.length < i + 1) failed.push(`${t.model}: no reply`)
+      this.failures = { ...this.failures, [name(t)]: (this.failures?.[name(t)] ?? 0) + 1 } // shown to the model (Your other models)
+      if (order[i + 1]) this.ui.warn(`${t.model} couldn't do it (${failed.at(-1).slice(t.model.length + 2)}); handing it to ${order[i + 1].model}`)
+    }
+    return `error: none of your models that can do it managed: ${failed.join('; ')}`
+  }
+
+  // One helper on one model (t: this one, or another of yours).
+  async #helper(t, task, images, description, id, signal) {
+    let { client, profile, strat } = this
+    if (!t.self) {
+      ;({ client, profile, strat } = await this.engineFor(t))
+      const was = client.retryIf
+      client.retryIf = (e, attempt) => attempt < 3 && (!was || was(e, attempt)) // then the next model gets the job
+    }
+    const label = clip(`${client.model}: ${String(description ?? '').trim() || task.split('\n')[0]}`, 60)
     const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
     Object.assign(helper, { isSub: true, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
     helper.track = (rel, before) => this.track(rel, before)
-    log('agent', `helper "${label}": ${task}`)
-    const answer = await (strat.actions === 'tools' ? runNative : runGuided)(helper, task, [], signal)
+    if (this.onEvent) helper.onEvent = (e) => this.onEvent({ ...e, parent: id, helper: label })
+    log('agent', `helper "${label}" (${images.length} image(s)): ${task}`)
+    const answer = await (strat.actions === 'tools' ? runNative : runGuided)(helper, task, images, signal)
     log('agent', `helper "${label}" done`, answer)
-    return answer?.trim() || '(the helper finished without a reply)'
+    return answer
   }
 
   // Images for a model that can't see them: another of yours (seer) describes each, for the task.
@@ -309,6 +370,7 @@ const SYSTEM = (s) => {
     prompt('agent/system', { root: s.root, files: '', more: '', caller: Boolean(s.appendSystem) }),
     instructions && prompt('agent/instructions', { instructions }),
     s.memory && prompt('agent/memory', { tags: s.memory.tagSummary() || '(none yet)' }),
+    s.strat.vision && prompt('agent/you-see'), // models that can see often say they can't
     s.mcpInstructions && prompt('agent/mcp-instructions', { instructions: s.mcpInstructions }), // what the MCP servers say about their tools
     s.director && !s.appendSystem && s.director.app.cfg.director !== false && prompt('agent/director'),
     !s.isSub && teamPrompt(s),
@@ -324,7 +386,8 @@ const SYSTEM = (s) => {
 const teamPrompt = (s) => {
   const team = s.team?.() ?? []
   if (!team.length) return ''
-  const can = (t) => [t.tools ? 'tool calls' : 'no tool calls', t.images && 'images', t.thinking && 'thinking', `${Math.round(t.context / 1000)}k context`].filter(Boolean).join(', ')
+  const fails = (t) => s.failures?.[`${t.provider} ${t.model}`] && `failed ${s.failures[`${t.provider} ${t.model}`]}× this session`
+  const can = (t) => [t.tools ? 'tool calls' : 'no tool calls', t.images && 'images', t.thinking && 'thinking', `${Math.round(t.context / 1000)}k context`, fails(t)].filter(Boolean).join(', ')
   const you = [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking'].filter(Boolean).join(', ')
   return prompt('agent/team', { models: team.map((t) => `- ${t.provider} ${t.model}: ${can(t)}`).join('\n'), you })
 }
@@ -542,6 +605,9 @@ async function runNative(s, task, images, signal) {
       log('task', 'the user added while working:', added)
       s.messages.push({ role: 'user', content: prompt('agent/user-added', { text: added.join('\n\n') }) })
     }
+    // the model answering can change mid-message (your model list): the system prompt follows it
+    const now = SYSTEM(s)
+    if (s.messages[0]?.content !== now && (s.messages[0]?.role === 'system' || strat.mergeSystem)) s.messages[0] = { ...s.messages[0], content: now }
     fitMessages(s.messages, budget())
     pairTools(s.messages)
     ui.spinner('thinking')
@@ -575,7 +641,7 @@ async function runNative(s, task, images, signal) {
       res.content = ''
       s.messages[s.messages.length - 1] = { role: 'assistant', content: '', tool_calls: res.toolCalls }
     }
-    s.onEvent?.({ type: 'assistant', content: res.content, reasoning: res.reasoning, toolCalls: res.toolCalls }) // headless output
+    s.onEvent?.({ type: 'assistant', model: `${client.provider}/${client.model}`, content: res.content, reasoning: res.reasoning, toolCalls: res.toolCalls }) // headless output
     if (!res.toolCalls.length && !res.content?.trim()) {
       // Nothing at all (seen after a failed tool call): not an answer. The same request again
       // first (often fine the second time), then asked to go on; three in a row ends the task.
@@ -618,7 +684,7 @@ async function runNative(s, task, images, signal) {
       const args = argsOf(call)
       if (call.function.name !== 'agent' || !args || !allowed(s, 'agent') || res.toolCalls.filter((x) => x.function.name === 'agent').length < 2) continue
       ui.step('agent', clip([args.model && `${args.model}:`, args.description].filter(Boolean).join(' '), 80))
-      together.set(call.id, runTool('agent', args, s, signal))
+      together.set(call.id, runTool('agent', args, s, signal, call.id))
     }
     for (const call of res.toolCalls) {
       const name = call.function.name
@@ -637,7 +703,7 @@ async function runNative(s, task, images, signal) {
                   ? ''
                   : (args.path ?? args.url ?? args.query ?? args.filter ?? args.name ?? '')
       if (name !== 'run_command' && !together.has(call.id)) ui.step(name, clip(detail, 80))
-      const out = together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal) : 'error: the tool arguments were not valid JSON'
+      const out = together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal, call.id) : 'error: the tool arguments were not valid JSON'
       if (name === 'read_file' || name === 'search' || name === 'list_files' || name === 'web_fetch' || name === 'web_search') ui.result(`${out.split('\n').length} lines`)
       else if (name === 'agent' && !out.startsWith('error')) ui.result(`${s.ui.permission === 'plan' ? 'planned' : 'done'}: ${clip(out.split('\n').find((l) => l.trim()) ?? '', 100)}`)
       else if (out.startsWith('error')) ui.result(clip(out, 120))
