@@ -13,7 +13,7 @@ import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { HOME, readJson, readConfig, writeJson } from './config.js'
+import { HOME, readJson, readConfig, writeJson, VERSION } from './config.js'
 import { log } from './log.js'
 import { savedToken, signIn } from './oauth.js'
 
@@ -79,7 +79,7 @@ class Server {
 
   start(signal) {
     this.ready ??= (async () => {
-      const init = () => this.request('initialize', { protocolVersion: '2025-06-18', capabilities: { roots: {} }, clientInfo: { name: 'heartcode', version: '0.1.0' } }, this.url ? 600_000 : 120_000, signal) // remote: time to sign in
+      const init = () => this.request('initialize', { protocolVersion: '2025-06-18', capabilities: { roots: {} }, clientInfo: { name: 'heartcode', version: VERSION } }, this.url ? 600_000 : 120_000, signal) // remote: time to sign in
       let r
       if (this.url) {
         const type = this.cfg.type ?? this.cfg.transport

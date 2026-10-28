@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export const HOME = process.env.HEART_HOME || path.join(os.homedir(), '.heart')
 export const CONFIG_FILE = path.join(HOME, 'config.json')
@@ -15,6 +16,9 @@ export function readJson(file, fallback) {
     return fallback
   }
 }
+
+// HeartCode's version, from package.json (npm version changes it there).
+export const VERSION = readJson(fileURLToPath(new URL('../package.json', import.meta.url)), {}).version ?? '0.0.0'
 
 // A config file the user writes (hooks.json, mcp.json): one that doesn't parse is skipped, but
 // said (takeConfigErrors, shown before the next message), never silently ignored.

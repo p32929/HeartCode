@@ -9,9 +9,10 @@
 //   <!-- … -->                             a note right under the heading; never sent
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { HOME } from './config.js'
 
-const BUILTIN = new URL('../prompts/', import.meta.url).pathname
+const BUILTIN = fileURLToPath(new URL('../prompts/', import.meta.url))
 let project = null
 const cache = new Map()
 

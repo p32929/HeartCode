@@ -2,7 +2,7 @@
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { Client } from '../src/client.js'
-import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, DEFAULT_MODEL } from '../src/config.js'
+import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, DEFAULT_MODEL, VERSION } from '../src/config.js'
 import { probe, loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
 import { learnFromUsage, RATE_CAP_MS } from '../src/context.js'
 import { Session, transcript } from '../src/agent.js'
@@ -28,7 +28,6 @@ import { Tabs } from '../src/tabs.js'
 import { startSettings } from '../src/settings.js'
 import { RESETS, reset, resetPaths, resetCode } from '../src/reset.js'
 
-const VERSION = '0.1.0'
 const LOCAL_SERVERS = ['http://localhost:11434/v1', 'http://localhost:1234/v1', 'http://localhost:8080/v1']
 
 const HELP = `${c.magenta('♥')} ${c.bold('HeartCode')} — a coding CLI for any local or OpenAI-compatible model

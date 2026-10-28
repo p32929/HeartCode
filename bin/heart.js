@@ -15,6 +15,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const fail = (msg) => {
   console.error(msg)
@@ -73,5 +74,5 @@ if (!process.env.HEART_LOG && !process.env.HEART_LOG_DIR && !args.some((a) => ['
   process.env.HEART_LOG_RUN = logOn ? 'on' : 'off' // how it starts
 }
 
-process.argv = [process.argv[0], new URL('./heartcode.js', import.meta.url).pathname, ...args]
+process.argv = [process.argv[0], fileURLToPath(new URL('./heartcode.js', import.meta.url)), ...args]
 await import('./heartcode.js')
