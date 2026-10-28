@@ -88,6 +88,20 @@ function indexOf(t) {
   return index
 }
 
+// A "…-latest" name models.dev doesn't list: the newest dated version it does list
+// (magistral-small-latest → magistral-small-2509), its entries at every provider. [] if none.
+function newestOf(name) {
+  const base = /^(.+?)[-_.:]?latest$/i.exec(name)?.[1]
+  if (!base) return []
+  const re = new RegExp(`^[a-z]{0,12}${norm(base)}(\\d{4,8})$`) // a date or version after the name: 2509, 20250929; a vendor before it (mistral.magistral-small-2509)
+  let best = null
+  for (const [k, list] of indexOf(table)) {
+    const d = re.exec(k)?.[1]
+    if (d && (!best || Number(d) > Number(best.d))) best = { d, list }
+  }
+  return best ? [...best.list].sort((a, b) => a.n - b.n) : []
+}
+
 // What models.dev says of a model: { context, output (tokens), tools, thinking, images }, or null. Found by its name
 // however it's written (google/gemini-2.5-flash, models/gemini-2.5-flash, gpt-oss:120b ≈
 // gpt-oss-120b): at this provider first; else, among all that list it, the size most say (a
@@ -98,7 +112,8 @@ export function limitsOf(provider, baseUrl, model) {
   const want = new Set([model, model.replace(/^models\//, ''), last(model), last(model).replace(/:(free|beta|extended|nitro|floor|online|cloud)$/, '').replace(/-cloud$/, '')].map(norm))
   const own = ownBy(provider, baseUrl)
   const found = { own: [], all: [] }
-  const hits = [...new Set([...want].flatMap((w) => indexOf(table).get(w) ?? []))].sort((a, b) => a.n - b.n)
+  let hits = [...new Set([...want].flatMap((w) => indexOf(table).get(w) ?? []))].sort((a, b) => a.n - b.n)
+  if (!hits.length) hits = newestOf(last(model)) // "magistral-small-latest" by its dated names only
   for (const { entry, info } of hits) {
     const it = { ...info.limit, ...(info.can ?? { tools: true, thinking: false, images: false }) }
     found.all.push(it)

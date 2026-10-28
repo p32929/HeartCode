@@ -145,7 +145,7 @@
 
   /* Providers & models: every provider's models on the left (pick one), yours in order on the right;
      both fill the screen's height and scroll inside */
-  .work { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 20px; }
+  .work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; } /* the catalog and your models, half and half */
   .work > .card { padding: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
   .cat-top { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
   .cat-top input { flex: 1; min-width: 0; }
@@ -206,10 +206,10 @@
   .cat-note { padding: 12px 16px; color: var(--muted); font-size: 12.5px; }
   .byname { display: flex; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
   .byname input { height: 32px; font-family: var(--mono); font-size: 12.5px; }
-  /* two lines' room, never more: a test's progress doesn't move the cards below */
-  .olist .test { font-size: 11.5px; line-height: 1.45; margin-top: 3px; color: var(--faint); display: flex; align-items: flex-start; gap: 6px; height: calc(2 * 1.45em + 2px); }
-  .olist .test .msg { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-  .olist .test .spin { margin-top: 3px; flex: none; }
+  /* one line: what models.dev says (cut short, all of it on hover), its buttons on the right */
+  .olist .test { font-size: 12px; color: var(--faint); display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .olist .test .msg { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .olist .test .spin { flex: none; }
   .olist .test button { flex: none; }
   .olist .test.ok { color: var(--ok); }
   .olist .test.warn { color: var(--accent); }
@@ -221,20 +221,19 @@
   .olist .test.failed { color: var(--err); }
   .olist .test.testing, .olist .test.waiting { color: var(--accent); }
   .olist .test button { padding: 0 7px; font-size: 11px; }
-  .olist .tried { font-size: 11.5px; line-height: 1.45; margin-top: 2px; overflow-wrap: anywhere; }
-  .olist .tried.ok { color: var(--ok); }
-  .olist .tried.bad { color: var(--err); }
-  .olist .tried.going { color: var(--accent); }
   .spin { width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .mine-top { padding: 16px 18px 6px; }
   .mine-title { display: flex; align-items: center; justify-content: space-between; gap: 6px 8px; flex-wrap: wrap; }
   .mine-title h2 { margin: 0 0 6px; flex: 1; white-space: nowrap; }
   .mine-title button { white-space: nowrap; }
-  .olist { list-style: none; margin: 0; padding: 6px 12px 12px; flex: 1; overflow-y: auto; }
-  .olist li { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; background: var(--panel); }
-  .olist li.in { border-color: var(--brand); background: var(--brand-soft); }
-  .olist li.next { border-style: dashed; background: none; color: var(--faint); font-size: 12.5px; justify-content: center; padding: 14px 10px; }
+  /* your models as a table: a header, then one line a model */
+  .ohead, .olist li.in { display: grid; grid-template-columns: 14px 30px minmax(0, 1.7fr) minmax(0, 0.6fr) minmax(0, 1.5fr) 26px; align-items: center; column-gap: 8px; padding: 7px 16px; }
+  .ohead { font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding-top: 8px; padding-bottom: 8px; }
+  .olist { list-style: none; margin: 0; padding: 0; flex: 1; overflow-y: auto; }
+  .olist li { border-bottom: 1px solid var(--line); background: var(--panel); font-size: 13px; }
+  .olist li.in:first-child { background: var(--brand-soft); }
+  .olist li.next { border-bottom: 0; background: none; color: var(--faint); font-size: 12.5px; text-align: center; padding: 14px 10px; }
   .olist li.in { cursor: grab; user-select: none; transition: transform .16s ease, box-shadow .16s ease; position: relative; }
   .olist.sorting li.in { transition: transform .16s ease; }
   .olist li.in.lifted { transition: none; z-index: 2; cursor: grabbing; box-shadow: 0 10px 28px rgba(0, 0, 0, .35), 0 0 0 2px var(--brand); }
@@ -247,8 +246,8 @@
   .mt-top .chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--brand); background: var(--brand-soft); border-radius: 999px; padding: 1px 4px 1px 9px; margin: 2px 4px 2px 0; color: var(--text); font-size: 12.5px; }
   .mt-top .chip button { border: 0; background: none; padding: 0 4px; font-size: 12px; color: var(--muted); }
   .mt-scroll { overflow-x: auto; }
-  .mt { min-width: 1080px; }
-  .mt-h, .mtable li { display: grid; grid-template-columns: 16px 30px minmax(170px, 3fr) minmax(80px, 1.2fr) 76px 82px 56px 62px 54px 60px 64px minmax(200px, 2fr) 30px; align-items: center; column-gap: 8px; padding: 8px 18px; }
+  .mt { min-width: 1090px; }
+  .mt-h, .mtable li { display: grid; grid-template-columns: 16px 28px minmax(150px, 3fr) minmax(70px, 1.1fr) 66px 66px 42px 60px 50px 54px 60px minmax(166px, 1.5fr) minmax(120px, 1.3fr) 28px; align-items: center; column-gap: 6px; padding: 8px 16px; }
   .mt-h { border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); padding-top: 10px; padding-bottom: 10px; }
   .mt-h button { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; white-space: nowrap; }
   .mt-h button:hover { color: var(--text); }
@@ -270,13 +269,19 @@
   .mtable .src { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
   .mtable .src.warn { color: var(--accent); }
   .mtable button { padding: 1px 7px; font-size: 11.5px; }
+  .mtable .try { font-size: 12px; color: var(--faint); display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .mtable .try .msg { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mtable .try.ok { color: var(--ok); }
+  .mtable .try.bad { color: var(--err); }
+  .mtable .try.going { color: var(--accent); }
   .mt-empty { padding: 28px 18px; color: var(--muted); }
   .olist .grip { cursor: grab; color: var(--faint); padding: 0 2px; user-select: none; }
   .olist .n { font-weight: 800; color: var(--brand); min-width: 24px; }
-  .olist .what { flex: 1; min-width: 0; }
-  .olist .m { font-family: var(--mono); font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
-  .olist .p { color: var(--muted); font-size: 12px; }
+  .olist .m { font-family: var(--mono); font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .olist .p { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .olist .p.use { color: var(--brand); font-weight: 600; }
   .olist button { padding: 2px 8px; font-size: 12px; }
+  .olist button.danger { padding: 1px 6px; }
   .mine-rules { border-top: 1px solid var(--line); padding: 4px 18px 16px; }
   .mine-rules .hint { min-height: 2.9em; } /* the hints differ in length: the next setting stays put */
   .mine-empty { padding: 30px 22px; text-align: center; color: var(--muted); }
@@ -800,28 +805,31 @@ function testLine(t) {
   const edit = (label) => h('button', { className: 'small', textContent: label, onclick: (e) => (e.stopPropagation(), openSetup(t)) })
   const [cls, text, action] =
     !x ? ['none', 'looking it up in models.dev…', null]
-      : x.source === 'assumed' ? ['warn', 'not in models.dev: set up what it can do', [retry(t), edit('Set it up')]]
+      : x.source === 'assumed' ? ['warn', 'not in models.dev', edit('Set up')] // its Retry: on the Your models page, and Retry all
       : ['ok', `✓ ${testedText(x)} · ${Object.keys(x.set ?? {}).length ? 'yours' : FROM[x.source]}`, edit('Edit')]
-  return h('div', { className: 'test ' + cls }, h('span', { className: 'msg', textContent: text }), action)
+  const about = x?.source === 'assumed' ? "not in models.dev: Retry, or set up what it can do" : text
+  return h('div', { className: 'test ' + cls }, h('span', { className: 'msg', textContent: text, title: about }), action)
 }
 
 // Test: one short message to the model, to see that it really answers (the key, access to it, its
 // name, the server). The result stays under it until the page is reloaded.
 const TRIES = {} // "provider/model" → { going } | { ok, ms, reply } | { ok: false, error }
 const keyOf = (t) => `${t.provider}/${t.model}`
-function triedLine(t) {
+// The Works? cell: the last result (cut short, all of it on hover) and Test.
+function triedCell(t) {
   const r = TRIES[keyOf(t)]
-  if (!r) return null
-  const secs = r.ms != null ? ` · ${(r.ms / 1000).toFixed(1)}s` : ''
-  const [cls, text] = r.going ? ['going', 'testing: sending it a short message…'] : r.ok ? ['ok', `✓ works: it answered "${r.reply}"${secs}`] : ['bad', `✗ doesn't work: ${r.error}${secs}`]
-  return h('div', { className: 'tried ' + cls, textContent: text })
+  const secs = r?.ms != null ? ` · ${(r.ms / 1000).toFixed(1)}s` : ''
+  const [cls, text, about] = !r ? ['', 'not tested', 'send it a short message to see that it really answers (your key, access to it, its name)']
+    : r.going ? ['going', 'testing…', 'sending it a short message']
+    : r.ok ? ['ok', `✓ ${(r.ms / 1000).toFixed(1)}s`, `works: it answered "${r.reply}"${secs}`]
+    : ['bad', `✗ ${r.status ?? (/nothing/.test(r.error) ? 'empty' : /within/.test(r.error) ? 'no answer' : 'failed')}`, `doesn't work: ${r.error}${secs}`] // the reason on hover
+  return h('div', { className: 'try ' + cls },
+    h('span', { className: 'msg', textContent: text, title: about }),
+    h('button', { className: 'small', textContent: 'Test', disabled: Boolean(r?.going), title: 'send it a short message to see that it really answers', 'aria-label': `test ${t.model}`, onclick: () => tryModel(t) }))
 }
 function showTried(t) {
-  const li = document.querySelector(`#inuse li[data-key="${CSS.escape(keyOf(t))}"]`)
-  if (!li) return
-  li.querySelector('.tried')?.remove()
-  const line = triedLine(t)
-  if (line) li.querySelector('.what').append(line)
+  document.querySelector(`#mt li[data-key="${CSS.escape(keyOf(t))}"] .try`)?.replaceWith(triedCell(t))
+  if (SORT.some((x) => x.key === 'works') && !TRIES[keyOf(t)]?.going) drawMine(S) // sorted by it: its place may change
 }
 async function tryModel(t) {
   TRIES[keyOf(t)] = { going: true }
@@ -837,13 +845,35 @@ async function tryAll() {
   testingAll = true
   const list = [...(S?.order ?? [])]
   let good = 0
-  toast(`testing ${list.length} model${list.length === 1 ? '' : 's'}, one at a time…`)
+  toast(`testing ${list.length} model${list.length === 1 ? '' : 's'}…`)
+  // several at once (6), but at most 2 per provider: more would trip its rate limit and show
+  // working models as failing
+  for (const t of list) TRIES[keyOf(t)] = { going: true }
+  list.forEach(showTried)
+  const queue = [...list]
+  const busy = {}
+  const worker = async () => {
+    while (queue.length) {
+      const i = queue.findIndex((t) => (busy[t.provider] ?? 0) < 2)
+      if (i === -1) {
+        await new Promise((r) => setTimeout(r, 100)) // every waiting one's provider is busy
+        continue
+      }
+      const [t] = queue.splice(i, 1)
+      busy[t.provider] = (busy[t.provider] ?? 0) + 1
+      try {
+        if ((await tryModel(t)).ok) good++
+      } finally {
+        busy[t.provider]--
+      }
+    }
+  }
   try {
-    for (const t of list) if ((await tryModel(t)).ok) good++
+    await Promise.all(Array.from({ length: Math.min(6, list.length) }, worker))
   } finally {
     testingAll = false
   }
-  toast(`${good} of ${list.length} work${good === list.length ? '' : `; ${list.length - good} don't (see under each)`}`, good < list.length)
+  toast(`${good} of ${list.length} work${good === list.length ? '' : `; ${list.length - good} don't (Works? says why, on hover)`}`, good < list.length)
 }
 
 // models.dev looked up again: one model (its Retry), or all of yours (Retry all)
@@ -964,20 +994,18 @@ function drawProviders(s) {
         h('h2', { textContent: 'Your models' }),
         h('button', { className: 'small', textContent: 'Table', style: order.length ? '' : 'visibility:hidden', title: 'all of them in a table, to compare and sort', onclick: () => (location.hash = 'models') }),
         h('button', { className: 'small', textContent: 'Retry all', title: 'look all of them up in models.dev again', style: order.length ? '' : 'visibility:hidden', onclick: () => lookUp() }),
-        h('button', { className: 'small', textContent: 'Test all', title: 'send each a short message, one at a time, to see which really answer', style: order.length ? '' : 'visibility:hidden', onclick: () => tryAll() }),
         h('button', { className: 'small danger', textContent: 'Remove all', title: 'take every model off this list', style: order.length ? '' : 'visibility:hidden', onclick: () => confirm(`Take all ${order.length} model${order.length === 1 ? '' : 's'} off your list? HeartCode then has none to use until you choose one. (They stay under their providers.)`) && saveOrder([], 'all removed: no model chosen now') })),
       h('p', { className: 'sub', style: 'margin:0', textContent: order.length > 1 ? 'HeartCode uses #1. If it fails, it tries #2, then #3… and round again. Drag to change the order.' : order.length ? `HeartCode uses this one. Click more ${side} to add fallbacks: tried, in order, when one fails.` : `The models HeartCode uses, in the order it tries them. Click one ${side} to start.` })),
+    order.length ? h('div', { className: 'ohead' }, h('span'), h('span', { textContent: '#' }), h('span', { textContent: 'Model' }), h('span', { textContent: 'Provider' }), h('span', { textContent: 'What it can do' }), h('span')) : null,
     order.length ? h('ol', { className: 'olist' }, order.map((t, i) => h('li', {
         className: 'in', 'data-key': `${t.provider}/${t.model}`, title: order.length > 1 ? 'Drag to move it (or Alt+↑ / Alt+↓)' : '',
         onkeydown: (e) => e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && (e.preventDefault(), move(i, Math.max(0, Math.min(order.length - 1, i + (e.key === 'ArrowUp' ? -1 : 1))))),
       },
-      order.length > 1 ? h('span', { className: 'grip', textContent: '⋮⋮', title: 'drag to reorder', 'aria-hidden': 'true' }) : null,
-      h('span', { className: 'n', textContent: `#${i + 1}` }),
-      h('div', { className: 'what' },
-        h('div', { className: 'm', textContent: t.model }),
-        h('div', { className: 'p', textContent: `${t.provider} · ${i === 0 ? 'in use' : 'fallback'}` }),
-        testLine(t), triedLine(t)),
-      h('button', { textContent: 'Test', title: 'send it a short message to see that it really answers (your key, access to it, its name)', 'aria-label': `test ${t.model}`, onclick: (e) => (e.stopPropagation(), tryModel(t)) }),
+      h('span', { className: 'grip', textContent: '⋮⋮', title: 'drag to reorder', 'aria-hidden': 'true', style: order.length > 1 ? '' : 'visibility:hidden' }),
+      h('span', { className: 'n', textContent: `#${i + 1}`, title: i === 0 ? 'in use: the one HeartCode uses' : 'a fallback: tried, in order, when the ones above fail' }),
+      h('span', { className: 'm', textContent: t.model, title: t.model }),
+      h('span', { className: 'p' + (i === 0 ? ' use' : ''), textContent: t.provider, title: `${t.provider}${i === 0 ? ': in use' : ''}` }),
+      testLine(t),
       h('button', { className: 'danger', textContent: '✕', title: 'take it off the list', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) })),
       ), h('li', { className: 'next', textContent: `#${order.length + 1} · click a model ${side} to add it here (a fallback)` }))
       : h('div', { className: 'mine-empty' }, h('b', { textContent: 'No model chosen yet' }), `Click a model ${side}: it becomes #1, the one HeartCode uses.`),
@@ -1169,6 +1197,7 @@ const COLS = {
   images: { label: 'Images', get: (t) => can(t).images },
   input: { label: 'In $/M', how: 'cheap', get: (t) => t.price?.input ?? null },
   output: { label: 'Out $/M', how: 'cheap', get: (t) => t.price?.output ?? null },
+  works: { label: 'Works?', get: (t) => { const r = TRIES[keyOf(t)]; return !r || r.going ? 1 : r.ok ? 2 : 0 } }, // tested and working first; not tested; not working
 }
 let SORT = (() => {
   try {
@@ -1204,7 +1233,7 @@ function sorted(order) {
   }
   return order.map((t, i) => ({ t, i })).sort((a, b) => SORT.reduce((r, s) => r || cmp(a.t, b.t, s), 0) || a.i - b.i).map((x) => x.t)
 }
-const dirText = (key, dir) => (COLS[key].how === 'text' ? (dir === 'up' ? 'A→Z' : 'Z→A') : COLS[key].how === 'cheap' ? (dir === 'up' ? 'cheapest first' : 'priciest first') : dir === 'down' ? 'most first' : 'least first')
+const dirText = (key, dir) => (key === 'works' ? (dir === 'down' ? 'working first' : 'not working first') : COLS[key].how === 'text' ? (dir === 'up' ? 'A→Z' : 'Z→A') : COLS[key].how === 'cheap' ? (dir === 'up' ? 'cheapest first' : 'priciest first') : dir === 'down' ? 'most first' : 'least first')
 function drawMine(s) {
   const order = s.order
   $('n-mine').textContent = order.length || ''
@@ -1245,10 +1274,11 @@ function drawMine(s) {
         : order.length > 1 ? 'In your order: HeartCode uses #1, then the next when one fails. Drag a row to move it, or click a column to sort.' : ''),
       SORT.length ? h('button', { className: 'small', textContent: 'Clear sort', onclick: () => setSort([]) }) : null,
       SORT.length ? h('button', { className: 'small primary', textContent: same ? 'This is your order' : 'Use this order', disabled: same, onclick: () => keep(view) }) : null,
-      order.length ? h('button', { className: 'small', textContent: 'Retry all', title: 'look all of them up in models.dev again', onclick: () => lookUp() }) : null),
+      order.length ? h('button', { className: 'small', textContent: 'Retry all', title: 'look all of them up in models.dev again', onclick: () => lookUp() }) : null,
+      order.length ? h('button', { className: 'small', textContent: 'Test all', title: 'send each a short message, several at once (2 per provider at most), to see which really answer', onclick: () => tryAll() }) : null),
     order.length
       ? h('div', { className: 'mt-scroll' }, h('div', { className: 'mt' },
-          h('div', { className: 'mt-h' }, h('span'), h('span', { textContent: '#' }), head('model'), head('provider'), head('context', true), head('abilities', true), head('tools'), head('thinking'), head('images'), head('input', true), head('output', true), h('span', { textContent: 'From' }), h('span')),
+          h('div', { className: 'mt-h' }, h('span'), h('span', { textContent: '#' }), head('model'), head('provider'), head('context', true), head('abilities', true), head('tools'), head('thinking'), head('images'), head('input', true), head('output', true), h('span', { textContent: 'From' }), head('works'), h('span')),
           h('ol', { className: 'mtable' + (order.length < 2 ? '' : ' drag') }, view.map((t) => {
             const c = can(t)
             const ctx = COLS.context.get(t)
@@ -1263,6 +1293,7 @@ function drawMine(s) {
               h('span', { className: 'num', textContent: t.price?.input != null ? usd(t.price.input) : '–' }),
               h('span', { className: 'num', textContent: t.price?.output != null ? usd(t.price.output) : '–' }),
               src(t),
+              triedCell(t),
               h('button', { className: 'danger', textContent: '✕', title: 'take it off the list', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) }))
           }))))
       : h('div', { className: 'mt-empty' }, 'No models in your list yet. ', h('a', { href: '#providers', textContent: 'Choose some under Providers & models' }), '.'))
