@@ -184,11 +184,33 @@ export class Client {
     this.#next(why)
     return true
   }
-  #next(why) {
+  #next(why, pick) {
     const r = this.rotation
-    r.at = (r.at + 1) % r.list.length
+    r.at = pick ? pick() : (r.at + 1) % r.list.length
     log('rotate', `${why} → ${r.list[r.at].provider} · ${r.list[r.at].model}`)
     this.#use(r.list[r.at])
+  }
+  // Which model of the list to go on to after this one failed, for one request (tried: the places
+  // tried, down: the providers that answered with an error, 400 or above). A provider that answered
+  // with an error isn't asked again through its next model: the next one is from another provider.
+  // When every provider has failed, the models not tried yet, in order; when all have been tried,
+  // simply the next one (round again).
+  #pick(e, tried, down) {
+    const r = this.rotation
+    tried.add(r.at)
+    if (e?.status >= 400) down.add(r.list[r.at].provider)
+    const n = r.list.length
+    const after = (ok) => {
+      for (let k = 1; k <= n; k++) if (ok((r.at + k) % n)) return (r.at + k) % n
+      return -1
+    }
+    let i = after((i) => !tried.has(i) && !down.has(r.list[i].provider))
+    if (i < 0) i = after((i) => !tried.has(i))
+    if (i < 0) {
+      tried.clear() // all tried: round again
+      i = (r.at + 1) % n
+    }
+    return i
   }
   // A new message: back to #1 (unless it stays on the one that worked)
   newMessage() {
@@ -203,11 +225,11 @@ export class Client {
     if (changed) this.onUse?.(t)
   }
   // After a failure: go on to the next model? (then it's tried at once)
-  #rotate(e, tries) {
+  #rotate(e, tries, pick) {
     const r = this.rotation
     if (!r) return false
     if (!(r.on === 'any' || (r.on === 'failure' && (outage(e) || unusable(e))) || (r.on === 'retries' && (tries >= r.retries || unusable(e))))) return false
-    r.at = (r.at + 1) % r.list.length
+    r.at = pick ? pick() : (r.at + 1) % r.list.length
     log('rotate', `${e.message.slice(0, 200)} → ${r.list[r.at].provider} · ${r.list[r.at].model}`)
     this.#use(r.list[r.at])
     return true
@@ -284,6 +306,8 @@ export class Client {
   // The server's own entries for its models ({ id, owned_by, context_length, pricing… }, as it sends them).
   async modelEntries(timeout = 10_000) {
     const data = await this.#json(this.baseUrl + '/models', undefined, timeout)
+    // { result: [...] } (Cloudflare's shape): there the id is an internal one and the name is the model's
+    if (Array.isArray(data.result)) return data.result.filter((m) => m?.name).map((m) => ({ ...m, id: m.name }))
     return (data.data ?? data.models ?? []).filter((m) => m && (m.id ?? m.name))
   }
 
@@ -399,6 +423,8 @@ export class Client {
     let round = 0 // models tried since the last wait (a whole round of them failing: a short pause)
     let hard = true // every failure in this round was one that waiting can't fix (see outage)
     let refusedBy = 0 // models that refused this request (a bad request), tried in turn
+    const tried = new Set() // places in the model list tried for this request
+    const down = new Set() // providers that answered it with an error (400 or above): their other models are skipped
     for (let attempt = 0; ; attempt++) {
       try {
         const r = await this.#timed(body, { ...opts, once: true })
@@ -415,7 +441,7 @@ export class Client {
         // conversation holds from another model). Two more at most, then it stops.
         if (!outage(e) && !unusable(e) && this.rotation && this.rotation.on !== 'any' && refusedBy < Math.min(2, this.rotation.list.length - 1)) {
           refusedBy++
-          this.#next(`refused (${e.status})`)
+          this.#next(`refused (${e.status})`, () => this.#pick(e, tried, down))
           this.onRetry(e, 0, attempt + 1, this.target)
           continue
         }
@@ -426,7 +452,7 @@ export class Client {
         if (!outage(e) && !(unusable(e) && this.rotation) && this.rotation?.on !== 'any') throw e
         hard &&= !outage(e)
         tries++
-        if (this.#rotate(e, tries)) {
+        if (this.#rotate(e, tries, () => this.#pick(e, tried, down))) {
           tries = 0
           // ponytail: a 1s pause after a whole round fails (no connection at all: not thousands of
           // requests a minute); the user chose "round again at once"

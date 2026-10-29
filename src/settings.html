@@ -1254,7 +1254,7 @@ function drawProviders(s) {
   // left: every provider's models, A to Z; one click adds it (the first one becomes #1). Built
   // again only when what it lists changes (a provider, its models, the search); a change to your
   // list only updates the rows it touches (markCatalog), so the list stays where you scrolled it.
-  const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + (MODELS[p.name]?.loading ? 'loading' : '')), modelQuery.trim(), catSort])
+  const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + ((MODELS[p.name] ?? { loading: true }).loading ? 'loading' : '')), modelQuery.trim(), catSort])
   // every provider's list at once: on when all are
   const allOn = s.providers.length > 0 && s.providers.every((p) => p.list)
   put($('lists-all'), [sw({ checked: allOn, 'aria-label': "load every provider's model list", onchange: (e) => act('/api/provider/list', { on: e.target.checked }, `every provider's model list ${e.target.checked ? 'on' : 'off'}`) }), 'Load all lists'])

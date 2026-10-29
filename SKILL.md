@@ -55,7 +55,9 @@ reached has an `error` and is skipped; the command still exits `0`.
 a lost connection, or an error page from a proxy in front of the provider is waited out and tried
 again (or handed to the next model in the list), up to `--max-retries` (10). With the default
 list, a model that can't be used (a wrong key, no access to it, a name the server doesn't know:
-401, 403, 404) also makes way for the next one, and so does one that keeps replying with nothing.
+401, 403, 404) also makes way for the next one, and so does one that keeps replying with nothing. When a
+provider answers with an error (status 400 or above), the next model tried is from another
+provider; that provider's other models are tried only after every provider has had a go.
 The run stops with that error and exit code `1` when every model in the list fails that way, or
 when a single model (`-m <model>`) does. A request a server refuses (400) is sent as it is to two
 more models of the list at most, then the run stops (unless the user set the fallback rule to "at

@@ -427,7 +427,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
       if (!p) throw new Error(`no provider "${name}"`)
       if (p.list === false) return { models: [], details: {}, off: true }
       const lists = readJson(LISTS, {})
-      let saved = lists[name]?.baseUrl === p.baseUrl ? lists[name] : null
+      let saved = lists[name]?.baseUrl === p.baseUrl && lists[name].models?.length ? lists[name] : null // an empty one: asked again
       if (!saved) {
         const entries = await new Client({ baseUrl: p.baseUrl, apiKey: p.apiKey }).modelEntries()
         const num = (...xs) => xs.map(Number).find((x) => x > 0)
