@@ -76,9 +76,12 @@ function fromFile() {
 // Any other model given for a run (-m, HEART_MODEL, a URL of its own) is that model alone: fixed.
 export const DEFAULT_MODEL = 'default'
 
+// providers by name, A to Z: every list of them (settings page, `heart providers`, pickers) follows
+export const byName = (providers) => Object.fromEntries(Object.entries(providers ?? {}).sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' })))
+
 export function loadConfig(flags = {}) {
   const file = fromFile()
-  const cfg = { providers: file.providers, provider: file.provider, model: file.model, adhoc: null }
+  const cfg = { providers: byName(file.providers), provider: file.provider, model: file.model, adhoc: null }
   for (const k of SETTINGS) cfg[k] = flags[k] ?? file[k]
   if (cfg.context) cfg.context = Number(cfg.context)
 
@@ -100,7 +103,7 @@ export function loadConfig(flags = {}) {
 }
 
 export function saveConfig(cfg) {
-  const providers = { ...cfg.providers }
+  const providers = byName(cfg.providers)
   if (cfg.adhoc) delete providers[cfg.adhoc]
   const keep = cfg.adhoc && cfg.provider === cfg.adhoc ? fromFile() : null // the run-only provider isn't saved as current
   const out = { providers, provider: keep ? keep.provider : cfg.provider, model: keep ? keep.model : cfg.model }

@@ -35,6 +35,7 @@
   nav a.on { background: var(--brand-soft); color: var(--text); font-weight: 600; }
   nav a .ic { width: 18px; text-align: center; opacity: .8; }
   nav a .count { margin-left: auto; font-size: 12px; color: var(--faint); font-weight: normal; }
+  .using:empty { visibility: hidden; } /* until your settings are in */
   .using { margin: auto 4px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 12.5px; background: var(--panel2); }
   .using .k { color: var(--faint); display: block; }
   .using b { display: block; font-family: var(--mono); font-size: 12.5px; word-break: break-all; margin: 2px 0; }
@@ -150,9 +151,15 @@
      both fill the screen's height and scroll inside */
   .work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; } /* the catalog and your models, half and half */
   .work > .card { padding: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-  .cat-top { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
-  .cat-top input { flex: 1; min-width: 0; }
-  .cat-top button { flex: none; }
+  .cat-top { padding: 14px 16px 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+  .cat-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .cat-row input { flex: 1; min-width: 160px; }
+  .cat-row select { flex: none; width: auto; padding-right: 30px; }
+  .cat-row button { flex: none; height: 28px; }
+  .cat-row button.ghost { padding: 3px 8px; }
+  .cat-row button.ghost:hover:not(:disabled) { color: var(--text); border-color: transparent; }
+  .cat-group { display: flex; align-items: center; gap: 6px; }
+  .cat-group.end { margin-left: auto; }
   .prov-h { cursor: pointer; }
   .prov-h .fold { border: 0; background: none; color: var(--muted); padding: 2px 4px; font-size: 16px; line-height: 1; transition: transform .15s; align-self: flex-start; margin-top: 1px; }
   .prov-h .fold:hover { color: var(--text); }
@@ -169,13 +176,18 @@
   .mrow:hover { background: var(--hover); }
   .mrow.flash { animation: flash 1.6s ease-out; }
   @keyframes flash { from { background: var(--brand-soft); box-shadow: inset 3px 0 0 var(--brand); } to { background: none; box-shadow: none; } }
-  .mrow .id { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+  .mrow .id { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rows > .mrow, .rows > .mwrap { height: 56px; } /* one height: a long list only draws what's in view */
+  .mwrap .mrow { height: 100%; }
+  .mrow .can { display: block; margin-top: 2px; color: var(--muted); font-family: system-ui, sans-serif; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
   .mrow .add { color: var(--accent); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
   .mrow.taken .id { color: var(--muted); }
   .mwrap { display: flex; break-inside: avoid; border-bottom: 1px solid var(--line); }
   .mwrap .mrow { border-bottom: 0; }
   .mwrap .forget { border: 0; background: none; color: var(--faint); padding: 0 12px; }
   .mwrap .forget:hover { color: var(--err); }
+  .cat-top .listsw { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); white-space: nowrap; margin-right: 6px; }
+  .cat-top .listsw .sw { margin-top: 0; }
   .prov-h .listsw { margin-top: 8px; width: fit-content; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
   .prov-h .listsw .sw { margin-top: 0; }
   .log-opts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; }
@@ -211,7 +223,7 @@
   .byname input { height: 32px; font-family: var(--mono); font-size: 12.5px; }
   /* one line: what models.dev says (cut short, all of it on hover), its buttons on the right */
   .olist .test { font-size: 12px; color: var(--faint); display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .olist .test .msg { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .olist .test .msg { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
   .olist .test .spin { flex: none; }
   .olist .test button { flex: none; }
   .olist .test.ok { color: var(--ok); }
@@ -231,11 +243,12 @@
   .mine-title h2 { margin: 0 0 6px; flex: 1; white-space: nowrap; }
   .mine-title button { white-space: nowrap; }
   /* your models as a table: a header, then one line a model */
-  .ohead, .olist li.in { display: grid; grid-template-columns: 14px 30px minmax(0, 1.7fr) minmax(0, 0.6fr) minmax(0, 1.5fr) 26px; align-items: center; column-gap: 8px; padding: 7px 16px; }
+  .ohead, .olist li.in { display: grid; grid-template-columns: 14px 44px minmax(0, 1.6fr) minmax(0, 0.6fr) minmax(0, 1.7fr) 26px; align-items: center; column-gap: 8px; padding: 7px 16px; }
   .ohead { font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding-top: 8px; padding-bottom: 8px; }
   .olist { list-style: none; margin: 0; padding: 0; flex: 1; overflow-y: auto; }
   .olist li { border-bottom: 1px solid var(--line); background: var(--panel); font-size: 13px; }
-  .olist li.in:first-child { background: var(--brand-soft); }
+  .olist li.in.use { background: var(--brand-soft); }
+  .olist li.in.lifted { background: var(--panel); }
   .olist li.next { border-bottom: 0; background: none; color: var(--faint); font-size: 12.5px; text-align: center; padding: 14px 10px; }
   .olist li.in { cursor: grab; user-select: none; transition: transform .16s ease, box-shadow .16s ease; position: relative; }
   .olist.sorting li.in { transition: transform .16s ease; }
@@ -249,8 +262,24 @@
   .mt-top .chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--brand); background: var(--brand-soft); border-radius: 999px; padding: 1px 4px 1px 9px; margin: 2px 4px 2px 0; color: var(--text); font-size: 12.5px; }
   .mt-top .chip button { border: 0; background: none; padding: 0 4px; font-size: 12px; color: var(--muted); }
   .mt-scroll { overflow-x: auto; }
-  .mt { min-width: 1090px; }
-  .mt-h, .mtable li { display: grid; grid-template-columns: 16px 28px minmax(150px, 3fr) minmax(70px, 1.1fr) 66px 66px 42px 60px 50px 54px 60px minmax(166px, 1.5fr) minmax(120px, 1.3fr) 28px; align-items: center; column-gap: 6px; padding: 8px 16px; }
+  .mt { min-width: 1116px; }
+  .mt-h input[type=checkbox], .mtable input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(--brand); cursor: pointer; }
+  .mtable li.picked { background: var(--brand-soft); }
+  .mt-outcomes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+  .mt-outcomes > span:first-child { margin-right: 4px; }
+  /* a test result: what it was and how many (a click selects them), and ↻ to test them again */
+  .pill { display: inline-flex; align-items: stretch; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); overflow: hidden; font-size: 12px; line-height: 1; }
+  .pill button { border: 0; border-radius: 0; background: none; padding: 5px 8px; display: inline-flex; align-items: center; gap: 5px; }
+  .pill button:hover:not(:disabled) { background: var(--hover); }
+  .pill .what { font-weight: 600; }
+  .pill.ok .what { color: var(--ok); }
+  .pill.bad .what { color: var(--err); }
+  .pill .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .pill .again { border-left: 1px solid var(--line); padding: 5px 6px; color: var(--muted); }
+  .pill .again:hover:not(:disabled) { color: var(--text); }
+  .pill.on { border-color: var(--brand); background: var(--brand-soft); }
+  .pill.on .again { border-left-color: var(--brand); }
+  .mt-h, .mtable li { display: grid; grid-template-columns: 16px 20px 44px minmax(150px, 3fr) minmax(70px, 1.1fr) 66px 66px 42px 60px 50px 54px 60px minmax(166px, 1.5fr) minmax(120px, 1.3fr) 28px; align-items: center; column-gap: 6px; padding: 8px 16px; }
   .mt-h { border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); padding-top: 10px; padding-bottom: 10px; }
   .mt-h button { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; white-space: nowrap; }
   .mt-h button:hover { color: var(--text); }
@@ -265,8 +294,8 @@
   .mtable .grip { color: var(--faint); touch-action: none; }
   .mtable:not(.drag) .grip { visibility: hidden; }
   .mtable .n { font-weight: 800; color: var(--brand); }
-  .mtable .m { font-family: var(--mono); font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
-  .mtable .p { color: var(--muted); overflow-wrap: anywhere; }
+  .mtable .m { font-family: var(--mono); font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mtable .p { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mtable .yes { color: var(--ok); }
   .mtable .no { color: var(--faint); }
   .mtable .src { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -329,6 +358,23 @@
   #toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); padding: 10px 18px; border-radius: 10px; background: var(--text); color: var(--bg); opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); z-index: 10; }
   #toast.show { opacity: 1; }
   #toast.err { background: var(--err); color: #fff; }
+  /* what's running (tests, loading): a strip at the top of the panel it's about, updated in place */
+  .job-slot:empty { display: none; }
+  .job-slot.solo { margin: -6px 0 18px; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; } /* on its own, under a page's title */
+  .job-slot.solo .job:last-child { border-bottom: 0; }
+  .job { padding: 10px 16px 0; border-bottom: 1px solid var(--line); background: var(--panel2); font-size: 12.5px; }
+  .job .top { display: flex; align-items: center; gap: 10px; min-height: 24px; }
+  .job .spin { flex: none; color: var(--brand); }
+  .job .what { font-weight: 600; white-space: nowrap; }
+  .job .detail { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+  .job .detail .ok { color: var(--ok); }
+  .job .detail .bad { color: var(--err); }
+  .job .count { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .job button { padding: 1px 9px; font-size: 12px; }
+  .job .bar { margin: 8px -16px 0; height: 3px; background: var(--line); overflow: hidden; }
+  .job .bar i { display: block; height: 100%; background: var(--brand); transition: width .3s ease; }
+  .job .bar.unknown i { width: 30%; animation: job-slide 1.2s ease-in-out infinite; }
+  @keyframes job-slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 
   @media (max-width: 1180px) {
     .split { grid-template-columns: 1fr; }
@@ -376,6 +422,7 @@
   </aside>
 
   <main>
+    <div class="job-slot solo" data-where="page"></div>
     <!-- Providers & models -->
     <section class="page" id="page-providers">
       <div class="head">
@@ -397,9 +444,17 @@
             <div class="hint">Kept in config.json on this machine. This page only shows its first and last characters.</div>
             <div class="actions"><button class="primary" id="p-save">Add provider</button><button class="ghost" id="p-cancel">Cancel</button></div>
           </div>
-          <div class="work" id="p-work">
+          <div class="work" id="p-work" hidden>
             <div class="card catalog">
-              <div class="cat-top"><input type="search" id="m-search" placeholder="Search all models…"><button class="small" id="fold-all" type="button">Collapse all</button><button class="small" id="unfold-all" type="button">Expand all</button></div>
+              <div class="cat-top">
+                <div class="cat-row"><input type="search" id="m-search" placeholder="Search all models…"><select id="m-sort" aria-label="sort the models"><option value="name">Sort by name</option><option value="price">Sort by price</option></select></div>
+                <div class="cat-row">
+                  <div class="cat-group"><span class="listsw" id="lists-all" title="load every provider's model list, or none"></span>
+                  <button class="small ghost" id="fold-all" type="button">Collapse all</button><button class="small ghost" id="unfold-all" type="button">Expand all</button></div>
+                  <div class="cat-group end"><button class="small" id="dev-all" type="button" title="ask models.dev what each listed model can do: tool calls, context, thinking, images">Get from models.dev</button><button class="small" id="add-all" type="button" title="add every model shown here (only the matches when searching) to your list">Add all</button></div>
+                </div>
+              </div>
+              <div class="job-slot" data-where="catalog"></div>
               <div class="cat-list" id="p-list"></div>
             </div>
             <div class="card mine" id="inuse"></div>
@@ -451,6 +506,7 @@
             <label class="on"><input type="radio" name="l-filter" value="all" checked>All</label><label><input type="radio" name="l-filter" value="failed">Failed</label><label><input type="radio" name="l-filter" value="fallback">Fallbacks</label>
           </div>
         </div>
+        <div class="job-slot" data-where="requests"></div>
         <div class="reqs">
           <div class="req-list" id="l-list"></div>
           <div class="req-detail" id="l-detail-pane"><div class="empty">Click a request to see it in full.</div></div>
@@ -583,15 +639,63 @@ function toast(text, err = false) {
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => (t.className = ''), err ? 6000 : 2400)
 }
+// What's running (a test, lists loading, models.dev), shown at the top of the panels it's about
+// while it runs: job(id, { what, where, done, total, detail, stop }) to show or update it (no total:
+// a bar that just moves), job(id) when it's over. where: the panels ('catalog', 'mine', 'table').
+// Updated in place, so nothing jumps while it counts.
+const JOBS = new Map()
+function job(id, state) {
+  if (!state) JOBS.delete(id)
+  else JOBS.set(id, { ...JOBS.get(id), ...state, id })
+  for (const slot of document.querySelectorAll('.job-slot')) fillSlot(slot)
+}
+// a panel's place for them: made empty, filled now and kept up to date by job()
+const jobSlot = (where) => fillSlot(h('div', { className: 'job-slot', 'data-where': where }))
+function fillSlot(slot) {
+  const mine = [...JOBS.values()].filter((j) => j.where.includes(slot.dataset.where))
+  for (const el of [...slot.children]) if (!mine.some((j) => j.id === el.dataset.job)) el.remove()
+  for (const j of mine) {
+    let el = slot.querySelector(`[data-job="${CSS.escape(j.id)}"]`)
+    if (!el) {
+      el = h('div', { className: 'job', 'data-job': j.id },
+        h('div', { className: 'top' }, h('span', { className: 'spin' }), h('span', { className: 'what' }), h('span', { className: 'detail' }), h('span', { className: 'count' }), h('button', { className: 'small', type: 'button' })),
+        h('div', { className: 'bar' }, h('i')))
+      slot.append(el)
+    }
+    const known = j.total > 0
+    el.querySelector('.what').textContent = j.what
+    put(el.querySelector('.detail'), [j.detail ?? ''].flat().map((x) => (x instanceof Node ? x.cloneNode(true) : x))) // a copy: it may show in two panels
+    el.querySelector('.count').textContent = known ? `${j.done ?? 0} of ${j.total}` : ''
+    const stop = el.querySelector('button')
+    stop.hidden = !j.stop
+    stop.textContent = j.stopping ? 'Stopping…' : 'Stop'
+    stop.disabled = Boolean(j.stopping)
+    stop.onclick = () => (j.stop(), job(j.id, { stopping: true }))
+    el.querySelector('.bar').classList.toggle('unknown', !known)
+    el.querySelector('.bar i').style.width = known ? `${Math.round((100 * (j.done ?? 0)) / j.total)}%` : ''
+  }
+  return slot
+}
 async function api(path, body) {
   const res = await fetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { 'x-heart-token': token, ...(body !== undefined && { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) })
   const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
   return data
 }
+// What a save or change is doing, said on the page when it takes more than a moment
+const DOING = {
+  '/api/provider': 'Checking the address and saving the provider',
+  '/api/provider/delete': 'Deleting the provider',
+  '/api/provider/list': 'Saving the model list setting',
+  '/api/order': 'Saving your models',
+  '/api/models-dev': null, // its own strip
+}
+let acting = 0
 async function act(path, body, done) {
+  const id = `act${++acting}`
+  const slow = DOING[path] !== null && setTimeout(() => job(id, { where: ['page'], what: DOING[path] ?? 'Saving', detail: 'one moment' }), 400)
   try {
-    const r = await api(path, body)
+    const r = await api(path, body).finally(() => (clearTimeout(slow), job(id)))
     if (r.providers) render(r)
     if (done) toast(done)
     return r
@@ -602,16 +706,56 @@ async function act(path, body, done) {
 }
 const sw = (props) => h('label', { className: 'sw' }, h('input', { type: 'checkbox', ...props }), h('i'))
 
+// A long list drawn a screenful at a time: every row the same height, only the rows in view (and a
+// few more each side) on the page, the rest empty room of the right size, so thousands of models
+// scroll smoothly. box: where the rows go; scroller: what scrolls (the box itself, an element
+// around it, or window); row(i): row i's element. Draw it (v.draw()) once the box is on the page.
+const VLISTS = new Set()
+function virtual(box, { count, height, row, scroller = box }) {
+  const v = { box, scroller, count, height, shown: new Map(), shift: null }
+  box.style.position = 'relative'
+  if (scroller === box) box.append(h('li', { className: 'vspace', 'aria-hidden': 'true', style: `height:${count * height}px` }))
+  else box.style.height = `${count * height}px`
+  v.draw = () => {
+    if (!box.isConnected || !box.getClientRects().length) return // not on the page, or folded away
+    const view = scroller === window ? { top: 0, height: innerHeight } : { top: scroller.getBoundingClientRect().top, height: scroller.clientHeight }
+    const top = scroller === box ? -box.scrollTop : box.getBoundingClientRect().top - view.top // the list's start, from the view's top
+    const first = Math.max(0, Math.floor(-top / height) - 6)
+    const last = Math.min(count, Math.ceil((view.height - top) / height) + 6)
+    for (const [i, el] of v.shown) if ((i < first || i >= last) && !el.classList.contains('lifted')) (el.remove(), v.shown.delete(i))
+    for (let i = first; i < last; i++) {
+      if (v.shown.has(i)) continue
+      const el = row(i)
+      Object.assign(el.style, { position: 'absolute', left: 0, right: 0, top: `${i * height}px`, height: `${height}px` })
+      el.dataset.i = i
+      v.shown.set(i, el)
+      box.append(el)
+      v.shift?.(el, i)
+    }
+  }
+  VLISTS.add(v)
+  return v
+}
+let vFrame = 0
+const drawVirtual = () => (vFrame ||= requestAnimationFrame(() => {
+  vFrame = 0
+  for (const v of VLISTS) v.box.isConnected ? v.draw() : VLISTS.delete(v)
+}))
+addEventListener('scroll', drawVirtual, { capture: true, passive: true }) // the page's or any list's
+addEventListener('resize', drawVirtual)
+
 // pages: one at a time, from the address (#providers…)
 const PAGES = ['providers', 'models', 'general', 'logging', 'prompts', 'mcp', 'skills', 'files']
 const page = () => (PAGES.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'providers')
 function showPage() {
   for (const p of PAGES) $('page-' + p).classList.toggle('on', p === page())
+  $('page-' + page()).querySelector('.head').after(document.querySelector('.job-slot[data-where="page"]')) // what's loading: under this page's title
   for (const a of document.querySelectorAll('nav a')) a.classList.toggle('on', a.dataset.page === page())
   if (S) drawUsing(S)
   if (page() === 'logging') drawDisk()
   scrollTo(0, 0)
   fillHeight()
+  drawVirtual() // the lists on the page now shown
   document.querySelector('nav a.on')?.scrollIntoView({ inline: 'center', block: 'nearest' }) // on a phone the pages scroll sideways
 }
 addEventListener('hashchange', showPage)
@@ -715,10 +859,21 @@ $('p-url').oninput = drawPresets
 
 const MODELS = {} // provider → { list } | { error } | { loading }
 const filters = {}
+// the lists loading now, for the progress card: how many asked for since none was loading, and done
+const listLoads = { total: 0, done: 0, failed: 0 }
 function loadModels(name, again = false) {
   if (MODELS[name] && !again) return
+  if (MODELS[name]?.loading) return // already on its way
   MODELS[name] = { loading: true }
-  api('/api/models', { name }).then(({ models, details }) => (MODELS[name] = { list: models, details: details ?? {} }), (e) => (MODELS[name] = { error: e.message })).then(() => S && drawProviders(S))
+  if (listLoads.done === listLoads.total) Object.assign(listLoads, { total: 0, done: 0, failed: 0 })
+  listLoads.total++
+  const show = () => listLoads.done === listLoads.total
+    ? job('lists')
+    : job('lists', { where: ['catalog'], what: 'Loading model lists', done: listLoads.done, total: listLoads.total, detail: listLoads.failed ? `${listLoads.failed} couldn't be listed` : 'from each provider, kept for next time' })
+  show()
+  api('/api/models', { name })
+    .then(({ models, details }) => (MODELS[name] = { list: models, details: details ?? {} }), (e) => ((MODELS[name] = { error: e.message }), listLoads.failed++))
+    .then(() => (listLoads.done++, show(), S && drawProviders(S)))
 }
 const useModel = (provider, model) => act('/api/model', { provider, model }, `HeartCode now uses ${provider} · ${model}`)
 const saveOrder = (list, done, opts = {}) => act('/api/order', { list, ...opts }, done)
@@ -765,8 +920,25 @@ for (const id of ['c-name', 'c-what']) $(id).addEventListener('keydown', (e) => 
 for (const id of ['p-name', 'p-url', 'p-key']) $(id).addEventListener('keydown', (e) => e.key === 'Enter' && $('p-save').click())
 
 // model names in a natural order: "glm-5.2" before "glm-5.10", case doesn't matter
-const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare // one collator: thousands of names sort fast
 let modelQuery = ''
+// the models under each provider: by name, or by what its list says they cost (cheapest first; no price: last)
+let catSort = (() => {
+  try {
+    return localStorage.getItem('heart.catSort') === 'price' ? 'price' : 'name'
+  } catch {
+    return 'name'
+  }
+})()
+$('m-sort').value = catSort
+$('m-sort').onchange = (e) => {
+  catSort = e.target.value
+  try {
+    localStorage.setItem('heart.catSort', catSort)
+  } catch {}
+  if (S) drawProviders(S)
+}
+const costOf = (d) => (d?.price ? (d.price.input ?? 0) + (d.price.output ?? 0) : Infinity)
 // Providers folded on the page (the browser remembers them). Typing a search opens them all, until
 // you fold or unfold one (or all) again.
 let searchOpen = false
@@ -786,6 +958,7 @@ function applyFolds() {
     sec.classList.toggle('collapsed', folded)
     sec.querySelector('.fold')?.setAttribute('aria-expanded', String(!folded))
   }
+  for (const box of $('p-list').querySelectorAll('.rows')) box._v?.draw() // the ones now open
 }
 // A fold by hand during a search starts from what's shown (the ones it opened stay open).
 function settle() {
@@ -795,6 +968,20 @@ function settle() {
 const fold = (name) => (settle(), FOLDED.has(name) ? FOLDED.delete(name) : FOLDED.add(name), applyFolds())
 $('fold-all').onclick = () => (settle(), S?.providers.forEach((p) => FOLDED.add(p.name)), applyFolds())
 $('unfold-all').onclick = () => (settle(), FOLDED.clear(), applyFolds())
+// every model shown on the left (the search's matches, when searching) added to the end of your list
+$('add-all').onclick = () => {
+  if (!S) return
+  const seen = new Set(S.order.map(keyOf))
+  const add = CATALOG.flatMap(({ provider, ids }) => ids.map((model) => ({ provider, model }))).filter((t) => !seen.has(keyOf(t)) && seen.add(keyOf(t)))
+  if (!add.length) return toast(modelQuery.trim() ? 'every match is in your list already' : 'every model shown is in your list already')
+  if (!confirm(`Add ${add.length} model${add.length === 1 ? '' : 's'} to your list${modelQuery.trim() ? ` (the ones matching "${modelQuery.trim()}")` : ''}?`)) return
+  saveOrder([...S.order, ...add], `${add.length} added: your list has ${S.order.length + add.length} models`)
+}
+// models.dev fetched again (your models' profiles too), then every listed provider's models with it
+$('dev-all').onclick = async () => {
+  if (!(await lookUp())) return
+  S?.providers.filter((p) => p.list).forEach((p) => loadModels(p.name, true))
+}
 $('m-search').oninput = (e) => ((modelQuery = e.target.value), (searchOpen = true), S && drawProviders(S), applyFolds())
 // A model's tooltip: its full name and what's known about it (from the provider, HeartCode's price
 // list and its own test), and what a click does. Shown on hover and on keyboard focus.
@@ -817,75 +1004,103 @@ function testLine(t) {
 
 // Test: one short message to the model, to see that it really answers (the key, access to it, its
 // name, the server). The result stays under it until the page is reloaded.
-const TRIES = {} // "provider/model" → { going } | { ok, ms, reply } | { ok: false, error }
+const TRIES = {} // "provider/model" → { going } | { ok, ms, reply, at } | { ok: false, status, error, at } (from the server)
 const keyOf = (t) => `${t.provider}/${t.model}`
+// What each test result means, for its chip's hover
+const MEANS = {
+  works: 'it answered',
+  400: '400: the provider refused the request as sent (often: a model that isn\'t a chat model)',
+  401: '401: the key isn\'t accepted',
+  402: '402: it needs payment or credits on your account',
+  403: '403: no access to this model with your plan or key',
+  404: '404: the provider has no model by this name',
+  408: '408: the provider timed out',
+  410: '410: the model was taken down',
+  413: '413: the request was too large for it',
+  422: '422: the provider couldn\'t use the request',
+  429: '429: the provider kept saying it\'s busy (rate limit): try again later',
+  500: '500: the provider\'s server failed',
+  502: '502: the provider (or a proxy before it) couldn\'t reach the model',
+  503: '503: the model or provider is unavailable now',
+  504: '504: the provider timed out',
+  empty: 'it answered, but with no text at all',
+  'no answer': 'no answer within 90 seconds',
+  failed: 'it failed without a status code (a lost connection, an unreadable reply…)',
+}
+// What a test came to, in a word: works, its status code (402, 429…), empty, no answer or failed;
+// null while it runs or before it's tested
+const outcome = (r) => (!r || r.going ? null : r.ok ? 'works' : r.status ? String(r.status) : /nothing/.test(r.error) ? 'empty' : /within/.test(r.error) ? 'no answer' : 'failed')
 // The Works? cell: the last result (cut short, all of it on hover) and Test.
 function triedCell(t) {
   const r = TRIES[keyOf(t)]
-  const secs = r?.ms != null ? ` · ${(r.ms / 1000).toFixed(1)}s` : ''
+  const secs = (r?.ms != null ? ` · ${(r.ms / 1000).toFixed(1)}s` : '') + (r?.at ? ` · tested ${new Date(r.at).toLocaleString()}` : '')
   const [cls, text, about] = !r ? ['', 'not tested', 'send it a short message to see that it really answers (your key, access to it, its name)']
     : r.going ? ['going', 'testing…', 'sending it a short message']
     : r.ok ? ['ok', `✓ ${(r.ms / 1000).toFixed(1)}s`, `works: it answered "${r.reply}"${secs}`]
-    : ['bad', `✗ ${r.status ?? (/nothing/.test(r.error) ? 'empty' : /within/.test(r.error) ? 'no answer' : 'failed')}`, `doesn't work: ${r.error}${secs}`] // the reason on hover
+    : ['bad', `✗ ${outcome(r)}`, `doesn't work: ${r.error}${secs}`] // the reason on hover
   return h('div', { className: 'try ' + cls },
     h('span', { className: 'msg', textContent: text, title: about }),
     h('button', { className: 'small', textContent: 'Test', disabled: Boolean(r?.going), title: 'send it a short message to see that it really answers', 'aria-label': `test ${t.model}`, onclick: () => tryModel(t) }))
 }
 function showTried(t) {
   document.querySelector(`#mt li[data-key="${CSS.escape(keyOf(t))}"] .try`)?.replaceWith(triedCell(t))
-  if (SORT.some((x) => x.key === 'works') && !TRIES[keyOf(t)]?.going) drawMine(S) // sorted by it: its place may change
+  if (!TRIES[keyOf(t)]?.going) mineSoon() // a result: the counts by result (and a sort by it) change
 }
+let mineFrame = 0
+const mineSoon = () => (mineFrame ||= requestAnimationFrame(() => ((mineFrame = 0), S && drawMine(S))))
+// Tests run on the settings server (closing this page doesn't stop them; their results are kept
+// there for next time): this page asks for them and shows what the server says as it goes.
 async function tryModel(t) {
-  TRIES[keyOf(t)] = { going: true }
+  TRIES[keyOf(t)] = { going: true, before: TRIES[keyOf(t)] }
   showTried(t)
-  const r = (await act('/api/try', { provider: t.provider, model: t.model })) ?? { ok: false, error: 'the settings page did not answer' }
-  TRIES[keyOf(t)] = r
-  showTried(t)
+  const r = await api('/api/try', { provider: t.provider, model: t.model }).catch((e) => ({ ok: false, error: e.message }))
+  gotResult(keyOf(t), r)
   return r
 }
-let testingAll = false
-async function tryAll() {
-  if (testingAll) return
-  testingAll = true
-  const list = [...(S?.order ?? [])]
-  let good = 0
-  toast(`testing ${list.length} model${list.length === 1 ? '' : 's'}…`)
-  // several at once (6), but at most 2 per provider: more would trip its rate limit and show
-  // working models as failing
-  for (const t of list) TRIES[keyOf(t)] = { going: true }
-  list.forEach(showTried)
-  const queue = [...list]
-  const busy = {}
-  const worker = async () => {
-    while (queue.length) {
-      const i = queue.findIndex((t) => (busy[t.provider] ?? 0) < 2)
-      if (i === -1) {
-        await new Promise((r) => setTimeout(r, 100)) // every waiting one's provider is busy
-        continue
-      }
-      const [t] = queue.splice(i, 1)
-      busy[t.provider] = (busy[t.provider] ?? 0) + 1
-      try {
-        if ((await tryModel(t)).ok) good++
-      } finally {
-        busy[t.provider]--
-      }
-    }
-  }
+let testingAll = false // a run is going (on the server)
+// a run of tests: all your models, or the ones given
+async function tryAll(only) {
+  if (testingAll) return toast('a test is running: wait for it, or stop it', true)
   try {
-    await Promise.all(Array.from({ length: Math.min(6, list.length) }, worker))
-  } finally {
-    testingAll = false
+    const { run } = await api('/api/tests/start', only ? { only: only.map(({ provider, model }) => ({ provider, model })) } : {})
+    showRun(run)
+  } catch (e) {
+    toast(e.message, true)
   }
-  toast(`${good} of ${list.length} work${good === list.length ? '' : `; ${list.length - good} don't (Works? says why, on hover)`}`, good < list.length)
+}
+// a model's result, from the server
+function gotResult(key, result) {
+  TRIES[key] = result
+  const t = S?.order[placeOf(...key.split(/\/(.*)/s))]
+  if (t) showTried(t)
+}
+// the run, as the server says it is: its progress strip, and the models waiting marked as testing
+function showRun(run) {
+  for (const key of run?.pending ?? []) if (!TRIES[key]?.going) TRIES[key] = { going: true, before: TRIES[key] } // its last result, kept if it isn't reached
+  testingAll = Boolean(run && !run.over)
+  if (!testingAll) {
+    for (const [key, r] of Object.entries(TRIES)) if (r.going) r.before ? (TRIES[key] = r.before) : delete TRIES[key] // stopped before it: as it was
+    job('test-all')
+    if (run?.over) toast(`${run.stopping ? `stopped after ${run.done} of ${run.total}: ` : ''}${run.good} of ${run.done} work${run.good === run.done ? '' : `; ${run.done - run.good} don't (Works? says why, on hover)`}`, run.good < run.done)
+  } else
+    job('test-all', {
+      where: ['table', 'mine'],
+      what: run.stopping ? 'Stopping the tests…' : `Testing ${run.some ? '' : 'your '}${run.total} model${run.total === 1 ? '' : 's'}${run.each > 1 ? ` · ${run.each} at a time per provider` : ''}`,
+      done: run.done, total: run.total, stopping: run.stopping,
+      detail: [h('span', { className: 'ok', textContent: `✓ ${run.good} work` }), ' · ', h('span', { className: 'bad', textContent: `✗ ${run.done - run.good} don't` }), run.busy.length ? ` · now: ${run.busy.join(', ')}` : '', Object.keys(run.paused ?? {}).length ? ` · paused (busy, 429): ${Object.entries(run.paused).map(([p, secs]) => `${p} ${secs}s`).join(', ')}` : ''],
+      stop: () => api('/api/tests/stop', {}).catch((e) => toast(e.message, true)),
+    })
+  mineSoon()
 }
 
 // models.dev looked up again: one model (its Retry), or all of yours (Refresh from models.dev)
 const retry = (t) => h('button', { className: 'small', textContent: 'Retry', title: 'look it up in models.dev again', onclick: (e) => (e.stopPropagation(), lookUp(t)) })
 async function lookUp(t) {
-  toast(t ? `looking up ${t.model} in models.dev…` : 'looking up your models in models.dev…')
+  job('models.dev', { where: ['catalog', 'mine', 'table'], what: t ? `Looking up ${t.model} in models.dev` : 'Asking models.dev about your models', detail: 'context, tool calls, thinking, images' })
   const r = await act('/api/models-dev', t ? { provider: t.provider, model: t.model } : {})
+  job('models.dev')
   if (r) toast(t ? (r.found ? `${t.model}: found in models.dev` : `${t.model}: still not in models.dev`) : `models.dev: ${r.found} of ${r.of} found`)
+  return r
 }
 
 // The model's setup: a window over the page (nothing on it moves). Its context window (empty: as
@@ -990,8 +1205,26 @@ function drawProviders(s) {
     const list = [...order]
     const [t] = list.splice(i, 1)
     list.splice(j, 0, t)
-    save(list, list[0] !== order[0] ? `HeartCode now uses ${list[0].provider} · ${list[0].model}` : 'order saved')
+    return save(list, list[0] !== order[0] ? `HeartCode now uses ${list[0].provider} · ${list[0].model}` : 'order saved')
   }
+  // a row of your list (the last: where the next one goes)
+  const mineRow = (i) => {
+    if (i === order.length) return h('li', { className: 'next', textContent: `#${order.length + 1} · click a model ${side} to add it here (a fallback)` })
+    const t = order[i]
+    return h('li', {
+        className: 'in' + (i === 0 ? ' use' : ''), tabIndex: 0, 'data-key': `${t.provider}/${t.model}`, title: order.length > 1 ? 'Drag to move it (or Alt+↑ / Alt+↓)' : '',
+        onkeydown: (e) => e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && (e.preventDefault(), move(i, Math.max(0, Math.min(order.length - 1, i + (e.key === 'ArrowUp' ? -1 : 1))))),
+      },
+      h('span', { className: 'grip', textContent: '⋮⋮', title: 'drag to reorder', 'aria-hidden': 'true', style: order.length > 1 ? '' : 'visibility:hidden' }),
+      h('span', { className: 'n', textContent: `#${i + 1}`, title: i === 0 ? 'in use: the one HeartCode uses' : 'a fallback: tried, in order, when the ones above fail' }),
+      h('span', { className: 'm', textContent: t.model, title: t.model }),
+      h('span', { className: 'p' + (i === 0 ? ' use' : ''), textContent: t.provider, title: `${t.provider}${i === 0 ? ': in use' : ''}` }),
+      testLine(t),
+      h('button', { className: 'danger', textContent: '✕', title: 'take it off the list', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) }))
+  }
+  const mine = order.length ? h('ol', { className: 'olist' }) : null
+  const mineV = mine && virtual(mine, { count: order.length + 1, height: MINE_ROW, row: mineRow })
+  if (mineV) mineV.items = order.length
   put($('inuse'),
     h('div', { className: 'mine-top' },
       h('div', { className: 'mine-title' },
@@ -1000,18 +1233,9 @@ function drawProviders(s) {
         h('button', { className: 'small', textContent: 'Refresh from models.dev', title: 'ask models.dev again what each model can do: context, tools, thinking, images, price', style: order.length ? '' : 'visibility:hidden', onclick: () => lookUp() }),
         h('button', { className: 'small danger', textContent: 'Remove all', title: 'take every model off this list', style: order.length ? '' : 'visibility:hidden', onclick: () => confirm(`Take all ${order.length} model${order.length === 1 ? '' : 's'} off your list? HeartCode then has none to use until you choose one. (They stay under their providers.)`) && saveOrder([], 'all removed: no model chosen now') })),
       h('p', { className: 'sub', style: 'margin:0', textContent: order.length > 1 ? 'HeartCode uses #1. If it fails, it tries #2, then #3… and round again. Drag to change the order.' : order.length ? `HeartCode uses this one. Click more ${side} to add fallbacks: tried, in order, when one fails.` : `The models HeartCode uses, in the order it tries them. Click one ${side} to start.` })),
+    jobSlot('mine'),
     order.length ? h('div', { className: 'ohead' }, h('span'), h('span', { textContent: '#' }), h('span', { textContent: 'Model' }), h('span', { textContent: 'Provider' }), h('span', { textContent: 'What it can do' }), h('span')) : null,
-    order.length ? h('ol', { className: 'olist' }, order.map((t, i) => h('li', {
-        className: 'in', 'data-key': `${t.provider}/${t.model}`, title: order.length > 1 ? 'Drag to move it (or Alt+↑ / Alt+↓)' : '',
-        onkeydown: (e) => e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && (e.preventDefault(), move(i, Math.max(0, Math.min(order.length - 1, i + (e.key === 'ArrowUp' ? -1 : 1))))),
-      },
-      h('span', { className: 'grip', textContent: '⋮⋮', title: 'drag to reorder', 'aria-hidden': 'true', style: order.length > 1 ? '' : 'visibility:hidden' }),
-      h('span', { className: 'n', textContent: `#${i + 1}`, title: i === 0 ? 'in use: the one HeartCode uses' : 'a fallback: tried, in order, when the ones above fail' }),
-      h('span', { className: 'm', textContent: t.model, title: t.model }),
-      h('span', { className: 'p' + (i === 0 ? ' use' : ''), textContent: t.provider, title: `${t.provider}${i === 0 ? ': in use' : ''}` }),
-      testLine(t),
-      h('button', { className: 'danger', textContent: '✕', title: 'take it off the list', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) })),
-      ), h('li', { className: 'next', textContent: `#${order.length + 1} · click a model ${side} to add it here (a fallback)` }))
+    order.length ? mine
       : h('div', { className: 'mine-empty' }, h('b', { textContent: 'No model chosen yet' }), `Click a model ${side}: it becomes #1, the one HeartCode uses.`),
     order.length > 1 ? h('div', { className: 'mine-rules' },
       h('label', { className: 'f', for: 'r-on', textContent: 'When the one in use fails, go on to the next' }),
@@ -1024,12 +1248,16 @@ function drawProviders(s) {
       h('select', { id: 'r-next', onchange: (e) => save(order, 'saved', { next: e.target.value }) },
         [['first', '#1 again'], ['stay', 'the model that answered last']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.next === v })))) : null)
 
-  sortable($('inuse').querySelector('.olist'), move)
+  mineV?.draw()
+  sortable(mineV, move)
 
   // left: every provider's models, A to Z; one click adds it (the first one becomes #1). Built
   // again only when what it lists changes (a provider, its models, the search); a change to your
   // list only updates the rows it touches (markCatalog), so the list stays where you scrolled it.
-  const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + (MODELS[p.name]?.loading ? 'loading' : '')), modelQuery.trim()])
+  const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + (MODELS[p.name]?.loading ? 'loading' : '')), modelQuery.trim(), catSort])
+  // every provider's list at once: on when all are
+  const allOn = s.providers.length > 0 && s.providers.every((p) => p.list)
+  put($('lists-all'), [sw({ checked: allOn, 'aria-label': "load every provider's model list", onchange: (e) => act('/api/provider/list', { on: e.target.checked }, `every provider's model list ${e.target.checked ? 'on' : 'off'}`) }), 'Load all lists'])
   if (shape !== catalogShape) (buildCatalog(s), applyFolds())
   catalogShape = shape
   markCatalog()
@@ -1039,60 +1267,77 @@ function drawProviders(s) {
 // Your models: pick one up (anywhere on it with a mouse, by its ⋮⋮ on a touch screen) and the
 // others move aside as it goes; let go and it's saved, already in its place (no jump when the
 // page redraws from what's saved).
-function sortable(ol, onMove) {
-  if (!ol) return
-  ol.addEventListener('pointerdown', (e) => {
+// Drag a row of a long list (virtual) to move it: it follows the pointer, the others make room, and
+// near the list's top or bottom edge it scrolls (faster nearer the edge). onMove(from, to) when
+// dropped; the list is drawn again once the order is saved (put back if saving failed).
+const MINE_ROW = 50 // your models, on the right
+const TABLE_ROW = 46 // the Your models page's table
+function sortable(v, onMove) {
+  if (!v || v.items < 2) return
+  const { box, scroller, height } = v
+  const scrolled = () => (scroller === window ? scrollY : scroller.scrollTop)
+  box.addEventListener('pointerdown', (e) => {
     const li = e.target.closest('li.in')
     if (!li || e.button !== 0 || e.target.closest('button, a, input, select, textarea')) return
     if (e.pointerType !== 'mouse' && !e.target.closest('.grip')) return // a finger scrolls the list, except on the grip
-    const items = [...ol.querySelectorAll('li.in')]
-    if (items.length < 2) return
-    const from = items.indexOf(li)
-    const rects = items.map((x) => x.getBoundingClientRect())
-    const step = rects[1].top - rects[0].top // a card and the space after it
-    const centers = rects.map((r) => r.top + r.height / 2)
+    const n = v.items
+    const from = Number(li.dataset.i)
     const startY = e.clientY
+    const startScroll = scrolled()
+    let y = startY
     let to = from
     let moving = false
-    const shift = () => items.forEach((x, k) => {
-      if (x === li) return
-      const by = from < to && k > from && k <= to ? -step : from > to && k >= to && k < from ? step : 0
-      x.style.transform = by ? `translateY(${by}px)` : ''
-    })
+    let frame = 0
+    // the others: out of the way of the one moving (also the ones drawn while it moves)
+    v.shift = (el, k) => {
+      if (!moving || el === li) return
+      const by = from < to && k > from && k <= to ? -height : from > to && k >= to && k < from ? height : 0
+      el.style.transform = by ? `translateY(${by}px)` : ''
+    }
+    const place = () => {
+      const dy = Math.max(-from * height, Math.min((n - 1 - from) * height, y - startY + scrolled() - startScroll)) // within the list
+      li.style.transform = `translateY(${dy}px)`
+      to = Math.max(0, Math.min(n - 1, Math.round(from + dy / height)))
+      v.shown.forEach((el, k) => v.shift(el, k))
+    }
+    const edge = () => {
+      const r = scroller === window ? { top: 0, bottom: innerHeight } : scroller.getBoundingClientRect()
+      const d = y < r.top + 48 ? y - (r.top + 48) : y > r.bottom - 48 ? y - (r.bottom - 48) : 0
+      if (d) {
+        ;(scroller === window ? window : scroller).scrollBy(0, Math.sign(d) * Math.min(28, 2 + Math.abs(d) / 2))
+        v.draw()
+        place()
+      }
+      frame = requestAnimationFrame(edge)
+    }
     const onMovePointer = (ev) => {
-      const dy = ev.clientY - startY
+      y = ev.clientY
       if (!moving) {
-        if (Math.abs(dy) < 4) return
+        if (Math.abs(y - startY) < 4) return
         moving = true
-        li.setPointerCapture(e.pointerId)
         li.classList.add('lifted')
-        ol.classList.add('sorting')
+        box.classList.add('sorting')
         document.body.classList.add('sorting')
         $('tip').classList.remove('show')
         getSelection()?.removeAllRanges()
+        frame = requestAnimationFrame(edge)
       }
-      const y = Math.max(rects[0].top - rects[from].top, Math.min(rects.at(-1).bottom - rects[from].bottom, dy)) // within the list
-      li.style.transform = `translateY(${y}px)`
-      const mid = centers[from] + y
-      to = items.filter((x, k) => k !== from && centers[k] < mid).length
-      shift()
+      place()
     }
     const done = () => {
       removeEventListener('pointermove', onMovePointer)
       removeEventListener('pointerup', done)
       removeEventListener('pointercancel', done)
+      cancelAnimationFrame(frame)
+      v.shift = null
       if (!moving) return
       document.body.classList.remove('sorting')
-      ol.classList.remove('sorting')
+      box.classList.remove('sorting')
       li.classList.remove('lifted')
-      for (const x of items) {
-        x.style.transition = 'none' // into place at once: the cards are where they look
-        x.style.transform = ''
-      }
-      if (to !== from) items[to].insertAdjacentElement(to > from ? 'afterend' : 'beforebegin', li)
-      ol.querySelectorAll('li.in').forEach((x, k) => (x.querySelector('.n').textContent = `#${k + 1}`))
-      requestAnimationFrame(() => items.forEach((x) => (x.style.transition = '')))
-      onMove(from, to)
+      const back = () => v.shown.forEach((el) => (el.style.transform = ''))
+      if (to === from) return back()
+      li.style.transform = `translateY(${(to - from) * height}px)` // in its new place while it's saved
+      Promise.resolve(onMove(from, to)).then((r) => r || back())
     }
     addEventListener('pointermove', onMovePointer)
     addEventListener('pointerup', done)
@@ -1102,16 +1347,25 @@ function sortable(ol, onMove) {
 
 // --- the models on the left: rows that read your list when clicked or hovered (S.order, now) ---
 let catalogShape = null
+// where a model is in your list (undefined: not in it); looked up, not searched (thousands of rows ask)
+let places = { of: null, at: null }
 const placeOf = (provider, id) => {
-  const i = S.order.findIndex((t) => t.provider === provider && t.model === id)
-  return i < 0 ? undefined : i
+  if (places.of !== S.order) places = { of: S.order, at: new Map(S.order.map((t, i) => [`${t.provider}/${t.model}`, i])) }
+  return places.at.get(`${provider}/${id}`)
 }
 // A model's row on the left: scrolled to and lit up for a moment (one just added by name).
 function showRow(provider, id, said) {
   toast(said)
-  const row = $('p-list').querySelector(`.mrow[data-provider="${CSS.escape(provider)}"][data-model="${CSS.escape(id)}"]`)
+  const list = $('p-list')
+  const box = [...list.querySelectorAll(`section[data-provider="${CSS.escape(provider)}"] .rows`)].find((b) => b._ids)
+  const i = box?._ids.indexOf(id) ?? -1
+  if (i < 0) return
+  const at = box.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop + i * CAT_ROW
+  if (at < list.scrollTop + 120 || at + CAT_ROW > list.scrollTop + list.clientHeight) list.scrollTop = at - list.clientHeight / 2
+  box._v.draw()
+  const el = box._v.shown.get(i)
+  const row = el?.matches('.mrow') ? el : el?.querySelector('.mrow')
   if (!row) return
-  row.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   row.classList.remove('flash')
   void row.offsetWidth // restart the animation
   row.classList.add('flash')
@@ -1130,7 +1384,29 @@ function rowTail(provider, id) {
   const at = placeOf(provider, id)
   return at === 0 ? h('span', { className: 'tag brand', textContent: '#1 in use' }) : at > 0 ? h('span', { className: 'tag brand', textContent: `#${at + 1} fallback` }) : h('span', { className: 'add', textContent: S.order.length ? '+ Add' : 'Use' })
 }
+// what a listed model can do: as tested or set up, else what models.dev says (one of yours: its
+// profile, also when the provider's list is off)
+// what the provider's own list says it costs, per million tokens
+const priceText = (p) => (!p ? '' : !p.input && !p.output ? 'free' : [p.input != null && `${p.input ? usd(p.input) : '$0'} in`, p.output != null && `${p.output ? usd(p.output) : '$0'} out`].filter(Boolean).join(' / ') + ' per M')
+function canCell(d, mine) {
+  const price = d?.price
+  if (mine?.tested) d = { tested: mine.tested }
+  const k = d?.known
+  const can = d?.tested?.source === 'assumed' ? 'not in models.dev' : d?.tested ? testedText(d.tested) : k ? testedText({ mode: k.tools ? 'tools' : '', context: k.context, thinking: k.thinking, vision: k.images }) : d ? 'not in models.dev' : ''
+  const text = [can, priceText(price)].filter(Boolean).join(' · ')
+  return text ? h('span', { className: 'can', textContent: text }) : null
+}
+// every model added to a provider by name forgotten; the ones in your list leave it too
+async function clearAdded(p) {
+  const inList = S.order.filter((t) => t.provider === p.name && p.added.includes(t.model))
+  if (!confirm(`Forget the ${p.added.length} model${p.added.length === 1 ? '' : 's'} you added to ${p.name}?${inList.length ? ` ${inList.length} of them ${inList.length === 1 ? 'is' : 'are'} in your list and will leave it.` : ''}`)) return
+  if (inList.length && !(await saveOrder(S.order.filter((t) => !inList.includes(t))))) return
+  act('/api/provider/added', { name: p.name, all: true }, `${p.name}: the models you added are forgotten`)
+}
+const CAT_ROW = 56 // a model's row on the left: its name, and what it can do under it
+let CATALOG = [] // what the left shows: [{ provider, ids }] (Add all adds these)
 function buildCatalog(s) {
+  CATALOG = []
   const q = modelQuery.trim()
   // a name no provider lists (anywhere): offered under each provider, to use it anyway
   const anyMatch = !q || s.providers.some((p) => (MODELS[p.name]?.list ?? []).some((id) => id.toLowerCase().includes(q.toLowerCase())))
@@ -1141,10 +1417,10 @@ function buildCatalog(s) {
     // and the models added by name (and any of yours it doesn't list), marked as yours
     const listed = new Set(m.list ?? [])
     const yours = [...new Set([...p.added, ...s.order.filter((t) => t.provider === p.name).map((t) => t.model)])].filter((id) => !listed.has(id))
-    const ids = [...listed, ...yours].sort(byName).filter((id) => id.toLowerCase().includes(q.toLowerCase()))
+    const ids = [...listed, ...yours].sort((a, b) => (catSort === 'price' && costOf(m.details?.[a]) - costOf(m.details?.[b])) || byName(a, b)).filter((id) => id.toLowerCase().includes(q.toLowerCase()))
     const row = (id, own) =>
       h('button', { className: 'mrow', 'data-provider': p.name, 'data-model': id, onclick: () => (placeOf(p.name, id) === undefined ? addModel(p.name, id) : removeMine(p.name, id)) },
-        h('span', { className: 'id', textContent: id }),
+        h('span', { className: 'id', title: id }, id, canCell(m.details?.[id], S.order[placeOf(p.name, id)])),
         own ? h('span', { className: 'tag', textContent: 'not in its list' }) : p.added.includes(id) ? h('span', { className: 'tag', textContent: 'added by you' }) : null,
         rowTail(p.name, id))
     // one you added: ✕ forgets it (it leaves your list too)
@@ -1155,6 +1431,7 @@ function buildCatalog(s) {
         act('/api/provider/added', { name: p.name, model: id, remove: true }, `forgot ${id}`)
       } }))
     const typed = !anyMatch ? [row(q, true)] : []
+    if (typed[0]) typed[0].dataset.typed = '1' // a name no provider lists: not part of Add all
     if (q && anyMatch && !ids.length) return null // searching: only the providers with a match
     // a model its list leaves out (some servers don't list them all): by its exact name
     const name = h('input', { type: 'text', placeholder: m.off ? 'List off: a model\'s exact name' : 'Custom model: its exact name', 'aria-label': `add a model to ${p.name} by name` })
@@ -1180,9 +1457,18 @@ function buildCatalog(s) {
             () => 'On: its models are loaded from the provider. Off: never asked for; only the models you add by name show.')),
         h('button', { className: 'small', textContent: 'Edit', onclick: () => openForm(p) }),
         h('button', { className: 'small danger', textContent: 'Delete', onclick: () => confirm(`Delete the provider "${p.name}"? Its models leave your list too.`) && act('/api/provider/delete', { name: p.name }, `deleted ${p.name}`) })),
-      h('div', { className: 'byname' }, name, h('button', { className: 'small byname-go', textContent: 'Add', onclick: go })),
+      h('div', { className: 'byname' }, name, h('button', { className: 'small byname-go', textContent: 'Add', onclick: go }),
+        p.added.length ? h('button', { className: 'small danger', textContent: `Clear added (${p.added.length})`, title: `forget the ${p.added.length} model${p.added.length === 1 ? '' : 's'} you added to ${p.name} by name`, onclick: () => clearAdded(p) }) : null),
       // what's listed first; loading and errors under it (the models already shown stay where they are)
-      typed.length || ids.length ? h('div', { className: 'rows' }, typed, ids.map(item)) : null,
+      typed.length ? h('div', { className: 'rows' }, typed) : null,
+      (() => {
+        if (!ids.length) return null
+        CATALOG.push({ provider: p.name, ids })
+        const box = h('div', { className: 'rows' })
+        box._ids = ids
+        box._v = virtual(box, { count: ids.length, height: CAT_ROW, row: (i) => item(ids[i]), scroller: $('p-list') })
+        return box
+      })(),
       m.error ? h('div', { className: 'cat-note', style: 'color:var(--err)' }, `can't list its models: ${shortError(m.error)} `, h('button', { className: 'small', textContent: 'Try again', onclick: () => loadModels(p.name, true) }), h('div', { className: 'muted', style: 'margin-top:4px', textContent: 'Or add a model by its exact name, above.' })) : null,
       m.loading ? h('div', { className: 'cat-note', textContent: 'Loading its models…' }) : null)
   }))
@@ -1238,10 +1524,34 @@ function sorted(order) {
   return order.map((t, i) => ({ t, i })).sort((a, b) => SORT.reduce((r, s) => r || cmp(a.t, b.t, s), 0) || a.i - b.i).map((x) => x.t)
 }
 const dirText = (key, dir) => (key === 'works' ? (dir === 'down' ? 'working first' : 'not working first') : COLS[key].how === 'text' ? (dir === 'up' ? 'A→Z' : 'Z→A') : COLS[key].how === 'cheap' ? (dir === 'up' ? 'cheapest first' : 'priciest first') : dir === 'down' ? 'most first' : 'least first')
+// The models ticked on the Your models page ("provider/model"), to remove several at once; the last
+// one ticked, so a Shift+click ticks the ones between
+const PICKED = new Set()
+let lastPicked = null
 function drawMine(s) {
   const order = s.order
   $('n-mine').textContent = order.length || ''
   const view = sorted(order)
+  for (const k of PICKED) if (placeOf(...k.split(/\/(.*)/s)) === undefined) PICKED.delete(k) // gone from the list
+  const removePicked = () => {
+    const rest = order.filter((t) => !PICKED.has(keyOf(t)))
+    const n = order.length - rest.length
+    if (!confirm(`Take ${n} model${n === 1 ? '' : 's'} off your list?${!rest.length ? ' None is left then: HeartCode has no model to use until you choose one.' : rest[0] !== order[0] ? ` HeartCode then uses ${rest[0].provider} · ${rest[0].model}.` : ''} (They stay under their providers.)`)) return
+    PICKED.clear()
+    saveOrder(rest, `${n} removed${rest.length ? '' : ': no model chosen now'}`)
+  }
+  const all = view.length > 0 && view.every((t) => PICKED.has(keyOf(t)))
+  // the tests' results, by outcome: a click selects those models (again: unselects them)
+  const outcomes = Map.groupBy(order.filter((t) => outcome(TRIES[keyOf(t)])), (t) => outcome(TRIES[keyOf(t)]))
+  const byOutcome = [...outcomes].sort(([a, x], [b, y]) => (b === 'works') - (a === 'works') || y.length - x.length).map(([what, models]) => {
+    const on = models.every((t) => PICKED.has(keyOf(t)))
+    const n = models.length
+    return h('span', { className: 'pill' + (what === 'works' ? ' ok' : ' bad') + (on ? ' on' : '') },
+      h('button', { type: 'button', className: 'pick', title: `${MEANS[what] ?? `the provider answered ${what}`}\n${on ? 'Unselect' : 'Select'} the ${n} model${n === 1 ? '' : 's'}`, onclick: () => (models.forEach((t) => (on ? PICKED.delete(keyOf(t)) : PICKED.add(keyOf(t)))), drawMine(S)) },
+        h('span', { className: 'what', textContent: what === 'works' ? '✓ works' : `✗ ${what}` }), h('span', { className: 'n', textContent: n.toLocaleString() })),
+      what === 'works' ? null : h('button', { type: 'button', className: 'again', textContent: '↻', title: `Test these ${n} again`, 'aria-label': `test the ${what} ones again`, disabled: testingAll, onclick: () => tryAll(models) }))
+  })
+
   const same = view.every((t, i) => t === order[i])
   // the order you see, saved as yours; the sort then goes (your own order from here on: drag on)
   const keep = (list, moved) => {
@@ -1249,7 +1559,7 @@ function drawMine(s) {
     try {
       localStorage.setItem('heart.sort', '[]')
     } catch {}
-    saveOrder(list, list[0] !== order[0] ? `${moved ? '' : 'order saved: '}HeartCode now uses ${list[0].provider} · ${list[0].model}` : 'order saved')
+    return saveOrder(list, list[0] !== order[0] ? `${moved ? '' : 'order saved: '}HeartCode now uses ${list[0].provider} · ${list[0].model}` : 'order saved')
   }
   // a row dragged (in the order shown, sorted or not)
   const move = (i, j) => {
@@ -1257,51 +1567,76 @@ function drawMine(s) {
     const list = [...view]
     const [t] = list.splice(i, 1)
     list.splice(j, 0, t)
-    keep(list, true)
-  }
-  const yes = (v) => h('span', { className: v ? 'yes' : 'no', textContent: v ? '✓' : '–' })
-  const src = (t) => {
-    const x = t.tested
-    if (!x) return h('div', { className: 'src', textContent: 'looking it up…' })
-    if (x.source === 'assumed') return h('div', { className: 'src warn', title: "models.dev doesn't know it: Retry, or set up what it can do" }, 'not found', retry(t), h('button', { className: 'small', textContent: 'Set up', onclick: () => openSetup(t) }))
-    return h('div', { className: 'src' }, Object.keys(x.set ?? {}).length ? 'set by you' : x.source === 'models.dev' ? 'models.dev' : FROM[x.source], h('button', { className: 'small', textContent: 'Edit', onclick: () => openSetup(t) }))
+    return keep(list, true)
   }
   const head = (key, num) => {
     const at = SORT.findIndex((x) => x.key === key)
     return h('button', { type: 'button', className: (at >= 0 ? 'on ' : '') + (num ? 'num' : ''), title: `sort by ${COLS[key].label.toLowerCase()}`, onclick: () => clickSort(key) },
       COLS[key].label, at >= 0 ? ` ${SORT[at].dir === 'up' ? '↑' : '↓'}${SORT.length > 1 ? at + 1 : ''}` : '')
   }
+  const table = order.length ? h('ol', { className: 'mtable' + (order.length < 2 ? '' : ' drag') }) : null
+  // ticked or not; with Shift, every row from the last one ticked to this one
+  const pick = (i, e) => {
+    const on = !PICKED.has(keyOf(view[i]))
+    const from = e.shiftKey && lastPicked !== null ? Math.min(lastPicked, i) : i
+    const to = e.shiftKey && lastPicked !== null ? Math.max(lastPicked, i) : i
+    for (let k = from; k <= to; k++) on ? PICKED.add(keyOf(view[k])) : PICKED.delete(keyOf(view[k]))
+    lastPicked = i
+    drawMine(S)
+  }
+  const tableV = table && virtual(table, { count: view.length, height: TABLE_ROW, row: (i) => tableRow(view[i], placeOf(view[i].provider, view[i].model), (e) => pick(i, e)), scroller: window })
+  if (tableV) tableV.items = view.length
   put($('mt'),
     h('div', { className: 'mt-top' },
       h('div', { className: 'sorts' }, SORT.length
         ? ['Sorted by ', SORT.map(({ key, dir }, k) => h('span', { className: 'chip' }, `${k + 1}. ${COLS[key].label}: ${dirText(key, dir)}`, h('button', { type: 'button', textContent: '✕', 'aria-label': `stop sorting by ${COLS[key].label}`, onclick: () => setSort(SORT.filter((x) => x.key !== key)) })))]
         : order.length > 1 ? 'In your order: HeartCode uses #1, then the next when one fails. Drag a row to move it, or click a column to sort.' : ''),
+      PICKED.size ? h('button', { className: 'small danger', textContent: `Remove ${PICKED.size} selected`, onclick: removePicked }) : null,
+      PICKED.size ? h('button', { className: 'small', textContent: `Test ${PICKED.size} selected`, disabled: testingAll, onclick: () => tryAll(order.filter((t) => PICKED.has(keyOf(t)))) }) : null,
+      PICKED.size ? h('button', { className: 'small', textContent: 'Clear selection', onclick: () => (PICKED.clear(), drawMine(S)) }) : null,
       SORT.length ? h('button', { className: 'small', textContent: 'Clear sort', onclick: () => setSort([]) }) : null,
       SORT.length ? h('button', { className: 'small primary', textContent: same ? 'This is your order' : 'Use this order', disabled: same, onclick: () => keep(view) }) : null,
       order.length ? h('button', { className: 'small', textContent: 'Refresh from models.dev', title: 'ask models.dev again what each model can do: context, tools, thinking, images, price', onclick: () => lookUp() }) : null,
-      order.length ? h('button', { className: 'small', textContent: 'Test all', title: 'send each a short message, several at once (2 per provider at most), to see which really answer', onclick: () => tryAll() }) : null),
+      order.length ? h('button', { className: 'small', textContent: 'Test all', disabled: testingAll, title: 'send each a short message to see which really answer: every provider at once, a few from each (one at a time per 100 models)', onclick: () => tryAll() }) : null),
     order.length
       ? h('div', { className: 'mt-scroll' }, h('div', { className: 'mt' },
-          h('div', { className: 'mt-h' }, h('span'), h('span', { textContent: '#' }), head('model'), head('provider'), head('context', true), head('abilities', true), head('tools'), head('thinking'), head('images'), head('input', true), head('output', true), h('span', { textContent: 'From' }), head('works'), h('span')),
-          h('ol', { className: 'mtable' + (order.length < 2 ? '' : ' drag') }, view.map((t) => {
-            const c = can(t)
-            const ctx = COLS.context.get(t)
-            return h('li', { className: 'in', 'data-key': `${t.provider}/${t.model}` },
-              h('span', { className: 'grip', textContent: '⋮⋮', 'aria-hidden': 'true' }),
-              h('span', { className: 'n', textContent: `#${order.indexOf(t) + 1}`, title: SORT.length ? 'its place in your order now' : '' }),
-              h('span', { className: 'm', textContent: t.model }),
-              h('span', { className: 'p', textContent: t.provider }),
-              h('span', { className: 'num', textContent: ctx ? `${t.tested?.sure === false ? '~' : ''}${kTok(ctx)}` : '–' }),
-              h('span', { className: 'num', textContent: `${Object.values(c).filter(Boolean).length} of 3` }),
-              yes(c.tools), yes(c.thinking), yes(c.images),
-              h('span', { className: 'num', textContent: t.price?.input != null ? usd(t.price.input) : '–' }),
-              h('span', { className: 'num', textContent: t.price?.output != null ? usd(t.price.output) : '–' }),
-              src(t),
-              triedCell(t),
-              h('button', { className: 'danger', textContent: '✕', title: 'take it off the list', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) }))
-          }))))
+          jobSlot('table'),
+          byOutcome.length ? h('div', { className: 'mt-outcomes' }, h('span', { textContent: 'Test results', title: 'click one to select those models; ↻ tests them again' }), byOutcome) : null,
+          h('div', { className: 'mt-h' }, h('span'),
+            h('input', { type: 'checkbox', checked: all, indeterminate: PICKED.size > 0 && !all, title: all ? 'select none' : 'select all', 'aria-label': 'select all', onchange: () => (all ? PICKED.clear() : view.forEach((t) => PICKED.add(keyOf(t))), (lastPicked = null), drawMine(S)) }),
+            h('span', { textContent: '#' }), head('model'), head('provider'), head('context', true), head('abilities', true), head('tools'), head('thinking'), head('images'), head('input', true), head('output', true), h('span', { textContent: 'From' }), head('works'), h('span')),
+          table))
       : h('div', { className: 'mt-empty' }, 'No models in your list yet. ', h('a', { href: '#providers', textContent: 'Choose some under Providers & models' }), '.'))
-  sortable($('mt').querySelector('.mtable'), move)
+  tableV?.draw()
+  sortable(tableV, move)
+}
+// the table's cells: yes or no; where what it can do comes from
+const yes = (v) => h('span', { className: v ? 'yes' : 'no', textContent: v ? '✓' : '–' })
+const src = (t) => {
+  const x = t.tested
+  if (!x) return h('div', { className: 'src', textContent: 'looking it up…' })
+  if (x.source === 'assumed') return h('div', { className: 'src warn', title: "models.dev doesn't know it: Retry, or set up what it can do" }, 'not found', retry(t), h('button', { className: 'small', textContent: 'Set up', onclick: () => openSetup(t) }))
+  return h('div', { className: 'src' }, Object.keys(x.set ?? {}).length ? 'set by you' : x.source === 'models.dev' ? 'models.dev' : FROM[x.source], h('button', { className: 'small', textContent: 'Edit', onclick: () => openSetup(t) }))
+}
+// a row of the table: one model of your list, in the order shown (at: its place in your order)
+function tableRow(t, at, pick) {
+  const c = can(t)
+  const ctx = COLS.context.get(t)
+  const picked = PICKED.has(keyOf(t))
+  return h('li', { className: 'in' + (picked ? ' picked' : ''), 'data-key': `${t.provider}/${t.model}` },
+    h('span', { className: 'grip', textContent: '⋮⋮', 'aria-hidden': 'true' }),
+    h('input', { type: 'checkbox', checked: picked, 'aria-label': `select ${t.model}`, title: 'select (Shift: and every row up to the last one selected)', onclick: (e) => (e.preventDefault(), pick(e)) }),
+    h('span', { className: 'n', textContent: `#${at + 1}`, title: SORT.length ? 'its place in your order now' : '' }),
+    h('span', { className: 'm', textContent: t.model, title: t.model }),
+    h('span', { className: 'p', textContent: t.provider, title: t.provider }),
+    h('span', { className: 'num', textContent: ctx ? `${t.tested?.sure === false ? '~' : ''}${kTok(ctx)}` : '–' }),
+    h('span', { className: 'num', textContent: `${Object.values(c).filter(Boolean).length} of 3` }),
+    yes(c.tools), yes(c.thinking), yes(c.images),
+    h('span', { className: 'num', textContent: t.price?.input != null ? usd(t.price.input) : '–' }),
+    h('span', { className: 'num', textContent: t.price?.output != null ? usd(t.price.output) : '–' }),
+    src(t),
+    triedCell(t),
+    h('button', { className: 'danger', textContent: '✕', title: 'take it off the list', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) }))
 }
 
 // your list changed: the rows and counts it touches, in place
@@ -1444,11 +1779,15 @@ async function openReq(r) {
   reqOpen = `${r.run}/${r.file}`
   for (const b of $('l-list').querySelectorAll('.rq')) b.classList.toggle('on', b.dataset.key === reqOpen)
   let d
+  put($('l-detail-pane'), jobSlot('request'))
+  job('request', { where: ['request'], what: 'Loading the request', detail: `${r.model ?? ''} · its messages and reply` })
   try {
     d = await api('/api/request', { run: r.run, file: r.file })
   } catch (e) {
+    job('request')
     return put($('l-detail-pane'), h('div', { className: 'empty', textContent: `Can't read it: ${e.message}` }))
   }
+  job('request')
   const row = (k, v) => (v === undefined || v === null || v === '' ? null : [h('dt', { textContent: k }), h('dd', { textContent: String(v) })])
   const pre = (text) => h('pre', { textContent: typeof text === 'string' ? text : JSON.stringify(text, null, 2) })
   const msgs = d.request?.messages ?? []
@@ -1605,6 +1944,7 @@ function drawFiles(s) {
 
 function render(s) {
   S = s
+  for (const [key, r] of Object.entries(TRIES)) if (!r.going && placeOf(...key.split(/\/(.*)/s)) === undefined) delete TRIES[key] // off your list: its result too
   drawProviders(s)
   drawMine(s)
   drawUsing(s)
@@ -1621,8 +1961,12 @@ showPage()
 drawPresets()
 if (!token) put($('page-providers'), h('h1', { textContent: 'Open the link HeartCode printed' }), h('p', { className: 'lead', textContent: 'It has the key to this page: /settings in HeartCode, or heart settings.' }))
 else {
-  api('/api/state').then(render, (e) => toast(e.message, true))
-  api('/api/requests').then(({ items }) => ((REQS = items), drawReqs()), () => ((REQS = []), drawReqs()))
+  job('state', { where: ['page'], what: 'Loading your settings', detail: 'providers, models, logging, prompts, MCP servers, skills' })
+  api('/api/state').then(render, (e) => toast(e.message, true)).finally(() => job('state'))
+    .then(() => api('/api/tests', {}))
+    .then(({ results, run }) => (Object.assign(TRIES, results), showRun(run)), (e) => toast(`the tests so far: ${e.message}`, true)) // and one going
+  job('requests', { where: ['requests'], what: 'Loading the request log', detail: 'every request HeartCode logged' })
+  api('/api/requests').then(({ items }) => ((REQS = items), drawReqs()), () => ((REQS = []), drawReqs())).finally(() => job('requests'))
 }
 // A model's test, as it goes: the server streams each change; only its line in your list changes.
 if (token) {
@@ -1638,13 +1982,29 @@ if (token) {
     const failed = REQS.filter((x) => x.result === 'failed').length
     $('n-failed').textContent = failed ? `${failed} failed` : ''
   })
+  // a test's result, and the run's progress (from the server, whichever page started it)
+  events.addEventListener('tested', (e) => {
+    const { key, result } = JSON.parse(e.data)
+    gotResult(key, result)
+  })
+  events.addEventListener('testrun', (e) => showRun(JSON.parse(e.data)))
+  // many at once (thousands of models added): taken in once a frame, the table drawn once
+  const news = new Map()
   events.addEventListener('test', (e) => {
     const d = JSON.parse(e.data)
-    const t = S?.order.find((x) => `${x.provider}/${x.model}` === d.key)
-    if (!t) return
-    Object.assign(t, { tested: d.tested ?? t.tested, known: d.known ?? t.known })
-    document.querySelector(`#inuse li[data-key="${CSS.escape(d.key)}"] .test`)?.replaceWith(testLine(t))
-    drawMine(S)
+    news.set(d.key, d)
+    if (news.size > 1) return
+    requestAnimationFrame(() => {
+      if (!S) return news.clear()
+      for (const d of news.values()) {
+        const t = S.order[placeOf(...d.key.split(/\/(.*)/s))]
+        if (!t) continue
+        Object.assign(t, { tested: d.tested ?? t.tested, known: d.known ?? t.known })
+        document.querySelector(`#inuse li[data-key="${CSS.escape(d.key)}"] .test`)?.replaceWith(testLine(t))
+      }
+      news.clear()
+      drawMine(S)
+    })
   })
 }
 </script>

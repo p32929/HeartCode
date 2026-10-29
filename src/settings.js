@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import os from 'node:os'
-import { HOME, saveConfig, readJson, writeJson } from './config.js'
+import { HOME, saveConfig, readJson, writeJson, byName } from './config.js'
 import { DEFAULT_SERVERS } from './mcp.js'
 import { sections, BUILTIN_PROMPTS } from './prompts.js'
 import { Client } from './client.js'
@@ -98,6 +98,17 @@ const skillsDir = () => path.join(HOME, 'skills')
 
 // cfg: the running HeartCode's config (changed in place, and saved). apply(what): after a change,
 // to bring it into the running sessions ('model', 'setting:<name>', 'theme', 'mcp', 'skill', 'keys').
+// Each provider's model list, kept after it's loaded: { name: { baseUrl, at, models, details } },
+// what the provider said (names, sizes, prices; not what's known from models.dev or tests, which
+// changes). Asked for again when its list is switched on or off, or the provider is changed.
+const LISTS = path.join(HOME, 'model-lists.json')
+function forgetList(...names) {
+  const all = readJson(LISTS, {})
+  if (!names.some((n) => n in all)) return
+  for (const n of names) delete all[n]
+  writeJson(LISTS, all)
+}
+
 export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
   const token = crypto.randomBytes(24).toString('hex')
   const changed = (what) => {
@@ -183,8 +194,139 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
     return clip(`${e.status ? `${e.status}: ` : ''}${said}`, 300)
   }
 
+  // Model tests: one short message to a model, to see that it really answers (key, access, name, the
+  // server itself), in the requests log as a model test. Run here, not in the page: closing the page
+  // doesn't stop them. Each result is kept in ~/.heart/model-tests.json ("provider/model" → { ok, ms,
+  // reply | error, status, at }) and sent to the page as it comes.
+  const TESTS_FILE = path.join(HOME, 'model-tests.json')
+  const tests = readJson(TESTS_FILE, {})
+  let saving = null
+  const saveTests = () => (saving ??= setTimeout(() => ((saving = null), writeJson(TESTS_FILE, tests)), 1000)) // at most once a second
+  // a model taken off your list: its test result goes too (added again, it's not tested)
+  const forgetTests = () => {
+    const mine = new Set(state().order.map((t) => `${t.provider}/${t.model}`))
+    let gone = 0
+    for (const key of Object.keys(tests)) if (!mine.has(key)) (delete tests[key]), gone++
+    if (gone) saveTests()
+  }
+  // Never throws: { ok, ms, reply } or { ok: false, ms, status, error }; { stopped } when stop
+  // (a run's Stop) cancels it.
+  async function tryOne({ provider, model }, stop) {
+    const c = clientFor({ provider, model })
+    if (!c || !model) return { ok: false, error: `no provider "${provider}"` }
+    c.purpose = 'test'
+    const t0 = Date.now()
+    try {
+      const signal = stop ? AbortSignal.any([AbortSignal.timeout(90_000), stop]) : AbortSignal.timeout(90_000)
+      const r = await c.chat({ messages: [{ role: 'user', content: 'Reply with just the word OK.' }], stream: true }, { signal })
+      const reply = (r.content || '').trim()
+      if (!reply && !r.toolCalls.length) return { ok: false, ms: Date.now() - t0, error: `it answered with nothing${r.usage?.completion_tokens ? ` (${r.usage.completion_tokens} tokens it said it wrote)` : ''}` }
+      return { ok: true, ms: Date.now() - t0, reply: reply.slice(0, 80) }
+    } catch (e) {
+      if (stop?.aborted) return { stopped: true }
+      return { ok: false, ms: Date.now() - t0, status: e.status ?? null, error: e.name === 'TimeoutError' ? 'no answer within 90 seconds' : whyFailed(e), ...(e.retryAfter > 0 && { retryAfter: Number(e.retryAfter) }) }
+    }
+  }
+  // result: kept and sent to the page (given: a test already made, as a run decided to end it)
+  async function testOne(t, given) {
+    const key = `${t.provider}/${t.model}`
+    const result = { ...(given ?? (await tryOne(t))), at: Date.now() }
+    tests[key] = result
+    saveTests()
+    emit('tested', { key, result })
+    return result
+  }
+  // The run going now: every provider at once, and from each a few models at a time: one per 100
+  // models being tested (100: one at a time, 200: two…). A provider that says it's busy (429)
+  // isn't a result about the model: that provider goes down to one at a time and pauses (as long
+  // as it asks, else 15s, 30s… up to 2 minutes), and the model is tried again later; it's kept as
+  // a 429 only after the provider refused it RATE_TRIES times. A model taken off your list while
+  // it runs isn't tested. Stop: each provider finishes the one it's on.
+  const RATE_TRIES = 4
+  let run = null
+  const runState = () => ({
+    total: run.total, done: run.done, good: run.good, each: run.each, busy: [...run.busy.keys()], stopping: run.stopping, some: run.some, started: run.started,
+    paused: Object.fromEntries([...run.providers].filter(([, p]) => p.until > Date.now()).map(([name, p]) => [name, Math.ceil((p.until - Date.now()) / 1000)])),
+  })
+  // your models now ("provider/model"), to skip the ones taken off while a run goes
+  let mineOf = { then: undefined, model: undefined, keys: null }
+  const inMine = (key) => {
+    if (mineOf.then !== cfg.rotation?.then || mineOf.model !== cfg.model || mineOf.provider !== cfg.provider)
+      mineOf = { then: cfg.rotation?.then, model: cfg.model, provider: cfg.provider, keys: new Set(state().order.map((t) => `${t.provider}/${t.model}`)) }
+    return mineOf.keys.has(key)
+  }
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+  async function startRun(list, some) {
+    const each = Math.max(1, Math.ceil(list.length / 100))
+    run = { total: list.length, done: 0, good: 0, each, busy: new Map(), pending: new Set(list.map((t) => `${t.provider}/${t.model}`)), stopping: false, some, started: Date.now(), providers: new Map(), cancel: new AbortController() }
+    emit('testrun', runState())
+    for (const t of list) {
+      if (!run.providers.has(t.provider)) run.providers.set(t.provider, { queue: [], cap: each, until: 0, pausedAt: 0, backoff: 15_000, refused: new Map() })
+      run.providers.get(t.provider).queue.push(t)
+    }
+    const ticker = setInterval(() => run && Object.keys(runState().paused).length && emit('testrun', runState()), 1000) // the pauses counting down
+    // a provider's worker n: its next model, while there's one and n is under its cap (a busy
+    // provider's cap goes down to one: the others stop; the last one left never does)
+    const worker = async (provider, n) => {
+      const p = run.providers.get(provider)
+      while (!run.stopping && p.queue.length && (n < p.cap || p.live === 1)) {
+        if (p.until > Date.now()) {
+          await wait(Math.min(200, p.until - Date.now()))
+          continue
+        }
+        const t = p.queue.shift()
+        const key = `${t.provider}/${t.model}`
+        if (!inMine(key)) {
+          run.pending.delete(key)
+          run.total--
+          emit('testrun', runState())
+          continue
+        }
+        run.busy.set(provider, (run.busy.get(provider) ?? 0) + 1)
+        const sent = Date.now()
+        const r = await tryOne(t, run.cancel.signal)
+        if (r.stopped) break // Stop: not a result (its last one stays)
+        run.busy.get(provider) > 1 ? run.busy.set(provider, run.busy.get(provider) - 1) : run.busy.delete(provider)
+        if (r.status === 429) {
+          const times = (p.refused.get(key) ?? 0) + 1
+          p.refused.set(key, times)
+          p.cap = 1
+          // a pause, longer each time; not for refusals of requests sent before the last pause began
+          // (several at once are one burst)
+          if (!(sent < p.pausedAt)) {
+            p.pausedAt = Date.now()
+            p.until = Date.now() + Math.min(120_000, r.retryAfter > 0 ? r.retryAfter * 1000 : p.backoff)
+            p.backoff = Math.min(120_000, p.backoff * 2)
+          }
+          log('test', `${provider} is busy (429): one at a time, pausing ${Math.round((p.until - Date.now()) / 1000)}s${times < RATE_TRIES ? `; ${t.model} again later` : ''}`)
+          if (times < RATE_TRIES) {
+            p.queue.push(t)
+            emit('testrun', runState())
+            continue
+          }
+          r.error = `the provider kept saying it's busy (429), ${times} times with pauses between: try it again later`
+        } else if (r.ok) p.backoff = 15_000
+        await testOne(t, r)
+        run.pending.delete(key)
+        run.done++
+        if (r.ok) run.good++
+        emit('testrun', runState())
+      }
+      p.live--
+    }
+    for (const p of run.providers.values()) p.live = Math.min(each, p.queue.length)
+    try {
+      await Promise.all([...run.providers].flatMap(([provider, p]) => Array.from({ length: p.live }, (_, n) => worker(provider, n))))
+    } finally {
+      clearInterval(ticker)
+      const over = { ...runState(), over: true }
+      run = null
+      emit('testrun', over)
+    }
+  }
+
   const state = () => ({
-    providers: Object.entries(cfg.providers)
+    providers: Object.entries(byName(cfg.providers))
       .filter(([n]) => n !== cfg.adhoc)
       .map(([name, p]) => ({ name, baseUrl: p.baseUrl, key: mask(p.apiKey), list: p.list !== false, added: p.models ?? [] })),
     provider: cfg.provider ?? null,
@@ -228,12 +370,15 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
       }
       cfg.providers[name] = { ...old, baseUrl, apiKey: key } // its list switch and added models stay
       if (!key) delete cfg.providers[name].apiKey
+      forgetList(name, ...(was ? [was] : [])) // a new URL or key: its models asked for again
       save('model')
+      forgetTests()
       return state()
     },
     'POST /api/provider/delete': ({ name }) => {
       if (!cfg.providers[name]) throw new Error(`no provider "${name}"`)
       delete cfg.providers[name]
+      forgetList(name)
       if (cfg.rotation?.then) cfg.rotation.then = cfg.rotation.then.filter((t) => t.provider !== name)
       if (cfg.provider === name) {
         const [first, ...rest] = cfg.rotation?.then ?? [] // the next in the list becomes #1
@@ -241,23 +386,34 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
         if (cfg.rotation) cfg.rotation.then = rest
       }
       save('model')
+      forgetTests()
       return state()
     },
     // a provider's models, and what's known about each (for the page's tooltip): what the provider
     // says (name, context, owner, date, description, price), HeartCode's price list, its own test
     // Its model list switched off: HeartCode never asks it for its models; only the ones added by name show.
+    // one provider's list on or off, or every provider's (no name)
     'POST /api/provider/list': ({ name, on }) => {
-      const p = cfg.providers[name]
-      if (!p) throw new Error(`no provider "${name}"`)
-      if (on) delete p.list
-      else p.list = false
+      if (name !== undefined && !cfg.providers[name]) throw new Error(`no provider "${name}"`)
+      for (const [n, p] of Object.entries(cfg.providers)) {
+        if (name !== undefined && n !== name) continue
+        if (on) delete p.list
+        else p.list = false
+      }
+      forgetList(...(name !== undefined ? [name] : Object.keys(cfg.providers))) // switched: loaded again
       save('provider')
       return state()
     },
     // A model added by its name (one the provider doesn't list, or its list is off): remembered.
-    'POST /api/provider/added': ({ name, model, remove }) => {
+    // all: every model added by name forgotten at once
+    'POST /api/provider/added': ({ name, model, remove, all }) => {
       const p = cfg.providers[name]
       if (!p) throw new Error(`no provider "${name}"`)
+      if (all) {
+        delete p.models
+        save('provider')
+        return state()
+      }
       model = String(model ?? '').trim()
       if (!model) throw new Error('a model is needed')
       const rest = (p.models ?? []).filter((m) => m !== model)
@@ -270,26 +426,32 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
       const p = cfg.providers[name]
       if (!p) throw new Error(`no provider "${name}"`)
       if (p.list === false) return { models: [], details: {}, off: true }
-      const entries = await new Client({ baseUrl: p.baseUrl, apiKey: p.apiKey }).modelEntries()
-      await loadPrices().catch(() => null)
-      const num = (...xs) => xs.map(Number).find((x) => x > 0)
-      const details = Object.fromEntries(entries.map((m) => {
-        const id = String(m.id ?? m.name)
-        const perMillion = (x) => Number((Number(x) * 1e6).toPrecision(6)) // OpenRouter: per token
-        const listed = m.pricing && { input: perMillion(m.pricing.prompt), output: perMillion(m.pricing.completion) }
-        const price = priceOf(name, p.baseUrl, id) ?? (listed && Number.isFinite(listed.input) ? listed : null)
-        const profile = loadProfile(new Client({ baseUrl: p.baseUrl, apiKey: p.apiKey, model: id }))
-        return [id, {
-          name: m.name && m.name !== id ? String(m.name) : undefined,
+      const lists = readJson(LISTS, {})
+      let saved = lists[name]?.baseUrl === p.baseUrl ? lists[name] : null
+      if (!saved) {
+        const entries = await new Client({ baseUrl: p.baseUrl, apiKey: p.apiKey }).modelEntries()
+        const num = (...xs) => xs.map(Number).find((x) => x > 0)
+        saved = { baseUrl: p.baseUrl, at: Date.now(), models: entries.map((m) => String(m.id ?? m.name)), details: Object.fromEntries(entries.map((m) => [String(m.id ?? m.name), {
+          name: m.name && m.name !== String(m.id ?? m.name) ? String(m.name) : undefined,
           context: num(m.context_length, m.context_window, m.max_model_len, m.max_context_length, m.top_provider?.context_length),
           owner: m.owned_by && m.owned_by !== 'system' ? String(m.owned_by) : undefined,
           created: num(m.created) && Number(m.created) > 946684800 ? Number(m.created) * 1000 : undefined, // seconds; 2000 or later
           description: m.description ? String(m.description).slice(0, 400) : undefined,
-          price: price ? { input: price.input, output: price.output } : undefined,
+          price: listedPrice(m),
+        }])) }
+        writeJson(LISTS, { ...readJson(LISTS, {}), [name]: saved })
+      }
+      await loadPrices().catch(() => null)
+      // and what's known now: its test or setup, and models.dev
+      const details = Object.fromEntries(saved.models.map((id) => {
+        const profile = loadProfile(new Client({ baseUrl: p.baseUrl, apiKey: p.apiKey, model: id }))
+        return [id, {
+          ...saved.details[id],
           tested: profile ? { mode: strategy(profile).actions, context: profile.context, thinking: Boolean(profile.thinking), vision: strategy(profile).vision } : undefined,
+          known: limitsOf(name, p.baseUrl, id) ?? undefined,
         }]
       }))
-      return { models: entries.map((m) => String(m.id ?? m.name)), details }
+      return { models: saved.models, details, at: saved.at }
     },
     'POST /api/model': ({ provider, model }) => {
       if (!cfg.providers[provider]) throw new Error(`no provider "${provider}"`)
@@ -298,6 +460,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
       if (cfg.rotation?.then) cfg.rotation.then = cfg.rotation.then.filter((t) => t.provider !== provider || t.model !== cfg.model) // #1 now, not also further down
       save('model')
       test([{ provider, model: cfg.model }])
+      forgetTests()
       return state()
     },
     // the model list, in order (#1 is the model), and when to go on to the next
@@ -322,6 +485,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
       saveConfig(cfg)
       changed(changed1 ? 'model' : 'setting:rotation')
       test(clean)
+      forgetTests()
       return state()
     },
     // models.dev again (one model, or all of yours): its list fetched anew, and each model's profile
@@ -329,19 +493,22 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
     // for it stay above). A running HeartCode takes it at once.
     // Test: one short message to the model, to see that it answers (key, access, name, the server
     // itself). In the requests log as a model test. Never throws: { ok, ms, reply } or { ok: false, error }.
-    'POST /api/try': async ({ provider, model } = {}) => {
-      const c = clientFor({ provider, model: String(model ?? '') })
-      if (!c || !model) return { ok: false, error: `no provider "${provider}"` }
-      c.purpose = 'test'
-      const t0 = Date.now()
-      try {
-        const r = await c.chat({ messages: [{ role: 'user', content: 'Reply with just the word OK.' }], stream: true }, { signal: AbortSignal.timeout(90_000) })
-        const reply = (r.content || '').trim()
-        if (!reply && !r.toolCalls.length) return { ok: false, ms: Date.now() - t0, error: `it answered with nothing${r.usage?.completion_tokens ? ` (${r.usage.completion_tokens} tokens it said it wrote)` : ''}` }
-        return { ok: true, ms: Date.now() - t0, reply: reply.slice(0, 80) }
-      } catch (e) {
-        return { ok: false, ms: Date.now() - t0, status: e.status ?? null, error: e.name === 'TimeoutError' ? 'no answer within 90 seconds' : whyFailed(e) }
-      }
+    'POST /api/try': ({ provider, model } = {}) => testOne({ provider, model: String(model ?? '') }),
+    // the tests' results, and the run going now (with the models it hasn't tested yet)
+    'POST /api/tests': () => ({ results: tests, run: run && { ...runState(), pending: [...run.pending] } }),
+    // a run: all your models, or the ones given (only); one at a time if one is going already
+    'POST /api/tests/start': ({ only } = {}) => {
+      if (run) throw new Error('a test is running: wait for it, or stop it')
+      const order = state().order
+      const mine = new Set(order.map((t) => `${t.provider}/${t.model}`))
+      const list = Array.isArray(only) ? only.map((t) => ({ provider: String(t?.provider ?? ''), model: String(t?.model ?? '') })).filter((t) => mine.has(`${t.provider}/${t.model}`)) : order.map(({ provider, model }) => ({ provider, model }))
+      if (!list.length) throw new Error('no model to test')
+      startRun(list, Array.isArray(only))
+      return { run: { ...runState(), pending: [...run.pending] } }
+    },
+    'POST /api/tests/stop': () => {
+      if (run && !run.stopping) (run.stopping = true), run.cancel.abort(), emit('testrun', runState()) // the ones on their way: cancelled
+      return {}
     },
     'POST /api/models-dev': async ({ provider, model } = {}) => {
       await loadPrices({ force: true })
@@ -551,6 +718,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
   })
   return new Promise((resolve, reject) => {
     server.on('error', reject)
+    forgetTests() // results of models no longer yours, left from before
     server.listen(port, '127.0.0.1', () => {
       const url = `http://127.0.0.1:${server.address().port}/?t=${token}`
       log('web', `settings page at 127.0.0.1:${server.address().port}`)
@@ -563,6 +731,28 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
       resolve({ url, server, close: () => (watcher?.close(), server.closeAllConnections?.(), server.close()) })
     })
   })
+}
+
+// What a model costs at this provider, per million tokens, as its own model list says: { input,
+// output } (either may be missing), or undefined. Not models.dev's: the same model costs differently
+// at different providers. The forms lists use: pricing.prompt/completion (per token, OpenRouter's);
+// pricing.input/output with a unit (per million when it says so; no unit: per token when it's that
+// small); input_price/output_price (per token); pricepermilliontokens; only a free tier.
+export function listedPrice(m) {
+  const num = (x) => (x === null || x === undefined || x === '' || !(Number(x) >= 0) ? undefined : Number(x)) // -1: varies (a router's "auto")
+  const pr = m.pricing && typeof m.pricing === 'object' && !Array.isArray(m.pricing) ? m.pricing : {}
+  const unit = (x) => (pr.unit ? (/1m|million/i.test(pr.unit) ? 1 : 1e6) : x < 0.001 ? 1e6 : 1)
+  for (const [i, o, k] of [
+    [num(pr.prompt), num(pr.completion), () => 1e6],
+    [num(pr.input), num(pr.output), unit],
+    [num(m.input_price), num(m.output_price), () => 1e6],
+    [num(m.pricepermilliontokens), num(m.output_pricepermilliontokens), () => 1],
+  ]) {
+    if (i === undefined && o === undefined) continue
+    const per = (x) => (x === undefined ? undefined : Number((x * k(x)).toPrecision(6)))
+    return { input: per(i), output: per(o) }
+  }
+  if (m.is_free === true || m.tier === 'free' || m.access_tier === 'free') return { input: 0, output: 0 }
 }
 
 function removeSkill(name) {
