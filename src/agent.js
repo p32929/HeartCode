@@ -695,9 +695,12 @@ async function runNative(s, task, images, signal) {
       // shorter conversation fits (a per-minute cap smaller than that), so not tried again
       const fixed = Math.round((est(JSON.stringify(tools)) + sizeOf(s.messages[0])) * (strat.ratio ?? 1))
       if (fixed >= e.inputLimit) throw Object.assign(e, { message: `${e.message} (the system prompt and tools alone are ~${fixed} tokens: this can't fit)` })
-      s.sizeCap = Math.min(s.sizeCap ?? Infinity, e.inputLimit)
       out.end()
-      shrink *= 0.8 // strat.context already dropped to the limit; leave more headroom each time
+      // e.fitted: the next model's window is smaller (strat already follows it): compacted at once
+      if (!e.fitted) {
+        s.sizeCap = Math.min(s.sizeCap ?? Infinity, e.inputLimit)
+        shrink *= 0.8 // strat.context already dropped to the limit; leave more headroom each time
+      }
       step--
       continue
     }

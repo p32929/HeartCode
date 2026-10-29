@@ -58,6 +58,8 @@ list, a model that can't be used (a wrong key, no access to it, a name the serve
 401, 403, 404) also makes way for the next one, and so does one that keeps replying with nothing. When a
 provider answers with an error (status 400 or above), the next model tried is from another
 provider; that provider's other models are tried only after every provider has had a go.
+A model that takes over with a smaller context window gets the conversation summarized first, if it
+wouldn't fit.
 The run stops with that error and exit code `1` when every model in the list fails that way, or
 when a single model (`-m <model>`) does. A request a server refuses (400) is sent as it is to two
 more models of the list at most, then the run stops (unless the user set the fallback rule to "at

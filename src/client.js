@@ -425,7 +425,15 @@ export class Client {
     let refusedBy = 0 // models that refused this request (a bad request), tried in turn
     const tried = new Set() // places in the model list tried for this request
     const down = new Set() // providers that answered it with an error (400 or above): their other models are skipped
+    const first = this.target
     for (let attempt = 0; ; attempt++) {
+      // moved on to a model with a smaller window than the conversation was fitted to: handed back
+      // (as "too large", at that window) so the caller summarizes it first, instead of a refusal
+      const sent = this.target !== first && body.messages && this.can?.context && Math.round(estMessages(body.messages) * this.tokenRatio)
+      if (sent > this.can.context * 0.9) {
+        log('limit', `${this.model}: ~${sent} tokens don't fit its window (${this.can.context}); handed back to be made smaller`)
+        throw Object.assign(new Error(`the conversation (~${sent} tokens) is too large for ${this.model} (${this.can.context})`), { inputLimit: this.can.context, fitted: true })
+      }
       try {
         const r = await this.#timed(body, { ...opts, once: true })
         if (attempt) this.onRetry(null)
