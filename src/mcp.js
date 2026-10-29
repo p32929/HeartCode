@@ -120,6 +120,7 @@ class Server {
     log('mcp', `starting ${this.name}: ${command} ${args.join(' ')}`)
     const child = (this.child = spawn(command, args, { cwd: this.root ?? undefined, env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' })) // in the project, so a relative path in its config works
     let buf = ''
+    child.stdout.setEncoding('utf8') // a character split between two chunks stays whole
     child.stdout.on('data', (d) => {
       buf += d
       let nl
@@ -133,8 +134,11 @@ class Server {
     const gone = new Promise((_, reject) => {
       child.on('error', (e) => reject(new Error(`${this.name} could not start: ${e.message}`)))
       child.on('exit', (code) => {
-        this.ready = null
-        this.#failAll(new Error(`${this.name} stopped (exit ${code})`))
+        // a server started again since: this old one's exit is nothing to the new one
+        if (this.child === child) {
+          this.ready = null
+          this.#failAll(new Error(`${this.name} stopped (exit ${code})`))
+        }
         reject(new Error(`${this.name} stopped (exit ${code})`))
       })
     })
@@ -235,6 +239,8 @@ class Server {
         return log('mcp', `${this.name} sent a non-JSON line: ${line.slice(0, 200)}`)
       }
     }
+    // a long call saying it's still at work: its time to answer starts again
+    if (msg.method === 'notifications/progress') return this.pending.get(msg.params?.progressToken)?.alive?.()
     if (msg.id !== undefined && (msg.result !== undefined || msg.error) && this.pending.has(msg.id)) {
       const { resolve, reject } = this.pending.get(msg.id)
       this.pending.delete(msg.id)
@@ -249,13 +255,21 @@ class Server {
     }
   }
 
+  // timeout: how long it may go without answering, or saying it's still at work (a tool call asks
+  // for progress notifications; each one gives it the time again)
   request(method, params, timeout = 120_000, signal) {
     return new Promise((resolve, reject) => {
       const id = this.next++
-      const timer = setTimeout(() => {
-        this.pending.delete(id)
-        reject(new Error(`${this.name} did not answer ${method} within ${timeout / 1000}s`))
-      }, timeout)
+      let timer
+      const alive = () => {
+        clearTimeout(timer)
+        timer = setTimeout(() => {
+          this.pending.delete(id)
+          reject(new Error(`${this.name} did not answer ${method} within ${timeout / 1000}s`))
+        }, timeout)
+      }
+      alive()
+      if (method === 'tools/call') params = { ...params, _meta: { ...params?._meta, progressToken: id } }
       const done = (fn) => (v) => {
         clearTimeout(timer)
         signal?.removeEventListener('abort', onAbort)
@@ -266,7 +280,7 @@ class Server {
         done(reject)(Object.assign(new Error('stopped'), { name: 'AbortError' }))
       }
       signal?.addEventListener('abort', onAbort, { once: true })
-      this.pending.set(id, { resolve: done(resolve), reject: done(reject) })
+      this.pending.set(id, { resolve: done(resolve), reject: done(reject), alive })
       this.#send({ jsonrpc: '2.0', id, method, params })
     })
   }
@@ -277,7 +291,7 @@ class Server {
       this.tools = []
       let cursor
       do {
-        const r = await this.request('tools/list', cursor ? { cursor } : {})
+        const r = await this.request('tools/list', cursor ? { cursor } : {}, 120_000, signal)
         this.tools.push(...(r.tools ?? []))
         cursor = r.nextCursor
       } while (cursor)
@@ -296,6 +310,7 @@ class Server {
     if (this.url) {
       this.abort?.abort()
       Object.assign(this, { ready: null, session: null, endpoint: null })
+      this.#failAll(new Error(`${this.name} was stopped`))
       return
     }
     if (!this.child) return
@@ -305,6 +320,7 @@ class Server {
     } catch {}
     this.child = null
     this.ready = null
+    this.#failAll(new Error(`${this.name} was stopped`)) // calls waiting on it fail now (its exit comes later, ignored)
   }
 }
 

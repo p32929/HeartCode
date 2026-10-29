@@ -45,7 +45,7 @@ const matches = (matcher, tool) => {
   if (!matcher || matcher === '*' || !tool) return true
   try {
     const re = new RegExp(`^(?:${matcher})$`)
-    return re.test(tool) || re.test(CLAUDE_NAMES[tool] ?? '') || (tool === 'mcp' && /^mcp__/.test(matcher))
+    return re.test(tool) || re.test(CLAUDE_NAMES[tool] ?? '')
   } catch {
     return matcher === tool
   }

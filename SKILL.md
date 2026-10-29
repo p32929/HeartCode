@@ -51,15 +51,19 @@ reached has an `error` and is skipped; the command still exits `0`.
 | `default`, or no `-m` | the user's list: #1, and the next one in order when it fails (rate limits, outages…). Use this unless you need one particular model. |
 | a model from the list: `-m "<provider> <model>"` (`-m "groq openai/gpt-oss-120b"`), or `-m <model>` alone | that model alone: never another one, also when it fails (a rate limit or an outage is tried again, up to `--max-retries`) |
 
-**Failures:** a rate limit, a server error, a timeout or a lost connection is waited out and tried
+**Failures:** a rate limit, a server error, a timeout, a reply that stops coming (nothing for 150s),
+a lost connection, or an error page from a proxy in front of the provider is waited out and tried
 again (or handed to the next model in the list), up to `--max-retries` (10). With the default
 list, a model that can't be used (a wrong key, no access to it, a name the server doesn't know:
 401, 403, 404) also makes way for the next one, and so does one that keeps replying with nothing.
-The run stops with that error and exit code `1` when every model in the list fails that way, when
-a single model (`-m <model>`) does, or at a request the server refuses (400), which is never sent
-again (unless the user set the fallback rule to "at any error"). A provider that refuses a part
+The run stops with that error and exit code `1` when every model in the list fails that way, or
+when a single model (`-m <model>`) does. A request a server refuses (400) is sent as it is to two
+more models of the list at most, then the run stops (unless the user set the fallback rule to "at
+any error"). A provider that refuses a part
 of the request HeartCode can do without (the model's thinking sent back, keys in the tools'
-schemas) gets it again without that part.
+schemas, images) gets it again without that part, and that is remembered for the model for a day.
+Each request is fitted to the model it goes to: one that can't see gets a note in place of each
+image, one that can't call tools gets the tool calls as text.
 
 `--provider <name>` and `-u <url>` (a server for this run) also mean one model, alone.
 
@@ -74,6 +78,9 @@ heart -p --output-format json -C /path/to/project "fix the failing test in math.
 
 - `-C <folder>`: the project to work in (default: the current folder). A folder, not a file.
 - The prompt is the last argument, or stdin: `echo "explain src/agent.js" | heart -p`.
+- An image goes with the task as `@path/to/shot.png` or a full path (`/Users/me/shot.png`) in the
+  prompt, or as an image block in stream-json. A file name only mentioned ("rename logo.png") isn't
+  attached. A model that can't see gets it looked at by one of the user's models that can.
 - Exit code: `0` it finished, `1` it failed (no model, the model kept failing, the server refused
   the request (wrong model name, bad key), `--max-turns` hit). The error is in `result` (JSON) or on stderr.
 
@@ -101,7 +108,9 @@ heart -p --continue "…"          # or: the last session in this folder
 ## Keep it safe
 
 Headless never asks anyone. What the permission mode would ask about is declined, and the
-model is told why. An MCP tool its server marks read-only is never asked about.
+model is told why. An MCP tool its server marks read-only is never asked about. The model can't
+give itself a freer permission mode (its `manage` tool asks the user, so headless refuses it), and
+can't switch the model you chose.
 
 | You want | Flags |
 |---|---|
@@ -136,7 +145,8 @@ The model in use knows the user's other models (what each can do, how often it f
 session) and works with them through its `agent` tool: it asks a model that can for what it
 can't do itself (a model that can't see asks one that can about a screenshot: "which tiles show a
 chair?"), several at once when there are many images or parts, and a helper that fails is handed to
-the next capable model until one does the job. Their tokens are in `usage`, and each model's in
+the next capable model until one does the job. A helper takes 25 steps at most, then answers with
+what it has. Their tokens are in `usage`, and each model's in
 `modelUsage`.
 
 ## Setting up a model
@@ -174,7 +184,8 @@ heart -p --input-format stream-json --output-format stream-json
 ```
 
 Stdin: one message per line, `{"type":"user","message":{"role":"user","content":"…"}}`.
-Stop the running one with `{"type":"control_request","request_id":"1","request":{"subtype":"interrupt"}}`.
+Stop the running one with `{"type":"control_request","request_id":"1","request":{"subtype":"interrupt"}}`;
+any other control request gets a `control_response` with `subtype: "error"` (not supported).
 Stdout: one JSON event per line, `system`/`init` (its `tools` include the MCP servers' tools,
 `mcp_servers` says which are `connected`), then `assistant` (text, thinking, `tool_use`),
 `user` (`tool_result`), and a `result` after each message. It runs until stdin closes.
@@ -182,8 +193,11 @@ Stdout: one JSON event per line, `system`/`init` (its `tools` include the MCP se
 A helper's steps (the `agent` tool: another of the user's models, or the same one, doing a job;
 several can run at once) come as `assistant` and `user` lines too, as Claude Code sends a
 subagent's: `parent_tool_use_id` is the id of the `agent` call they belong to (`null` for the main
-conversation's), and `message.model` says which model it is (`provider/model`). The helper's last
-reply is that `agent` call's `tool_result`.
+conversation's). The helper's last reply is that `agent` call's `tool_result`.
+
+Every `assistant` line's `message.model` is the model that wrote it (`provider/model`): after a
+fallback, the one that took over, not the one the run started with (the `init` line's `model`).
+`modelUsage` in the `result` has each model that answered.
 
 ## Don't
 

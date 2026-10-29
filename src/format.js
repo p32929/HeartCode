@@ -46,23 +46,32 @@ const BUILTIN = [
 
 const glob = (pattern) => new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`)
 
-// The command for a file ("…$FILE…" or one the path goes after), or null.
+// The command for a file ("…$FILE…" or one the path goes after), or null. fromProject: the
+// project gave it (its .heartcode/format.json, or a program in its node_modules): a cloned repo's
+// own, run only once the user says yes (tools.js).
 export function formatterFor(root, rel) {
-  const own = { ...readJson(path.join(HOME, 'format.json'), {}), ...readJson(path.join(root, '.heartcode', 'format.json'), {}) }
+  const mine = readJson(path.join(HOME, 'format.json'), {})
+  const project = readJson(path.join(root, '.heartcode', 'format.json'), {})
   const base = path.basename(rel)
-  for (const [pattern, cmd] of Object.entries(own)) {
-    if (glob(pattern).test(base) || glob(pattern).test(rel)) return cmd || null
+  for (const [pattern, cmd] of Object.entries({ ...mine, ...project })) {
+    if (glob(pattern).test(base) || glob(pattern).test(rel)) return cmd ? { cmd, fromProject: pattern in project } : null
   }
-  for (const [re, pick] of BUILTIN) if (re.test(rel)) return pick(root) || null
+  for (const [re, pick] of BUILTIN) {
+    if (!re.test(rel)) continue
+    const cmd = pick(root)
+    return cmd ? { cmd, fromProject: cmd.startsWith(q(path.join(root, 'node_modules')).slice(0, -1)) } : null
+  }
   return null
 }
 
 // Formats the file HeartCode just wrote. Returns its new text when the formatter changed it, else
 // null. A formatter that fails (a syntax error it can't parse) is left at that: the file stays as
-// written, and the language server or the model's next run says what's wrong.
-export async function formatFile(root, rel) {
-  const cmd = formatterFor(root, rel)
-  if (!cmd) return null
+// written, and the language server or the model's next run says what's wrong. allow(cmd): whether
+// a formatter the project gave may run (asked once).
+export async function formatFile(root, rel, allow = async () => true) {
+  const found = formatterFor(root, rel)
+  if (!found || (found.fromProject && !(await allow(found.cmd)))) return null
+  const { cmd } = found
   const abs = path.join(root, rel)
   const before = fs.readFileSync(abs, 'utf8')
   const line = cmd.includes('$FILE') ? cmd.replaceAll('$FILE', q(rel)) : `${cmd} ${q(rel)}`

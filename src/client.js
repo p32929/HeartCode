@@ -1,14 +1,17 @@
 // OpenAI-compatible chat client: plain fetch, SSE streaming, <think> stripping.
+import { createHash } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { log, logRequest, requestLog } from './log.js'
 
 export const est = (text) => Math.ceil(String(text ?? '').length / 3.5)
 // An error that may go away by itself: a rate limit, a server error or overload, a timeout, no
 // connection (no status). Anything else (a wrong model name, key or request) won't.
-export const outage = (e) => !e.status || [408, 409, 429].includes(e.status) || e.status >= 500
+// A 403 that is a web page, not the API's own (JSON) answer, comes from a gateway or proxy in
+// front of it, often for a moment (seen: the same request working a second later): an outage too.
+export const outage = (e) => !e.status || [408, 409, 429].includes(e.status) || e.status >= 500 || (e.status === 403 && e.page)
 // The model can't be used as it's set up (a wrong key, no access to it, no such model): waiting
 // won't help, but the next one in the list may work.
-export const unusable = (e) => [401, 403, 404].includes(e.status)
+export const unusable = (e) => [401, 403, 404].includes(e.status) && !outage(e)
 // A request's messages, estimated: an image's data isn't text (about 800 tokens, not its base64)
 export function estMessages(messages) {
   let images = 0
@@ -23,7 +26,7 @@ export function estMessages(messages) {
 export function inputLimit(e, sent, known = 0) {
   const big =
     e.status === 413 ||
-    (e.status >= 400 && e.status < 500 && /too large|too long|reduce the length|reduce your message|context length|context window|context size|too many tokens|exceeds? the (maximum|available|context)|maximum (number of )?tokens/i.test(e.message))
+    (e.status >= 400 && e.status < 500 && /\b(request|prompt|input|message|messages|context|payload|body)\b[^.]{0,30}\btoo (large|long|big)|reduce the length|reduce your message|context length|context window|context size|too many (input )?tokens|exceeds? the (maximum|available|context)|maximum (number of )?(input |context )?tokens/i.test(e.message))
   if (!big) return null
   const n = Number(LIMIT_IN_MESSAGE.map((re) => re.exec(e.message)?.[1]).find(Boolean))
   return n > 0 ? n : Math.max(Math.floor(sent * 0.75), known)
@@ -34,7 +37,7 @@ export function inputLimit(e, sent, known = 0) {
 export function limitSaid(e) {
   if (!inputLimit(e, 0)) return null
   const n = Number(LIMIT_IN_MESSAGE.map((re) => re.exec(e.message)?.[1]).find(Boolean))
-  return n > 0 ? { tokens: n, rate: /per minute|tokens per min|\bTPM\b|rate.?limit/i.test(e.message) } : null
+  return n > 0 ? { tokens: n, rate: /per (minute|hour|day)|tokens per (min|hour|day)|\bTP[MHD]\b|rate.?limit|quota/i.test(e.message) } : null
 }
 
 // How servers say the limit: OpenAI and vLLM, Mistral, llama.cpp, Anthropic-style, Gemini,
@@ -63,52 +66,77 @@ export function normalizeBaseUrl(url) {
   return u.toString().replace(/\/+$/, '')
 }
 
-export function isLocal(url) {
-  const h = new URL(url).hostname
-  return /^(localhost|127\.|0\.0\.0\.0|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h)
-}
-
-// Removes reasoning blocks some models put inside the normal content.
-export function stripThink(text) {
-  let t = String(text ?? '').replace(/<think>[\s\S]*?<\/think>/g, '')
-  const open = t.indexOf('<think>')
-  if (open !== -1) t = t.slice(0, open)
-  const close = t.indexOf('</think>')
-  if (close !== -1) t = t.slice(close + 8)
-  return t.trimStart()
+// Removes the thinking some models put in the normal content: a <think> block the reply starts
+// with (still open: all of it so far). A reply that only mentions the tag later keeps its text. A
+// closing tag with no opening one counts only for a model that thinks (some leave the opening out).
+export function stripThink(text, thinks = false) {
+  const t = String(text ?? '')
+  const lead = /^\s*<think>[\s\S]*?(<\/think>|$)/.exec(t)
+  if (lead) return t.slice(lead[0].length).trimStart()
+  const close = thinks && !t.includes('<think>') ? t.indexOf('</think>') : -1
+  return close !== -1 ? t.slice(close + 8).trimStart() : t
 }
 
 // What can be shown so far while streaming: holds back a half-received "<think>".
-function visible(full) {
-  let v = stripThink(full)
+function visible(full, thinks) {
+  let v = stripThink(full, thinks)
   for (let k = 7; k > 0; k--) {
     if (v.endsWith('<think>'.slice(0, k))) return v.slice(0, -k)
   }
   return v
 }
 
-// The text inside <think> blocks so far (an unclosed one counts), holding back a half-received "</think>".
+// The text inside the <think> block the reply starts with, so far (an unclosed one counts),
+// holding back a half-received "</think>".
 export function thinkOf(full) {
-  let out = ''
-  let i = 0
-  for (;;) {
-    const open = full.indexOf('<think>', i)
-    if (open === -1) return out
-    const close = full.indexOf('</think>', open + 7)
-    if (close === -1) {
-      let rest = full.slice(open + 7)
-      for (let k = 8; k > 0; k--) {
-        if (rest.endsWith('</think>'.slice(0, k))) {
-          rest = rest.slice(0, -k)
-          break
-        }
-      }
-      return out + rest
-    }
-    out += full.slice(open + 7, close)
-    i = close + 8
+  const m = /^\s*<think>/.exec(full)
+  if (!m) return ''
+  const close = full.indexOf('</think>', m[0].length)
+  if (close !== -1) return full.slice(m[0].length, close)
+  let rest = full.slice(m[0].length)
+  for (let k = 8; k > 0; k--) {
+    if (rest.endsWith('</think>'.slice(0, k))) return rest.slice(0, -k)
+  }
+  return rest
+}
+
+// The conversation as the model asked now can take it. It may have been written with others (the
+// model list moving on, helpers), so: images only for a model that sees them (else a note), tool
+// calls only for one that calls tools (else as text), tool call ids in one form every provider
+// takes (9 letters and digits), tool arguments always JSON, and only its own thinking sent back.
+// can: { vision, actions } (the model's abilities); the saved conversation stays as it is.
+export const writtenBy = new WeakMap() // an assistant message → the model that wrote it
+const IMAGE_NOTE = "(an image is here, but you can't see images: to know what's in it, ask a model that can, with the agent tool's images)"
+const callId = (id) => (/^[A-Za-z0-9]{9}$/.test(id) ? id : createHash('sha256').update(String(id)).digest('hex').slice(0, 9))
+const asJson = (a) => {
+  try {
+    JSON.parse(a || '{}')
+    return a || '{}'
+  } catch {
+    return '{}'
   }
 }
+export function fitFor(messages, can, model) {
+  const tools = can.actions !== 'guided'
+  return messages.map((m) => {
+    let x = { ...m }
+    if (x.reasoning_content && writtenBy.has(m) && writtenBy.get(m) !== model) delete x.reasoning_content
+    if (Array.isArray(x.content) && !can.vision) x.content = x.content.map((p) => (p.type === 'image_url' ? IMAGE_NOTE : (p.text ?? ''))).join('\n')
+    if (!tools && x.role === 'tool') return { role: 'user', content: `(the result of your earlier tool call)\n${x.content}` }
+    if (!tools && x.tool_calls) {
+      const { tool_calls, ...rest } = x
+      return { ...rest, content: [x.content, ...tool_calls.map((c) => `(called ${c.function.name} ${c.function.arguments || '{}'})`)].filter(Boolean).join('\n') }
+    }
+    if (x.tool_calls) x.tool_calls = x.tool_calls.map((c) => ({ ...c, id: callId(c.id), function: { ...c.function, arguments: asJson(c.function.arguments) } }))
+    if (x.role === 'tool') x.tool_call_id = callId(x.tool_call_id)
+    return x
+  })
+}
+
+// Refusals a provider may make of one part of a request, learned when sending it without that
+// part works (then kept in the model's profile for a day): temperature, reasoning_effort, the
+// usage in a stream, the thinking sent back, the tools' full schemas, images.
+export const QUIRKS = ['noTemperature', 'noEffort', 'noStreamUsage', 'noReasoningBack', 'simpleSchemas', 'noImages']
 
 export class Client {
   constructor({ baseUrl, apiKey, model, provider, timeout = 600_000 } = {}) {
@@ -119,6 +147,9 @@ export class Client {
     this.timeout = timeout
     this.quirks = {}
     this.retryBase = 1000 // first wait before retrying a failed request (then ×2 each time)
+    // how long a streamed reply may go without sending anything before it counts as stalled (then
+    // tried again, or the next model asked); a reply that keeps coming has no limit, however long
+    this.idleMs = 150_000
     this.tokenRatio = 1 // the server's token count / est(): calibrated from usage (context.js)
     this.knownGood = 0 // the biggest request known to work, in tokens
     this.onUsage = null // (prompt tokens the server counted, estimate of what was sent): learns the window
@@ -149,12 +180,15 @@ export class Client {
   // The model in use answers but gives nothing usable (agent.js: empty replies, again and again):
   // the next one in the list takes over. False when there's no list.
   moveOn(why) {
+    if (!this.rotation) return false
+    this.#next(why)
+    return true
+  }
+  #next(why) {
     const r = this.rotation
-    if (!r) return false
     r.at = (r.at + 1) % r.list.length
     log('rotate', `${why} → ${r.list[r.at].provider} · ${r.list[r.at].model}`)
     this.#use(r.list[r.at])
-    return true
   }
   // A new message: back to #1 (unless it stays on the one that worked)
   newMessage() {
@@ -228,9 +262,11 @@ export class Client {
       let body = await res.text().catch(() => '')
       log('http', `error body: ${body.slice(0, 5000)}`)
       const raw = body.slice(0, 20_000)
-      if (/^\s*</.test(body)) body = /<title>([^<]*)/i.exec(body)?.[1]?.trim() ?? 'an HTML error page' // proxies and gateways
-      const err = new Error(`${res.status} from ${url}: ${body.slice(0, 300)}`)
+      const page = /^\s*</.test(body) // proxies and gateways answer with a web page
+      if (page) body = /<title>([^<]*)/i.exec(body)?.[1]?.trim() ?? 'an HTML error page'
+      const err = new Error(`${res.status} from ${url}: ${body.slice(0, 300)}${!raw.trim() ? '(the server gave no reason)' : ''}`)
       err.status = res.status
+      err.page = page
       err.body = raw // all of it, for the requests log
       err.retryAfter = res.headers.get('retry-after') ?? /"retryDelay":\s*"(\d+)s"/.exec(body)?.[1] // Gemini says it in the body
       throw err
@@ -362,6 +398,7 @@ export class Client {
     let tries = 0 // of the model being tried now
     let round = 0 // models tried since the last wait (a whole round of them failing: a short pause)
     let hard = true // every failure in this round was one that waiting can't fix (see outage)
+    let refusedBy = 0 // models that refused this request (a bad request), tried in turn
     for (let attempt = 0; ; attempt++) {
       try {
         const r = await this.#timed(body, { ...opts, once: true })
@@ -372,7 +409,16 @@ export class Client {
       } catch (e) {
         if (e.name === 'AbortError' || opts.signal?.aborted) throw e
         if (tooLarge(e)) throw e // the caller shrinks the conversation and sends again
+        this.onFail?.(e, { provider: this.provider, model: this.model }) // counted for orchestration
         if (this.retryIf && !this.retryIf(e, attempt)) throw e
+        // A bad request (400…) with a list of models: the next one may take it (it's often what the
+        // conversation holds from another model). Two more at most, then it stops.
+        if (!outage(e) && !unusable(e) && this.rotation && this.rotation.on !== 'any' && refusedBy < Math.min(2, this.rotation.list.length - 1)) {
+          refusedBy++
+          this.#next(`refused (${e.status})`)
+          this.onRetry(e, 0, attempt + 1, this.target)
+          continue
+        }
         // A bad request (400…): the same request fails the same way every time, so it isn't sent
         // again. It stops here, unless the model list moves on at any error (the settings page). A
         // model that can't be used (a wrong key or name: 401, 403, 404) makes way for the next one
@@ -393,6 +439,8 @@ export class Client {
           } else this.onRetry(e, 0, attempt + 1, this.target)
           continue
         }
+        // a server error or no connection, again and again (not a rate limit, which is waited out)
+        if (e.status !== 429 && tries >= 8) throw e
         const wait = Math.min(Number(e.retryAfter) * 1000 || this.retryBase * 2 ** (tries - 1), 60_000)
         log('retry', `attempt ${attempt + 1} failed, waiting ${wait}ms: ${e.message}`)
         this.onRetry(e, wait, attempt + 1)
@@ -417,6 +465,10 @@ export class Client {
   // One request. Without `once`, rate limits and server errors get three quiet retries.
   async #chat(body, { onToken, onReasoning, onToolDelta, signal, once } = {}) {
     const req = { model: this.model, ...body }
+    const can = this.can && { ...this.can, vision: this.can.vision && !this.quirks.noImages }
+    if (can && req.messages) req.messages = fitFor(req.messages, can, this.model)
+    if (can?.actions === 'guided') delete req.tools
+    const thinks = Boolean(this.can?.thinking)
     // The model's thinking on its earlier steps (agent.js keeps it as reasoning_content): sent by the
     // name this provider sends it by (reasoning_content: DeepSeek, vLLM…; reasoning: OpenRouter,
     // Ollama), or not at all if it refused it once.
@@ -431,55 +483,65 @@ export class Client {
     let res
     let sent
     let firstAt
+    // a stream that stops sending: stalled (see idleMs)
+    const idle = req.stream ? new AbortController() : null
+    let timer
+    const poke = () => {
+      if (!idle) return
+      clearTimeout(timer)
+      timer = setTimeout(() => idle.abort(Object.assign(new Error(`${this.model} sent nothing for ${this.idleMs / 1000}s`), { name: 'TimeoutError' })), this.idleMs)
+      timer.unref?.()
+    }
+    const stop = idle ? (signal ? AbortSignal.any([signal, idle.signal]) : idle.signal) : signal
     try {
       for (let attempt = 0; ; attempt++) {
         sent = Date.now()
         this.last = { req, sent }
         try {
-          res = await this.#fetch(this.baseUrl + '/chat/completions', { method: 'POST', body: JSON.stringify(req) }, { signal })
+          poke()
+          res = await this.#fetch(this.baseUrl + '/chat/completions', { method: 'POST', body: JSON.stringify(req) }, { signal: stop, timeout: idle ? 86_400_000 : this.timeout })
           break
         } catch (e) {
           this.#record(req, sent, { error: e })
           // Rate limits and server errors, the same set the OpenAI SDKs retry: wait (Retry-After, else 2s, 4s, 8s).
-          if (once || !([408, 409, 429].includes(e.status) || e.status >= 500) || attempt === 3 || signal?.aborted) throw e
+          if (once || !outage(e) || !e.status || attempt === 3 || signal?.aborted) throw e
           const wait = Math.min(Number(e.retryAfter) * 1000 || 2000 * 2 ** attempt, 30_000)
           log('retry', `quiet retry ${attempt + 1} in ${wait}ms: ${e.message}`)
           await sleep(wait, null, { signal })
         }
       }
     } catch (e) {
-      // Some APIs reject parameters older servers need; learn once and retry. (Refused: 400, or 422
-      // from the ones that check requests against a schema, like Mistral.)
+      clearTimeout(timer)
+      // A provider that refuses one part of the request (400, or 422 from the ones that check
+      // requests against a schema): the same request without that part. Learned (onLearn: kept in
+      // the model's profile) only when that works; else it's put back and the refusal stands. The
+      // part the error names first; with none named, images (a model listed as seeing them that
+      // doesn't take them here), then the thinking sent back.
       const refused = e.status === 400 || e.status === 422
-      const said = e.body ?? e.message
-      if (refused && /temperature/.test(e.message) && 'temperature' in body && !this.quirks.noTemperature) {
-        this.quirks.noTemperature = true
-        log('quirk', 'server rejects temperature')
-        return this.#chat(body, { onToken, onReasoning, onToolDelta, signal, once })
-      }
-      for (const [quirk, param] of [['noEffort', 'reasoning_effort'], ['noStreamUsage', 'stream_options']]) {
-        if (refused && param in req && new RegExp(param).test(e.message) && !this.quirks[quirk]) {
-          this.quirks[quirk] = true
-          log('quirk', `server rejects ${param}; dropping it`)
-          return this.#chat(body, { onToken, onReasoning, onToolDelta, signal, once })
+      if (!refused || inputLimit(e, 1)) throw e // "too large": the caller sends less
+      const said = String(e.body ?? e.message)
+      const without = async (quirk) => {
+        this.quirks[quirk] = true
+        log('quirk', `${this.model}: sending it without what ${quirk} leaves out`)
+        try {
+          const r = await this.#chat(body, { onToken, onReasoning, onToolDelta, signal, once })
+          this.onLearn?.(quirk)
+          return r
+        } catch (e2) {
+          if (e2.status === 400 || e2.status === 422) delete this.quirks[quirk]
+          throw e2.status === 400 || e2.status === 422 ? e : e2
         }
       }
-      // The thinking sent back, or the tools' arguments (JSON schemas with keys a provider doesn't
-      // take: Gemini's "Unknown name additionalProperties"), refused: sent without it, or with
-      // simpler schemas, from now on with this model.
-      const reasoningSent = !this.quirks.noReasoningBack && body.messages?.some((m) => m.reasoning_content)
-      const noReasoning = () => {
-        this.quirks.noReasoningBack = true
-        log('quirk', 'server rejects the thinking sent back; not sending it')
-        return this.#chat(body, { onToken, onReasoning, onToolDelta, signal, once })
-      }
-      if (refused && reasoningSent && /reasoning(?!_effort)/i.test(said)) return noReasoning()
-      if (refused && body.tools?.length && !this.quirks.simpleSchemas && /schema|function_declarations|parameters|additionalProperties|exclusiveM|minItems|unknown name|invalid.{0,40}(tool|function)|tools\[/i.test(said)) {
-        this.quirks.simpleSchemas = true
-        log('quirk', 'server rejects the tools\' schemas; sending simpler ones')
-        return this.#chat(body, { onToken, onReasoning, onToolDelta, signal, once })
-      }
-      if (refused && reasoningSent && /extra|unknown|unrecognized|not permitted|additional propert/i.test(said)) return noReasoning()
+      const reasoningSent = !this.quirks.noReasoningBack && req.messages?.some((m) => m.reasoning_content || m.reasoning)
+      const imagesSent = !this.quirks.noImages && req.messages?.some((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'))
+      if (/temperature/i.test(said) && 'temperature' in req && !this.quirks.noTemperature) return without('noTemperature')
+      if (/reasoning_effort/.test(said) && 'reasoning_effort' in req && !this.quirks.noEffort) return without('noEffort')
+      if (/stream_options/.test(said) && req.stream_options && !this.quirks.noStreamUsage) return without('noStreamUsage')
+      if (reasoningSent && /reasoning(?!_effort)/i.test(said)) return without('noReasoningBack')
+      if (imagesSent && /image|vision|multimodal|modalit|content.{0,20}(type|part)/i.test(said)) return without('noImages')
+      if (req.tools?.length && !this.quirks.simpleSchemas && /schema|function_declarations|parameters|additionalProperties|exclusiveM|minItems|unknown name|invalid.{0,40}(tool|function)|tools\[/i.test(said)) return without('simpleSchemas')
+      if (imagesSent) return without('noImages')
+      if (reasoningSent) return without('noReasoningBack')
       throw e
     }
     // Tokens the last request used (prompt + reply): what the status bar shows against the context size.
@@ -503,9 +565,10 @@ export class Client {
       const choice = data.choices?.[0] ?? {}
       const msg = choice.message ?? {}
       this.#reasoningField(msg)
-      return count(done(textOf(msg.content), msg.reasoning_content ?? msg.reasoning ?? msg.thinking ?? '', msg.tool_calls ?? [], data.usage, choice.finish_reason))
+      return count(done(textOf(msg.content), msg.reasoning_content ?? msg.reasoning ?? msg.thinking ?? '', msg.tool_calls ?? [], data.usage, choice.finish_reason, thinks))
     }
 
+    poke()
     const reader = res.body.getReader()
     const dec = new TextDecoder()
     let buf = ''
@@ -524,7 +587,14 @@ export class Client {
       }
     }
     for (;;) {
-      const { value, done: end } = await reader.read()
+      let value, end
+      try {
+        ;({ value, done: end } = await reader.read())
+      } catch (e) {
+        clearTimeout(timer)
+        throw e
+      }
+      poke()
       firstAt ??= Date.now()
       if (end) break
       buf += dec.decode(value, { stream: true })
@@ -542,7 +612,17 @@ export class Client {
         } catch {
           continue
         }
-        if (chunk.error) throw new Error(`server error: ${chunk.error.message ?? JSON.stringify(chunk.error)}`)
+        if (chunk.error) {
+          // an error sent in the stream: its status from its code, else a "too large" one as 400
+          // (sent smaller, not again as it is), else a server error (tried again, a few times)
+          clearTimeout(timer)
+          const said = chunk.error.message ?? JSON.stringify(chunk.error)
+          const code = Number(chunk.error.code ?? chunk.error.status)
+          const err = Object.assign(new Error(`server error: ${said}`), { body: payload })
+          err.status = code >= 400 && code < 600 ? code : 502
+          if (err.status === 502 && inputLimit({ status: 400, message: said }, 1)) err.status = 400
+          throw err
+        }
         if (chunk.usage) usage = chunk.usage
         const ch = chunk.choices?.[0]
         if (!ch) continue
@@ -570,11 +650,12 @@ export class Client {
             onReasoning(t.slice(thought.length))
             thought = t
           }
-          emit(visible(content))
+          emit(visible(content, thinks))
         }
       }
     }
-    const result = done(content, reasoning, calls.filter(Boolean), usage, finishReason)
+    clearTimeout(timer)
+    const result = done(content, reasoning, calls.filter(Boolean), usage, finishReason, thinks)
     emit(result.content)
     if (!result.content.trim() && !result.toolCalls.length && !result.reasoning) {
       result.raw = raw // nothing read from it: what came, for the requests log
@@ -618,11 +699,11 @@ export function simpleSchema(x) {
 // Message content as text: a string, or a list of parts ({ type: 'text', text }).
 const textOf = (c) => (Array.isArray(c) ? c.map((p) => (typeof p === 'string' ? p : (p?.text ?? ''))).join('') : (c ?? ''))
 
-function done(raw, reasoning, toolCalls, usage, finishReason) {
+function done(raw, reasoning, toolCalls, usage, finishReason, thinks) {
   const calls = toolCalls.filter((c) => c?.function?.name)
-  calls.forEach((c, i) => (c.id ||= `call_${Date.now()}_${i}`))
+  calls.forEach((c, i) => (c.id ||= callId(`${Date.now()}_${i}_${Math.random()}`)))
   return {
-    content: stripThink(raw),
+    content: stripThink(raw, thinks),
     reasoning: (reasoning || thinkOf(raw)).trim(),
     toolCalls: calls,
     usage,

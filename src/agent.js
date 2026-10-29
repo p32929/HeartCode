@@ -4,50 +4,62 @@ import { log } from './log.js'
 import { prompt, userInstructions } from './prompts.js'
 import { newChat } from './sessions.js'
 import path from 'node:path'
-import { est, Client } from './client.js'
+import { est, Client, writtenBy } from './client.js'
 import { runGuided } from './guided.js'
-import { TOOL_DEFS, PLAN_HIDDEN, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, OUTPUTS } from './tools.js'
+import { TOOL_DEFS, PLAN_HIDDEN, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, OUTPUTS, imageUrl, MAX_IMAGE, failed } from './tools.js'
 import { loadHooks, runHooks } from './hooks.js'
 import { takeConfigErrors } from './config.js'
 import { c } from './ui.js'
 
-const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
-
 // Images for a helper (the agent tool's "images"), as data: URLs: image URLs (fetched), data: URLs,
 // or files: in the project, saved screenshots (OUTPUTS), or a path the user gave in a message.
 async function loadImages(list, s, signal) {
+  // a list written as text (some models send it so): JSON, or "[a.png, b.png]", or one per line
+  if (typeof list === 'string') {
+    try {
+      list = JSON.parse(list)
+    } catch {
+      list = list.replace(/^\s*\[|\]\s*$/g, '').split(/[,\n]/).map((x) => x.trim().replace(/^["'`]|["'`]$/g, ''))
+    }
+  }
   const out = []
-  for (const x of [].concat(list ?? []).map((v) => String(v).trim()).filter(Boolean)) {
+  for (const x of [].concat(list ?? []).filter((v) => v != null).map((v) => String(v).trim()).filter(Boolean)) {
     if (x.startsWith('data:image/')) {
       out.push(x)
     } else if (/^https?:\/\//i.test(x)) {
       const res = await fetch(x, { signal: AbortSignal.any([AbortSignal.timeout(30_000), ...(signal ? [signal] : [])]) })
       const type = res.headers.get('content-type')?.split(';')[0].trim() ?? ''
       if (!res.ok || !type.startsWith('image/')) throw new Error(`${x} is not an image (${res.status}${type ? `, ${type}` : ''})`)
-      out.push(`data:${type};base64,${Buffer.from(await res.arrayBuffer()).toString('base64')}`)
+      const data = Buffer.from(await res.arrayBuffer())
+      if (data.length > MAX_IMAGE) throw new Error(`${x} is too big to send (${Math.round(data.length / 1e6)} MB; at most ${MAX_IMAGE / 1e6} MB)`)
+      out.push(`data:${type};base64,${data.toString('base64')}`)
     } else {
       const abs = path.resolve(s.root, x.replace(/^~(?=\/)/, os.homedir()))
-      const ext = path.extname(abs).slice(1).toLowerCase()
-      if (!MIME[ext]) throw new Error(`${x} is not an image file (png, jpg, gif, webp)`)
-      if (!fs.existsSync(abs)) throw new Error(`${x} does not exist`)
       const inside = (dir) => abs.startsWith(dir + path.sep)
-      if (!inside(s.root) && !inside(OUTPUTS) && !s.toolImages?.has(abs) && !s.chat.turns.some((t) => t.task.includes(x) || t.task.includes(abs))) throw new Error(`${x} is outside the project; only images in it, saved screenshots and ones the user named can be sent`)
-      out.push(`data:${MIME[ext]};base64,${fs.readFileSync(abs).toString('base64')}`)
+      if (fs.existsSync(abs) && !inside(s.root) && !inside(OUTPUTS) && !s.toolImages?.has(abs) && !s.chat.turns.some((t) => t.task.includes(x) || t.task.includes(abs))) throw new Error(`${x} is outside the project; only images in it, saved screenshots and ones the user named can be sent`)
+      out.push(imageUrl(abs, x))
     }
   }
   return out
 }
 
-// An image the message names is attached: "@shot.png", or a path anywhere (/Users/me/Downloads/a.png,
-// ~/a.png; dragged in: quoted, or with "\ " for spaces), when the file is there. The path stays in the text.
-const IMAGE_PATH = /(^|\s)@?(?:(["'])([^"'\n]+?\.(?:png|jpe?g|gif|webp))\2|((?:\\ |[^\s"'])+?\.(?:png|jpe?g|gif|webp)))(?=$|[\s,;:!?).])/gi
+// An image the message gives is attached: "@shot.png", or a full path (/Users/me/Downloads/a.png,
+// ~/a.png; dragged in: quoted, or with "\ " for spaces), when the file is there. A file only named
+// ("rename logo.png") isn't: the model reads it if it needs to. The path stays in the text. Too big
+// to send: left out, and the message says so.
+const IMAGE_PATH = /(^|\s)(@)?(?:(["'])([^"'\n]+?\.(?:png|jpe?g|gif|webp))\3|((?:\\ |[^\s"'])+?\.(?:png|jpe?g|gif|webp)))(?=$|[\s,;:!?).])/gi
 export function extractImages(task, root) {
   const images = []
-  const text = task.replace(IMAGE_PATH, (m, pre, q, quoted, bare) => {
+  const text = task.replace(IMAGE_PATH, (m, pre, at, q, quoted, bare) => {
     const file = (quoted ?? bare.replace(/\\ /g, ' ')).replace(/^~(?=\/)/, os.homedir())
+    if (!at && !path.isAbsolute(file)) return m
     const abs = path.resolve(root, file)
     if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return m
-    images.push(`data:${MIME[path.extname(abs).slice(1).toLowerCase()]};base64,${fs.readFileSync(abs).toString('base64')}`)
+    try {
+      images.push(imageUrl(abs, file))
+    } catch (e) {
+      return `${pre}${file} (${e.message})`
+    }
     return `${pre}${file}`
   })
   return { text, images }
@@ -166,8 +178,9 @@ export class Session {
     let { text, images } = extractImages(task, this.root)
     images = [...images, ...extra]
     if (images.length && !this.strat.vision) {
-      const seer = this.team?.().find((t) => t.images) // another of your models that can: it describes them
-      if (seer) text += await this.describeImages(images, seer, text, signal)
+      const fails = (t) => this.failures?.[`${t.provider} ${t.model}`] ?? 0
+      const seers = (this.team?.() ?? []).filter((t) => t.images).sort((a, b) => fails(a) - fails(b)) // your models that can: they describe them
+      if (seers.length) text += await this.describeImages(images, seers, text, signal)
       else this.ui.warn(`${this.client.model} can't read images (per its probe); ignoring ${images.length} image(s)`)
       images = []
     }
@@ -175,7 +188,6 @@ export class Session {
     const answer = this.strat.actions === 'tools' ? await runNative(this, text, images, signal) : await runGuided(this, text, images, signal)
     log('task', 'answer:', answer)
     this.history.push({ task: text, answer })
-    if (this.memory && this.strat.actions === 'tools' && !this.appendSystem) await this.afterTask(text, answer, signal) // a program's instructions (--append-system-prompt) aren't the user's to remember
     return answer
   }
 
@@ -197,13 +209,16 @@ export class Session {
       return `error: ${e.message}`
     }
     const name = (t) => `${t.provider} ${t.model}`
-    const self = { provider: this.client.provider, model: this.client.model, images: this.strat.vision, self: true }
+    const self = { provider: this.client.provider, model: this.client.model, images: this.strat.vision, tools: this.strat.actions === 'tools', self: true }
     const all = [self, ...(this.team?.() ?? [])]
     const want = String(args.model ?? '').trim()
     const first = !want ? self : (all.find((t) => name(t) === want) ?? all.find((t) => t.model === want || want.endsWith(` ${t.model}`)))
     if (!first) return `error: no model "${want}". Yours: ${all.map(name).join(', ')}`
+    // the one asked for first (if it can do the job), then the others that can: those that call
+    // tools first, then the ones that failed least this session, in your list's order
     const able = (t) => !images.length || t.images
-    const order = [first, ...all.filter((t) => t !== first)].filter(able)
+    const fails = (t) => this.failures?.[name(t)] ?? 0
+    const order = [first, ...all.filter((t) => t !== first).sort((a, b) => b.tools - a.tools || fails(a) - fails(b))].filter(able)
     if (!order.length) return 'error: none of your models can see images'
     const failed = []
     for (const [i, t] of order.entries()) {
@@ -214,45 +229,95 @@ export class Session {
         if (e.name === 'AbortError' || signal?.aborted) throw e
         failed.push(`${t.model}: ${clip(e.message, 150)}`)
       }
-      if (answer) return t === first ? answer : `(${name(t)} did it${failed.length ? `; before it: ${failed.join('; ')}` : ''})\n\n${answer}`
-      if (failed.length < i + 1) failed.push(`${t.model}: no reply`)
-      this.failures = { ...this.failures, [name(t)]: (this.failures?.[name(t)] ?? 0) + 1 } // shown to the model (Your other models)
+      if (answer) return t === first ? answer : `(Answered by ${name(t)}, not ${name(first)}${failed.length ? `: ${failed.join('; ')}` : ''})\n\n${answer}`
+      if (failed.length < i + 1) {
+        failed.push(`${t.model}: no reply`)
+        if (this.failures) this.failures[name(t)] = fails(t) + 1 // (a failed request is counted where it fails: engine's onFail)
+      }
       if (order[i + 1]) this.ui.warn(`${t.model} couldn't do it (${failed.at(-1).slice(t.model.length + 2)}); handing it to ${order[i + 1].model}`)
     }
     return `error: none of your models that can do it managed: ${failed.join('; ')}`
   }
 
-  // One helper on one model (t: this one, or another of yours).
+  // One helper on one model (t: this one, or another of yours), with its own connection (a helper's
+  // failure moves no one else on to another model) that gives up after a few tries (then the next
+  // model gets the job).
   async #helper(t, task, images, description, id, signal) {
     let { client, profile, strat } = this
-    if (!t.self) {
+    if (this.engineFor) {
       ;({ client, profile, strat } = await this.engineFor(t))
       const was = client.retryIf
-      client.retryIf = (e, attempt) => attempt < 3 && (!was || was(e, attempt)) // then the next model gets the job
+      client.retryIf = (e, attempt) => attempt < 3 && (!was || was(e, attempt))
     }
     const label = clip(`${client.model}: ${String(description ?? '').trim() || task.split('\n')[0]}`, 60)
     const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
     Object.assign(helper, { isSub: true, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
     helper.track = (rel, before) => this.track(rel, before)
+    helper.mcpGate = async () => (await this.#gate(helper), () => {})
     if (this.onEvent) helper.onEvent = (e) => this.onEvent({ ...e, parent: id, helper: label })
     log('agent', `helper "${label}" (${images.length} image(s)): ${task}`)
-    const answer = await (strat.actions === 'tools' ? runNative : runGuided)(helper, task, images, signal)
-    log('agent', `helper "${label}" done`, answer)
-    return answer
+    try {
+      const answer = await (strat.actions === 'tools' ? runNative : runGuided)(helper, task, images, signal)
+      log('agent', `helper "${label}" done`, answer)
+      return answer
+    } finally {
+      this.#release(helper)
+    }
   }
 
-  // Images for a model that can't see them: another of yours (seer) describes each, for the task.
-  async describeImages(images, seer, task, signal) {
-    const { client } = await this.engineFor(seer)
-    const out = []
-    for (const [i, url] of images.entries()) {
-      this.ui.spinner(`${seer.model} is looking at image ${i + 1}`)
-      const res = await client.chat({ messages: [{ role: 'user', content: [{ type: 'text', text: prompt('guided/describe-image', { task }) }, { type: 'image_url', image_url: { url } }] }] }, { signal })
-      out.push(`Image ${i + 1}:\n${res.content.trim()}`)
-      this.ui.step('image', `${seer.model} described image ${i + 1}`)
+  // The MCP servers (a browser…) are one helper's from its first MCP call to its end: helpers
+  // working at the same time don't drive the same browser; the others (and this conversation)
+  // wait their turn. One turn for all of them, so two helpers can't each hold one the other waits on.
+  // ponytail: helpers that use different servers wait for each other too; a turn per server needs
+  // a fixed order of taking them (or waiting without holding) to stay deadlock-free.
+  // Returns what ends the turn: a helper's lasts until it ends (#helper), this conversation's until
+  // its call is done.
+  async mcpGate() {
+    await this.#gate(this)
+    return () => this.#release(this)
+  }
+  async #gate(who) {
+    while (this.mcpTurn && this.mcpTurn.who !== who) await this.mcpTurn.done
+    if (!this.mcpTurn) {
+      let release
+      const done = new Promise((r) => (release = r))
+      this.mcpTurn = { who, done, release }
     }
-    log('images', `described by ${seer.provider} ${seer.model}`, out)
-    return `\n\n${prompt('agent/images-described', { model: seer.model, descriptions: out.join('\n\n') })}`
+  }
+  #release(who) {
+    if (this.mcpTurn?.who !== who) return
+    const { release } = this.mcpTurn
+    this.mcpTurn = null
+    release()
+  }
+
+  // Images for a model that can't see them: your models that can describe each, for the task (the
+  // next one when one fails).
+  async describeImages(images, seers, task, signal) {
+    const out = []
+    let by = ''
+    for (const [i, url] of images.entries()) {
+      let said = ''
+      for (const seer of seers) {
+        this.ui.spinner(`${seer.model} is looking at image ${i + 1}`)
+        try {
+          const { client } = await this.engineFor(seer)
+          client.retryIf = (e, attempt) => attempt < 3
+          said = (await client.chat({ messages: [{ role: 'user', content: [{ type: 'text', text: prompt('guided/describe-image', { task }) }, { type: 'image_url', image_url: { url } }] }] }, { signal })).content.trim()
+        } catch (e) {
+          if (e.name === 'AbortError' || signal?.aborted) throw e
+          this.ui.warn(`${seer.model} couldn't look at image ${i + 1}: ${clip(e.message, 120)}`)
+        }
+        if (said) {
+          by = seer.model
+          this.ui.step('image', `${seer.model} described image ${i + 1}`)
+          break
+        }
+      }
+      out.push(`Image ${i + 1}:\n${said || '(none of your models that see images could look at it)'}`)
+    }
+    log('images', `described by ${by}`, out)
+    return `\n\n${prompt('agent/images-described', { model: by || 'another model', descriptions: out.join('\n\n') })}`
   }
 
   // /btw: a side question, answered from the conversation so far. Nothing goes into the
@@ -272,7 +337,7 @@ export class Session {
       messages = [{ role: 'user', content: past ? `${prompt('agent/btw-history', { conversation: past })}\n\n${ask}` : ask }]
     }
     const side = new Client({ baseUrl: client.baseUrl, apiKey: client.apiKey, model: client.model, provider: client.provider })
-    Object.assign(side, { effort: client.effort, quirks: client.quirks, tokenRatio: client.tokenRatio, onSpend: client.onSpend, purpose: 'btw' })
+    Object.assign(side, { effort: client.effort, quirks: client.quirks, can: client.can, tokenRatio: client.tokenRatio, onSpend: client.onSpend, purpose: 'btw' })
     log('btw', question)
     const res = await side.chat({ messages }, { signal })
     log('btw', 'answer:', res.content)
@@ -289,23 +354,6 @@ export class Session {
     const summary = notSummary((await client.chat({ messages }, { signal })).content)
     if (!summary) throw new Error('the model did not write a summary')
     return summary
-  }
-
-  // After a task: if the user said something worth keeping and the model didn't save it, ask it to
-  // (one small request, with only the related notes). Never fails the task.
-  async afterTask(task, answer, signal) {
-    const writes = this.memoryWrites ?? 0
-    try {
-      if (!writes && REMEMBER.test(task)) {
-        this.ui.spinner('remembering')
-        await this.memoryTask(this.#extractPrompt(`${task}\n${answer}`), prompt('agent/memory-exchange', { task: clip(task, 4000), answer: clip(answer, 2000) }), signal)
-      }
-    } catch (e) {
-      if (e.name === 'AbortError') throw e
-      this.ui.warn(`memory: ${e.message}`)
-    } finally {
-      this.memoryWrites = 0
-    }
   }
 
   #extractPrompt(about) {
@@ -397,9 +445,19 @@ const sizeOf = (m) =>
   (m.tool_calls ? est(JSON.stringify(m.tool_calls)) : 0) +
   (m.reasoning_content ? est(m.reasoning_content) : 0)
 export const size = (messages) => messages.reduce((n, m) => n + sizeOf(m), 0)
-// Words that suggest the user said something to remember (then HeartCode asks the model to save it).
-const REMEMBER = /\b(always|never|prefer|remember|don'?t|do not|instead of|from now on|we use|convention|make sure|keep in mind)\b/i
 const kTokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
+
+// How many steps a helper (the agent tool) takes at most before it answers with what it has.
+const HELPER_STEPS = 25
+
+// A chat template's tool-call markup in a reply's text (a tool call the model wrote out): outside
+// code blocks, and the reply ends in it (an answer that only mentions such tags isn't one).
+const MARKUP = /<\/?tool_call>|<\/?arg_(?:key|value)>|<function=[\w.-]+>|<\|[a-z_]+\|>/i
+export function leakedMarkup(text) {
+  const prose = String(text ?? '').replace(/```[\s\S]*?(```|$)/g, (m) => ' '.repeat(m.length)) // code keeps its place
+  const m = MARKUP.exec(prose)
+  return m && /[>}]\s*$/.test(prose) ? m : null
+}
 
 // "assistant to=mcp({...})", "to=functions.read_file <|constrain|>json<|message|>{...}": a tool
 // call written as text. Returns { name, arguments } (arguments as JSON text), or null.
@@ -477,9 +535,9 @@ export function fitMessages(messages, budget) {
 // The model keeps replying with nothing (seen when it's done but its server fails to decode the
 // last message): asked once more without tools, for the answer only. Never ends a task with
 // nothing: failing that, HeartCode says itself what changed.
-async function finalAnswer(s, signal) {
+async function finalAnswer(s, signal, why = 'empty replies in a row') {
   const { client, ui } = s
-  log('task', 'empty replies in a row; asking for the final answer without tools')
+  log('task', `${why}; asking for the final answer without tools`)
   ui.spinner('asking for the final answer')
   try {
     const res = await client.chat({ messages: [...s.messages, { role: 'user', content: prompt('agent/final-answer') }] }, { signal })
@@ -572,16 +630,29 @@ async function runNative(s, task, images, signal) {
   const content = images.length ? [{ type: 'text', text: said }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))] : said
   s.messages.push({ role: 'user', content })
   attachNamed(s, task) // files the message names: as if already read (saves a round trip each)
-  const tools = [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name) && !(planning && PLAN_HIDDEN.has(f.name)) && !(f.name === 'ask_user' && ui.noUser)).map((f) => ({ type: 'function', function: f }))
+  // the tools: built again each step (the model answering may change; client.js leaves them out for
+  // one that can't call tools)
+  const toolList = () => [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name) && !(planning && PLAN_HIDDEN.has(f.name)) && !(f.name === 'ask_user' && ui.noUser)).map((f) => ({ type: 'function', function: f }))
+  let lastCall = '' // the last call (tool and arguments), and how many times in a row
+  let inRow = 0
   // A todo list left done from an earlier message is cleared; an unfinished one stays.
   if (!s.isSub && s.chat.todos?.every((t) => t.status === 'completed')) s.chat.todos = []
   s.todoTouched = false
   let nudged = 0 // reminders sent this message about open todo items or a Stop hook
 
   let empty = 0 // replies in a row with neither text nor tool calls
+  let stuck = null // a tool called the same way five times this message: stop
+  let garbled = 0 // replies with a tool call written as text (template markup), this message
   let movedOn = 0 // models given up on for that, in this message
   // No step limit: a long fix takes many steps, and Esc stops it. A caller can set one (--max-turns).
   for (let step = 0; ; step++) {
+    const tools = toolList()
+    // a helper has a budget: then it answers with what it has (one once searched the web for 40
+    // steps to answer which of two numbers is bigger)
+    if (s.isSub && step >= HELPER_STEPS) {
+      ui.warn(`${client.model} took ${HELPER_STEPS} steps; asking it for its answer`)
+      return finalAnswer(s, signal, `helper: ${HELPER_STEPS} steps`)
+    }
     if (s.maxTurns && step >= s.maxTurns) {
       ui.warn(`stopped after ${s.maxTurns} steps (--max-turns); say "continue" to go on`)
       throw Object.assign(new Error(`stopped after ${s.maxTurns} steps (--max-turns)`), { maxTurns: true })
@@ -620,6 +691,10 @@ async function runNative(s, task, images, signal) {
       res = await client.chat({ messages: s.messages, tools, stream }, { signal, onToken: out.text, onReasoning: out.think, onToolDelta })
     } catch (e) {
       if (!e.inputLimit || shrink < 0.3) throw e
+      // what every request carries (the system prompt and the tools) is over the limit already: no
+      // shorter conversation fits (a per-minute cap smaller than that), so not tried again
+      const fixed = Math.round((est(JSON.stringify(tools)) + sizeOf(s.messages[0])) * (strat.ratio ?? 1))
+      if (fixed >= e.inputLimit) throw Object.assign(e, { message: `${e.message} (the system prompt and tools alone are ~${fixed} tokens: this can't fit)` })
       s.sizeCap = Math.min(s.sizeCap ?? Infinity, e.inputLimit)
       out.end()
       shrink *= 0.8 // strat.context already dropped to the limit; leave more headroom each time
@@ -633,6 +708,7 @@ async function runNative(s, task, images, signal) {
     }
     out.end()
     s.messages.push({ role: 'assistant', content: res.content || '', ...(res.toolCalls.length && { tool_calls: res.toolCalls }), ...(res.reasoning && res.toolCalls.length && { reasoning_content: res.reasoning }) }) // client.js sends it by the name the provider uses, or not at all
+    writtenBy.set(s.messages.at(-1), client.model) // its thinking goes back to this model only
     // a tool call written out as text instead of made (some models do, after a long conversation): made
     const leak = !res.toolCalls.length && leakedCall(res.content)
     if (leak && tools.some((t) => t.function.name === leak.name)) {
@@ -640,6 +716,20 @@ async function runNative(s, task, images, signal) {
       res.toolCalls = [{ id: `text_${Date.now().toString(36)}`, type: 'function', function: { name: leak.name, arguments: leak.arguments } }]
       res.content = ''
       s.messages[s.messages.length - 1] = { role: 'assistant', content: '', tool_calls: res.toolCalls }
+    }
+    // A tool call written as text in the model's own template (<tool_call>, <arg_key>, <function=…>,
+    // <|…|>): not an answer. The model is told and asked again (twice); then the text before the
+    // markup is the answer.
+    const markup = !res.toolCalls.length ? leakedMarkup(res.content) : null
+    if (markup && garbled++ < 2) {
+      log('task', `${client.model}: a tool call written as text; asking again`, res.content)
+      s.messages.pop()
+      s.messages.push({ role: 'user', content: prompt('agent/garbled-call') })
+      continue
+    }
+    if (markup) {
+      res.content = res.content.slice(0, markup.index).trim()
+      s.messages[s.messages.length - 1] = { ...s.messages.at(-1), content: res.content }
     }
     s.onEvent?.({ type: 'assistant', model: `${client.provider}/${client.model}`, content: res.content, reasoning: res.reasoning, toolCalls: res.toolCalls }) // headless output
     if (!res.toolCalls.length && !res.content?.trim()) {
@@ -703,19 +793,29 @@ async function runNative(s, task, images, signal) {
                   ? ''
                   : (args.path ?? args.url ?? args.query ?? args.filter ?? args.name ?? '')
       if (name !== 'run_command' && !together.has(call.id)) ui.step(name, clip(detail, 80))
-      const out = together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal, call.id) : 'error: the tool arguments were not valid JSON'
+      let out = together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal, call.id) : 'error: the tool arguments were not valid JSON'
+      // the same call again and again in a row (a weak model going round): told at the third, stopped at the fifth
+      const sig = `${name} ${call.function.arguments}`
+      inRow = sig === lastCall ? inRow + 1 : 1
+      lastCall = sig
+      if (inRow >= 3) out += `\n\n${prompt('agent/repeating', { n: inRow })}`
+      if (inRow >= 5) stuck = name
       if (name === 'read_file' || name === 'search' || name === 'list_files' || name === 'web_fetch' || name === 'web_search') ui.result(`${out.split('\n').length} lines`)
-      else if (name === 'agent' && !out.startsWith('error')) ui.result(`${s.ui.permission === 'plan' ? 'planned' : 'done'}: ${clip(out.split('\n').find((l) => l.trim()) ?? '', 100)}`)
-      else if (out.startsWith('error')) ui.result(clip(out, 120))
+      else if (name === 'agent' && !failed(out)) ui.result(`${s.ui.permission === 'plan' ? 'planned' : 'done'}: ${clip(out.split('\n').find((l) => l.trim()) ?? '', 100)}`)
+      else if (failed(out)) ui.result(clip(out, 120))
       const msg = { role: 'tool', tool_call_id: call.id, content: fitResult(s, name, out) }
-      if (name === 'read_file' && args && !args.start_line && !args.end_line && !out.startsWith('error')) replaceCopy(s, args.path, msg)
+      if (name === 'read_file' && args && !args.start_line && !args.end_line && !failed(out)) replaceCopy(s, args.path, msg)
       s.messages.push(msg)
       s.onEvent?.({ type: 'tool', id: call.id, name, output: out })
     }
     trimOldResults(s)
+    if (stuck) {
+      ui.warn(`stopped: ${client.model} made the same ${stuck} call five times in a row`)
+      return finalAnswer(s, signal, `the same ${stuck} call five times`)
+    }
     // screenshots from MCP tools: tool results are text only, so images follow as a message
     if (s.pendingImages?.length) {
-      s.messages.push({ role: 'user', content: [{ type: 'text', text: prompt('agent/tool-images') }, ...s.pendingImages.map((url) => ({ type: 'image_url', image_url: { url } }))] })
+      s.messages.push({ role: 'user', content: [{ type: 'text', text: prompt('agent/tool-images', { files: s.pendingImages.map((p) => p.file).join(', ') }) }, ...s.pendingImages.map(({ url }) => ({ type: 'image_url', image_url: { url } }))] })
       s.pendingImages = []
     }
   }
@@ -825,7 +925,7 @@ function attachNamed(s, task) {
     } catch {
       continue
     }
-    if (body.startsWith('error') || body.startsWith(`${f} is a binary file`)) continue // an image: read_file shows it, or says who can see it
+    if (failed(body) || body.startsWith(`${f} is a binary file`)) continue // an image: read_file shows it, or says who can see it
     const id = `named_${Date.now().toString(36)}_${calls.length}`
     calls.push({ id, type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: f }) } })
     const msg = { role: 'tool', tool_call_id: id, content: body }

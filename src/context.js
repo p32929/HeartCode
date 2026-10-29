@@ -5,7 +5,7 @@
 //                   list), unless contextGuessed (it didn't say)
 //   known           models.dev's published limits for the model: { context, output }
 //   inputLimit      a limit a "too large" error stated, or a silent cut seen twice (inputLimitAt:
-//                   when); dropped when a bigger request works, and after a week (it's learned
+//                   when); dropped when a bigger request works, and after a day (it's learned
 //                   again if it's still so: a refused request costs nothing)
 //   rateCap         a per-minute token cap the provider stated ({ tokens, until }): your account's,
 //                   not the model's, so it lasts a day
@@ -20,7 +20,7 @@ export const ASSUMED_REMOTE = 128_000
 export const ASSUMED_MAX = 1_000_000
 export const LOCAL_SERVERS = ['llama.cpp', 'lmstudio', 'ollama']
 export const RATE_CAP_MS = 86_400_000
-export const LIMIT_MS = 7 * 86_400_000
+export const LIMIT_MS = 86_400_000 // a learned limit, and a refusal learned from a provider: a day (learned again if it still holds)
 
 // { size, sure, from }: from is measured, server, models.dev, learned, rate or assumed.
 export function contextWindow(p, now = Date.now()) {

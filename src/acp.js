@@ -9,7 +9,7 @@ import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { log } from './log.js'
-import { clip } from './tools.js'
+import { clip, runningCall, failed as toolFailed } from './tools.js'
 import { HeadlessUI } from './headless.js'
 import { PERMISSIONS } from './ui.js'
 import { loadChat } from './sessions.js'
@@ -36,7 +36,7 @@ class AcpUI extends HeadlessUI {
   }
   async confirm(question, kind = 'edit') {
     if ((this.permission === 'all' || (this.permission === 'commands' && kind === 'edit') || (this.permission === 'plan' && kind === 'read'))) return true
-    const toolCallId = this.calls[0] ?? `ask_${Date.now()}`
+    const toolCallId = runningCall.getStore() ?? this.calls[0] ?? `ask_${Date.now()}` // the call asking
     const r = await this.conn
       .request('session/request_permission', {
         sessionId: this.sessionId,
@@ -206,7 +206,7 @@ function events(ui, s, e) {
     }
   } else if (e.type === 'tool') {
     ui.calls = ui.calls.filter((id) => id !== e.id)
-    const failed = /^error/.test(e.output)
+    const failed = toolFailed(e.output)
     ui.update({ sessionUpdate: 'tool_call_update', toolCallId: e.id, status: failed ? 'failed' : 'completed', content: [{ type: 'content', content: { type: 'text', text: clip(plain(e.output), 4000) } }] })
     if (e.name === 'todo') ui.update({ sessionUpdate: 'plan', entries: (s.chat.todos ?? []).map((t) => ({ content: t.content, priority: 'medium', status: t.status })) })
   }

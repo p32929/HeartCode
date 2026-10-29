@@ -17,41 +17,15 @@ const ACTIONS = prompt('guided/actions')
   .map((l) => l.split(/:\s*/, 2))
   .filter(([n, d]) => n && d)
 const DESC = Object.fromEntries(ACTIONS)
-const CHANGE_WORDS = /\b(fix|add|change|implement|create|write|make|rename|refactor|update|remove|delete|replace|edit|convert|move|improve)\b/i
-const RUN_WORDS = /\b(tests?|run|build|lint|compile)\b/i
-const FAIL_WORDS = /\b(fail\w*|broken|breaks?|errors?|crash\w*)\b/i
 const TEST_FILE = /(^|[/._-])(tests?|spec|__tests__)([/._-]|$)/i
-const TESTS_ARE_TARGET = /\b(add|write|update|change|fix|edit)\s+(the\s+|a\s+|some\s+)?(unit\s+)?tests?\b/i
-const QUESTION = /^\s*(what|how|why|where|which|who|when|explain|describe|summari[sz]e|tell|show|list|is|are|does|do|can|could|should)\b|\?\s*$/i
-
-// Wording first; the model only breaks a tie (small models answer yes/no unreliably).
-export function intent(task) {
-  const change = CHANGE_WORDS.test(task)
-  const question = QUESTION.test(task)
-  return change && !question ? true : question && !change ? false : null
-}
-
-// A path in the task that doesn't exist yet, e.g. "create src/slug.js".
-export function newFileIn(task, files) {
-  if (!/\b(create|new|add|write|make|generate)\b/i.test(task)) return null
-  for (const m of task.matchAll(/(?:^|[\s`'"(])((?:[\w.-]+\/)*[\w-]+\.[a-z0-9]{1,6})(?=$|[\s`'"),:;]|\.(?:\s|$))/gi)) {
-    const f = m[1].replace(/^\.\//, '')
-    if (!files.includes(f) && !/^(node|next|vue|react|nuxt|express|three|d3)\.js$/i.test(f)) return f
-  }
-  return null
-}
 
 // Obvious next steps are taken without asking: a weak model's effort goes into
 // writing code, not into navigating. Returns an action, or null to ask.
 export function autoAction(st) {
   if (st.delegated) return 'finish' // another model did the task: say what it did
-  if (st.newFile && st.wantsChange) return 'create'
-  if (st.failing && st.canRun && !st.runs && !st.edits) return 'run' // see the failure first
   if (st.lastRun !== null && st.lastRun !== 0 && !st.editsSinceRun && st.wantsChange && st.fixes < 3) return 'edit'
   if (st.wantsChange && st.reads && !st.edits) return 'edit'
-  if (st.editsSinceRun && st.canRun && st.wantsRun) return 'run'
   if (st.lastRun === 0 && st.edits && !st.editsSinceRun) return 'finish'
-  if (st.wantsRun && !st.runs && !st.wantsChange) return 'run'
   return null
 }
 
@@ -294,13 +268,11 @@ class Guided {
   }
 
   async start(images) {
+    this.images = images.length > 0
     if (images.length) await this.describeImages(images)
     this.autoRead()
     this.ui.spinner('reading the task')
-    this.st.wantsChange = intent(this.task) ?? (await this.yesNo(prompt('guided/intent'), false))
-    this.st.newFile = newFileIn(this.task, this.files)
-    this.st.wantsRun = RUN_WORDS.test(this.task)
-    this.st.failing = FAIL_WORDS.test(this.task)
+    this.st.wantsChange = await this.yesNo(prompt('guided/intent'), false) // the model says, not words in the task
     let last = ''
     let repeats = 0
     // No step limit (Esc stops it); a model doing the same thing three times in a row is stopped.
@@ -410,11 +382,9 @@ class Guided {
     const seen = this.notes.filter((n) => n.key?.startsWith('read:')).map((n) => n.key.slice(5)).reverse()
     // Weak models pick the first option: offer the code under test before the tests themselves.
     let files = [...new Set([...seen, ...this.files])]
-    const testsAreTarget = TESTS_ARE_TARGET.test(this.task)
-    if (!testsAreTarget) files = [...files.filter((x) => !TEST_FILE.test(x)), ...files.filter((x) => TEST_FILE.test(x))]
+    files = [...files.filter((x) => !TEST_FILE.test(x)), ...files.filter((x) => TEST_FILE.test(x))]
     let f = await this.pickFile(prompt('guided/which-file-to-edit'), files)
     if (!f) return 'edit:'
-    if (this.st.lastRun && TEST_FILE.test(f) && !testsAreTarget) f = this.codeUnderTest(f)
     const old = fs.readFileSync(resolveIn(this.s.root, f), 'utf8')
     this.ui.step('edit', f)
     let next = null
@@ -425,24 +395,20 @@ class Guided {
     if (lost.length) {
       this.ui.result(c.yellow(`that edit deleted ${lost.join(', ')}; retrying`))
       const again = await this.editRewrite(f, old, prompt('guided/keep-names', { names: lost.join(', '), them: lost.length > 1 ? 'them' : 'it' }))
-      if (again !== null && !lostNames(old, again, this.task).length) next = again
-      else this.ui.warn(`this edit removes ${lost.join(', ')}; check the diff`)
+      const still = again === null ? lost : lostNames(old, again, this.task)
+      if (again !== null && !still.length) next = again
+      // still gone: written only if the model says the task asks for that (not from words in it)
+      else if (await this.yesNo(prompt('guided/meant-to-remove', { names: still.join(', ') }), false)) next = again ?? next
+      else return (this.failed(f, `the edit removed ${still.join(', ')}, which the task doesn't ask for`), `edit:${f}`)
     }
     await this.apply(f, old, next)
     return `edit:${f}`
   }
 
-  // Weak models "fix" failing tests by editing the tests. Unless the task asks for test changes,
-  // the edit goes to the code the test imports.
-  codeUnderTest(test) {
-    const code = localImports(test, fs.readFileSync(resolveIn(this.s.root, test), 'utf8'), this.files).find((x) => !TEST_FILE.test(x))
-    if (code) this.note(null, 'note', prompt('guided/note-tests-are-right', { test, code }))
-    return code ?? test
-  }
-
   async editBlocks(f, old) {
     const q = prompt('guided/edit-blocks', { file: f, content: fence(old) })
     const res = await this.query(q, { room: Math.min(est(old) + 800, 4096), onToken: this.progress(`editing ${f}`), skipKey: `read:${f}` })
+    if (this.unfinished(f, res)) return null
     const blocks = parseBlocks(res.content)
     let text = old
     for (const b of blocks) {
@@ -461,7 +427,7 @@ class Guided {
     if (est(old) * 2.3 + 1000 < this.s.strat.context) {
       const q = prompt('guided/rewrite', { file: f, content: fence(old), extra })
       const res = await this.query(q, { room: Math.ceil(est(old) * 1.5) + 600, onToken: this.progress(`rewriting ${f}`), skipKey })
-      if (res.finishReason === 'length') return this.failed(f, 'the reply was cut off before the end of the file')
+      if (this.unfinished(f, res)) return null
       return cleanCode(res.content, old)
     }
 
@@ -500,9 +466,18 @@ class Guided {
       extra,
     })
     const res = await this.query(q, { room: est(chunk) * 2 + 500, onToken: this.progress(`rewriting ${f}:${a}-${b}`), skipKey })
-    if (res.finishReason === 'length') return this.failed(f, 'the reply was cut off')
+    if (this.unfinished(f, res)) return null
     const repl = reindent(lines.slice(a - 1, b), cleanCode(res.content, chunk).split('\n'))
     return [...lines.slice(0, a - 1), ...repl, ...lines.slice(b)].join('\n')
+  }
+
+  // A reply that can't be a whole file or edit: cut off (a length limit), stopped by a filter, or
+  // empty (all of it in the thinking). Nothing is written from it.
+  unfinished(f, res) {
+    if (res.finishReason === 'length') return this.failed(f, 'the reply was cut off') ?? true
+    if (res.finishReason === 'content_filter') return this.failed(f, 'the reply was stopped by the provider\'s filter') ?? true
+    if (!String(res.content ?? '').trim()) return this.failed(f, 'the reply was empty') ?? true
+    return false
   }
 
   failed(f, why) {
@@ -526,12 +501,8 @@ class Guided {
   }
 
   async create() {
-    let rel = this.st.newFile
-    this.st.newFile = null
-    if (!rel) {
-      const res = await this.query(prompt('guided/new-file-path'), { room: 40, oneLine: true })
-      rel = unquote(answerText(res.content).split('\n')[0].trim())
-    }
+    const res = await this.query(prompt('guided/new-file-path'), { room: 40, oneLine: true })
+    const rel = unquote(answerText(res.content).split('\n')[0].trim())
     if (!rel) return 'create:'
     const abs = resolveIn(this.s.root, rel)
     const f = path.relative(this.s.root, abs)
@@ -546,8 +517,7 @@ class Guided {
       room: Math.min(4096, Math.floor(this.s.strat.context / 2)),
       onToken: this.progress(`writing ${f}`),
     })
-    if (r.finishReason === 'length') this.failed(f, 'the reply was cut off')
-    else await this.apply(f, '', cleanCode(r.content))
+    if (!this.unfinished(f, r)) await this.apply(f, '', cleanCode(r.content))
     return `create:${f}`
   }
 
@@ -588,8 +558,10 @@ class Guided {
 
   // Another of your models, one with tool calls, does the whole task; what it did goes in the notes.
   async delegate() {
-    const team = this.s.team().filter((t) => t.tools)
-    const t = (/\.(png|jpe?g|gif|webp)\b/i.test(this.task) && team.find((x) => x.images)) || team[0]
+    // the model with tool calls that failed least this session (and sees images, if the task came with some)
+    const fails = (t) => this.s.failures?.[`${t.provider} ${t.model}`] ?? 0
+    const team = this.s.team().filter((t) => t.tools).sort((a, b) => (this.images ? b.images - a.images : 0) || fails(a) - fails(b))
+    const t = team[0]
     const done = await this.s.subagent({ description: 'the task', prompt: this.task, model: `${t.provider} ${t.model}` }, this.signal)
     this.note('delegate', `what ${t.model} did for the task`, done)
     this.st.delegated = true

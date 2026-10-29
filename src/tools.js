@@ -1,6 +1,8 @@
 import fs from 'node:fs'
+import { createHash } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { log } from './log.js'
-import { slug } from './memory.js'
+import { slug, fullSlug } from './memory.js'
 import { fillArgs } from './skills.js'
 import { prompt } from './prompts.js'
 import path from 'node:path'
@@ -49,12 +51,16 @@ export function resolveIn(root, p) {
   return abs
 }
 
-// Project files a message names (by path, or by file name like "num.js"), most specific first.
+// Project files a message names: by its path, or by a file name only one file in the project has
+// ("num.js"; in a project with three index.js, "index.js" names none of them).
 export function namedFiles(text, files) {
   const t = text.toLowerCase()
+  const count = new Map()
+  for (const f of files) count.set(path.basename(f).toLowerCase(), (count.get(path.basename(f).toLowerCase()) ?? 0) + 1)
+  const word = (w) => new RegExp(`(^|[^\\w./-])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\w-])`).test(t)
   return files.filter((f) => {
     const base = path.basename(f).toLowerCase()
-    return t.includes(f.toLowerCase()) || (base.includes('.') && new RegExp(`(^|[^\\w./-])${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\w-])`).test(t))
+    return t.includes(f.toLowerCase()) || (base.includes('.') && count.get(base) === 1 && word(base))
   })
 }
 
@@ -116,6 +122,21 @@ export function readFileTool(root, p, start, end, maxLines = 400) {
   return numberLines(lines.slice(s - 1, e), s) + more
 }
 
+// Images: the formats providers take, and the size sent at most (bigger ones, a full-page
+// screenshot of a long page, are refused by some providers; HeartCode has no image library to
+// shrink them).
+export const IMAGE_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
+export const MAX_IMAGE = 5_000_000
+// An image file as a data: URL; an error that says why not (shown: the name it was given as).
+export function imageUrl(abs, shown = abs) {
+  const mime = IMAGE_MIME[path.extname(abs).slice(1).toLowerCase()]
+  if (!mime) throw new Error(`${shown} is not an image file (png, jpg, gif, webp)`)
+  if (!fs.existsSync(abs)) throw new Error(`${shown} does not exist`)
+  const size = fs.statSync(abs).size
+  if (size > MAX_IMAGE) throw new Error(`${shown} is too big to send (${Math.round(size / 1e6)} MB; at most ${MAX_IMAGE / 1e6} MB)`)
+  return `data:${mime};base64,${fs.readFileSync(abs).toString('base64')}`
+}
+
 // An image file: shown to a model that can see images (after the tool results, as MCP screenshots
 // are); for one that can't, where to send it.
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i
@@ -124,12 +145,14 @@ function readImage(s, p) {
   const rel = path.relative(s.root, abs) || p
   if (!fs.existsSync(abs)) return readFileTool(s.root, p)
   if (s.strat?.vision) {
-    const ext = path.extname(abs).slice(1).toLowerCase()
-    ;(s.pendingImages ??= []).push(`data:image/${ext === 'jpg' ? 'jpeg' : ext};base64,${fs.readFileSync(abs).toString('base64')}`)
+    try {
+      ;(s.pendingImages ??= []).push({ url: imageUrl(abs, rel), file: rel })
+    } catch (e) {
+      return `error: ${e.message}`
+    }
     return `${rel}: the image is attached in the next message`
   }
-  const seer = s.team?.().find((t) => t.images)
-  return `${rel} is an image, and you can't see images.${seer ? ` Ask a model that can: the agent tool with model "${seer.provider} ${seer.model}", and the image's path in the prompt.` : ''}`
+  return s.team?.().some((t) => t.images) ? prompt('agent/images-unseen', { files: rel }) : `${rel} is an image, and you can't see images.`
 }
 
 export function searchFiles(root, query, sub = '', limit = 50) {
@@ -275,7 +298,13 @@ export async function proposeWrite(s, rel, old, next) {
 async function afterWrite(s, rel, old, res) {
   const notes = []
   if (!s.noFormat) {
-    const f = await formatFile(s.root, rel).catch((e) => (log('format', `${rel}: ${e.message}`), null))
+    // a formatter the project gave (a cloned repo's own commands): only once the user says yes
+    const allow = async (cmd) => {
+      s.formatters ??= new Map()
+      if (!s.formatters.has(cmd)) s.formatters.set(cmd, (await s.ui.confirm(`Run this project's formatter after each write? ${cmd}`, 'command')) === true)
+      return s.formatters.get(cmd)
+    }
+    const f = await formatFile(s.root, rel, allow).catch((e) => (log('format', `${rel}: ${e.message}`), null))
     if (f) {
       res.text = f.text
       res.ops = diffLines(old, f.text)
@@ -347,10 +376,15 @@ export async function runConfirmed(s, cmd, signal) {
 // /rewind, and told to the model. Text files up to 256 KB, read only when they changed since the
 // last look (the contents are cached per session).
 const SNAP_MAX = 256_000
+// complete: every file of the project is in it (a list cut at its limit isn't, and a file missing
+// from it may well have been there: never taken for a new one, which /rewind would delete).
+const SNAP_FILES = 20_000
 function snapshot(s) {
   const cache = (s.fileCache ??= new Map())
   const now = new Map()
-  for (const rel of listFiles(s.root)) {
+  const files = listFiles(s.root, SNAP_FILES + 1)
+  now.complete = files.length <= SNAP_FILES
+  for (const rel of files.slice(0, SNAP_FILES)) {
     let st
     try {
       st = fs.statSync(path.join(s.root, rel))
@@ -374,11 +408,14 @@ function changesSince(s, before) {
   const notes = []
   for (const rel of new Set([...before.keys(), ...after.keys()])) {
     if (before.get(rel) === after.get(rel)) continue
+    if (!(before.complete && after.complete) && (!before.has(rel) || !after.has(rel))) continue // a list cut at its limit: in one, not the other, says nothing
     const old = was.get(rel)
     const next = after.has(rel) ? s.fileCache.get(rel)?.text : undefined
     let note = !before.has(rel) ? `${rel} (new)` : !after.has(rel) ? `${rel} (deleted)` : rel
-    if (!before.has(rel)) s.track?.(rel, null) // /rewind removes it
-    else if (typeof old === 'string') s.track?.(rel, old) // /rewind puts this version back
+    if (!before.has(rel)) {
+      if (before.complete) s.track?.(rel, null) // /rewind removes it
+    } else if (typeof old === 'string') s.track?.(rel, old) // /rewind puts this version back
+    else if (old === undefined) note += ` (over ${SNAP_MAX / 1000} KB: /rewind can't put it back)`
     if (typeof old === 'string' && typeof next === 'string') {
       const ops = diffLines(old, next)
       s.ui.print(renderDiff(ops, rel, undefined, 2, 40))
@@ -440,7 +477,11 @@ export async function loadMcpTools(s, signal) {
   const notes = []
   for (const [server, { tools, instructions }] of known) {
     if (direct.size + tools.length > MAX_MCP_TOOLS) continue
-    for (const t of tools) direct.set(mcpName(server, t.name), { server, tool: t.name, def: t })
+    for (const t of tools) {
+      let n = mcpName(server, t.name)
+      if (direct.has(n)) n = `${n.slice(0, 57)}_${createHash('sha256').update(`${server}/${t.name}`).digest('hex').slice(0, 6)}` // cut to the same 64 characters as another
+      direct.set(n, { server, tool: t.name, def: t })
+    }
     if (instructions) notes.push(`### ${server}\n${instructions}`)
   }
   const shown = new Set([...direct.values()].map((d) => d.server))
@@ -455,9 +496,9 @@ function cleanSchema(x) {
   return Object.fromEntries(Object.entries(x).filter(([k]) => k !== '$schema').map(([k, v]) => [k, cleanSchema(v)]))
 }
 function mcpDefs(s) {
-  return [...(s.mcpDirect?.values() ?? [])].map(({ server, tool, def }) => {
+  return [...(s.mcpDirect?.entries() ?? [])].map(([name, { server, tool, def }]) => {
     const schema = cleanSchema(def.inputSchema ?? {})
-    return { name: mcpName(server, tool), description: clip(String(def.description ?? `${tool} (${server})`).trim(), 2000), parameters: { ...schema, type: 'object', properties: schema.properties ?? {} } }
+    return { name, description: clip(String(def.description ?? `${tool} (${server})`).trim(), 2000), parameters: { ...schema, type: 'object', properties: schema.properties ?? {} } }
   })
 }
 
@@ -483,8 +524,6 @@ export function extraTools(s) {
     const skills = forModel.map((k) => `${k.name}: ${k.description}`).join('\n')
     out.push({ name: 'skill', description: prompt('agent/tool-skill', { skills }), parameters: obj({ name: str }, ['name']) })
   }
-  // the patch format OpenAI's models are trained on (they also write it as a shell command, below)
-  if (/gpt|codex|\bo\d/i.test(s.client?.model ?? '')) out.push({ name: 'apply_patch', description: prompt('agent/tool-apply_patch'), parameters: obj({ input: str }, ['input']) })
   if (!s.isSub && s.subagent) {
     const team = s.team?.() ?? []
     const model = { type: 'string', description: prompt('agent/tool-agent-model') }
@@ -561,11 +600,13 @@ function memoryTool(s, args) {
   switch (args.action) {
     case 'write': {
       if (!args.content && !args.description) return 'error: write needs at least content or a description'
+      if (!String(args.name ?? '').trim() && !String(args.description ?? '').trim()) return 'error: write needs a "name" (or a description to name it by). Nothing was saved.'
+      if (String(args.name ?? '').trim() && fullSlug(args.name).length > 60) return 'error: the name is too long (60 characters at most, as a file name). Nothing was saved.'
       const n = m.write(args)
-      s.memoryWrites = (s.memoryWrites ?? 0) + 1
       return `Saved [[${n}]]${m.read(n)?.scope === 'global' ? ' (global)' : ''}.`
     }
     case 'read': {
+      if (!name.trim()) return 'error: read needs the note\'s "name" (search finds notes by words).'
       const n = m.read(name)
       if (!n) return `error: no note [[${slug(name)}]]. ${m.search(name).slice(0, 5).map((x) => `[[${x.name}]]`).join(', ') || 'Search the memory to find notes.'}`
       return `[[${n.name}]] (${n.scope === 'global' ? 'global' : 'this project'}, ${n.type}${n.tags.length ? `; ${n.tags.join(', ')}` : ''}): ${n.description}\n\n${n.body}${n.backlinks.length ? `\n\nLinked from: ${n.backlinks.join(', ')}` : ''}`
@@ -575,6 +616,7 @@ function memoryTool(s, args) {
       return hits.length ? hits.slice(0, 20).map((n) => `[[${n.name}]] — ${n.description} (${[n.scope === 'global' && 'global', ...n.tags].filter(Boolean).join(', ')})`).join('\n') : 'no notes match'
     }
     case 'delete':
+      if (!name.trim()) return 'error: delete needs the note\'s "name". Nothing was deleted.'
       return m.delete(name, args.scope) ? `Deleted [[${slug(name)}]].` : `error: no note [[${slug(name)}]]`
     default:
       return 'error: action must be write, read, search or delete'
@@ -621,31 +663,52 @@ async function mcpTool(s, args, signal) {
 async function callMcp(s, server, tool, a, signal) {
   if (!allowed(s, mcpName(server.name, tool))) return `error: the tool ${mcpName(server.name, tool)} is not allowed here`
   const def = (server.tools ?? s.mcpCatalog?.get(server.name)?.tools)?.find((t) => t.name === tool)
+  // a tool its server marks read-only isn't asked about (reading isn't, in any mode; headless
+  // declines what it would ask, so a browser's snapshot must not be); any other like a command
   if (!def?.annotations?.readOnlyHint) {
     const ok = await s.ui.confirm(`Use ${server.name} → ${tool}?`, 'command')
     if (ok !== true) return `The user declined this call.${typeof ok === 'string' ? ' User feedback: ' + ok : ''}`
   }
+  const done = await s.mcpGate?.() // a helper may be using the MCP servers (a browser): its turn first
   s.ui.spinner(`${server.name} · ${tool}`)
-  const r = await server.call(tool, a, signal)
+  const started = Date.now()
+  let r
+  try {
+    r = await server.call(tool, a, signal)
+  } finally {
+    done?.()
+  }
   const parts = r.content ?? []
   const text = parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n')
-  const images = parts.filter((p) => p.type === 'image' && p.data)
-  // image files the tool says it saved ("Saved screenshot to /…/shot.webp"): as if returned
-  const saved = [...new Set([...text.matchAll(/(?:^|[\s"'`(])((?:\/|~\/)[^\s"'`)]+\.(?:png|jpe?g|gif|webp))\b/gi)].map((m) => m[1].replace(/^~(?=\/)/, os.homedir())))].filter((f) => fs.existsSync(f))
-  if (saved.length) {
-    s.toolImages ??= new Set()
-    for (const f of saved) s.toolImages.add(f) // may be sent to a helper (agent images)
-    if (s.strat?.vision) images.push(...saved.map((f) => ({ data: fs.readFileSync(f).toString('base64'), mimeType: `image/${path.extname(f).slice(1).toLowerCase().replace('jpg', 'jpeg')}`, file: f })))
-  }
+  // Its images: the ones it returned, and image files it made while it ran (a path in its text to a
+  // file written during the call: "Saved screenshot to /…/shot.webp"; an old one it only mentions
+  // isn't one). Each is a file too, so a model that can't see them can have one that can look.
+  const made = [...new Set([...text.matchAll(/(?:^|[\s"'`(])((?:\/|~\/)[^\s"'`)]+\.(?:png|jpe?g|gif|webp))\b/gi)].map((m) => m[1].replace(/^~(?=\/)/, os.homedir())))].filter((f) => {
+    try {
+      return fs.statSync(f).mtimeMs >= started - 1000
+    } catch {
+      return false
+    }
+  })
+  const returned = parts.filter((p) => p.type === 'image' && p.data).map((p, i) => ({ p, file: saveOutput(s.chat?.id, `${tool}-${i + 1}`, Buffer.from(p.data, 'base64'), (p.mimeType ?? 'image/png').split('/')[1].replace('jpeg', 'jpg')) }))
+  const files = [...returned.map((x) => x.file).filter(Boolean), ...made]
+  s.toolImages ??= new Set()
+  for (const f of files) s.toolImages.add(f) // may be sent to a helper (agent images)
   let note = ''
-  if (images.length && s.strat?.vision) {
-    ;(s.pendingImages ??= []).push(...images.map((p) => `data:${p.mimeType ?? 'image/png'};base64,${p.data}`))
-    note = `\n(${images.length} image(s) attached in the next message)`
-  } else if ((images.length || saved.length) && s.team?.().some((t) => t.images)) {
-    // saved, for a model that can see to be asked about (the agent tool's images)
-    const files = [...images.map((p, i) => saveOutput(s.chat?.id, `${tool}-${i + 1}`, Buffer.from(p.data, 'base64'), (p.mimeType ?? 'image/png').split('/')[1].replace('jpeg', 'jpg'))).filter(Boolean), ...saved]
-    note = `\n${prompt('agent/images-unseen', { files: files.join('\n') })}`
-  } else if (images.length) note = `\n(${images.length} image(s) not shown: this model can't see images)`
+  if ((files.length || returned.length) && s.strat?.vision) {
+    const left = []
+    const shown = (s.pendingImages ??= []).length
+    for (const { p, file } of returned) if (!file) s.pendingImages.push({ url: `data:${p.mimeType ?? 'image/png'};base64,${p.data}`, file: '(not saved)' }) // couldn't be saved: shown as it came
+    for (const f of files) {
+      try {
+        s.pendingImages.push({ url: imageUrl(f), file: f })
+      } catch (e) {
+        left.push(e.message)
+      }
+    }
+    note = `\n(${s.pendingImages.length - shown} image(s): shown to you in the next message${left.length ? `; not shown: ${left.join('; ')}` : ''})`
+  } else if (files.length && s.team?.().some((t) => t.images)) note = `\n${prompt('agent/images-unseen', { files: files.join('\n') })}`
+  else if (files.length) note = `\n(${files.length} image(s) not shown: this model can't see images)`
   return `${r.isError ? 'error: ' : ''}${text || '(no text)'}${note}`
 }
 
@@ -723,7 +786,9 @@ async function editFiles(s, args) {
     const hits = listFiles(root).filter((f) => {
       try {
         const abs = resolveIn(root, f)
-        return fs.statSync(abs).size < 1_000_000 && fs.readFileSync(abs, 'utf8').includes(search)
+        if (fs.statSync(abs).size >= 1_000_000) return false
+        const buf = fs.readFileSync(abs)
+        return !isBinary(buf) && buf.toString('utf8').includes(search) // a binary file is never edited as text
       } catch {
         return false
       }
@@ -733,14 +798,20 @@ async function editFiles(s, args) {
   for (const [i, e] of edits.entries()) {
     const { search: s0, replace: r0, path: p0 } = normalize(e ?? {})
     const search = String(s0 ?? '')
-    const replace = String(r0 ?? '')
     const given = p0 ?? args.path
     const label = edits.length > 1 ? `edit ${i + 1} of ${edits.length}: ` : ''
+    // no "replace" at all isn't "replace with nothing": a model that left it out would delete code
+    // (one did). Deleting is an explicit "replace": "".
+    if (r0 === undefined || r0 === null) return `error: ${label}"replace" is missing: give the new text (or "replace": "" to delete the search text). Nothing was changed.`
+    if (typeof r0 !== 'string' && !(Array.isArray(r0) && r0.every((l) => typeof l === 'string'))) return `error: ${label}"replace" must be text, a string. Nothing was changed.`
+    const replace = Array.isArray(r0) ? r0.join('\n') : r0
     let rel = given && fs.existsSync(resolveIn(root, given)) ? path.relative(root, resolveIn(root, given)) : null
     let r = rel ? applyEdit(textOf(rel), search, replace) : null
     if (!r || r.error) {
       const other = search.trim() && holder(search)
-      if (other && other !== rel) [rel, r] = [other, applyEdit(textOf(other), search, replace)]
+      // no path given: the one file that has the text; a path given: that file only (the other is named)
+      if (other && other !== rel && !given) [rel, r] = [other, applyEdit(textOf(other), search, replace)]
+      else if (other && other !== rel) return `error: ${label}${rel ? `the search text isn't in ${given}` : `${given} does not exist`}, but the text is in ${other}: give that path if that's the file to change. Nothing was changed.`
     }
     if (!rel) return `error: ${label}${given ? `${given} does not exist; use write_file to create it` : 'no "path" given, and its search text is not in exactly one file'}. Nothing was changed.`
     if (r.error) return `error: ${label}${r.error}. Nothing was changed.`
@@ -767,12 +838,17 @@ async function applyPatch(s, text) {
   }
   if (!ops.length) return 'error: the patch changes no files. Nothing was changed.'
   const plan = [] // [rel, old, next (null: delete)]
+  const seen = new Set()
   for (const op of ops) {
     const abs = resolveIn(s.root, op.path)
     const rel = path.relative(s.root, abs)
+    // each file once: a second section for it would be worked out from the original and undo the first
+    if (seen.has(rel)) return `error: the patch changes ${op.path} twice; put all its changes in one section. Nothing was changed.`
+    seen.add(rel)
     const old = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null
     if (op.type === 'add') {
-      plan.push([rel, old ?? '', op.content.join('\n') + '\n'])
+      if (old !== null) return `error: ${op.path} already exists (*** Add File: is for new files; use *** Update File: to change it). Nothing was changed.`
+      plan.push([rel, '', op.content.join('\n') + '\n'])
       continue
     }
     if (old === null) return `error: ${op.path} does not exist${op.type === 'update' ? ' (use *** Add File: to create it)' : ''}. Nothing was changed.`
@@ -782,7 +858,12 @@ async function applyPatch(s, text) {
     }
     const r = applyChunks(old, op.chunks)
     if (r.error) return `error: ${op.path}: ${r.error}. Nothing was changed.`
-    if (op.moveTo) plan.push([path.relative(s.root, resolveIn(s.root, op.moveTo)), '', r.text], [rel, old, null])
+    if (op.moveTo) {
+      const dest = path.relative(s.root, resolveIn(s.root, op.moveTo))
+      if (dest === rel) plan.push([rel, old, r.text]) // moved onto itself: just the change
+      else if (fs.existsSync(resolveIn(s.root, op.moveTo)) || seen.has(dest)) return `error: ${op.moveTo} already exists (or the patch writes it twice); a move doesn't overwrite a file. Nothing was changed.`
+      else (seen.add(dest), plan.push([dest, '', r.text], [rel, old, null]))
+    }
     else plan.push([rel, old, r.text])
   }
   const out = []
@@ -795,13 +876,25 @@ async function applyPatch(s, text) {
 }
 
 // Every tool call goes through the user's PreToolUse and PostToolUse hooks (hooks.js).
+// The tool call running now (its id), through everything it does: an editor's permission prompt
+// names that call, also with several at once (helpers).
+export const runningCall = new AsyncLocalStorage()
+// A tool's result that is HeartCode's error, not the tool's output (command output starts with
+// "exit code", a file's with line numbers).
+export const failed = (out) => /^error: /.test(String(out))
+
 // id: the tool call's (a helper's steps are sent as its, for other apps to show under it)
 export async function runTool(name, args, s, signal, id) {
+  return id ? runningCall.run(id, () => toolRun(name, args, s, signal, id)) : toolRun(name, args, s, signal, id)
+}
+async function toolRun(name, args, s, signal, id) {
   log('tool', name, args)
-  const pre = await runHooks(s, 'PreToolUse', { tool_name: name, tool_input: args }, signal)
+  // hooks see an MCP tool by its own name (mcp__server__tool), also when called through "mcp"
+  const hookName = name === 'mcp' && args?.server && args?.tool ? mcpName(String(args.server), String(args.tool)) : name
+  const pre = await runHooks(s, 'PreToolUse', { tool_name: hookName, tool_input: args }, signal)
   if (pre.block) return prompt('agent/hook-blocked-tool', { reason: pre.block })
   let out = await tool(name, args, s, signal, id)
-  const post = await runHooks(s, 'PostToolUse', { tool_name: name, tool_input: args, tool_response: out }, signal)
+  const post = await runHooks(s, 'PostToolUse', { tool_name: hookName, tool_input: args, tool_response: out }, signal)
   if (post.block) out += `\n\n${prompt('agent/hook-after-tool', { reason: post.block })}`
   log('tool', `${name} result:`, clip(out, 4000))
   return out
@@ -857,6 +950,10 @@ async function tool(name, args, s, signal, id) {
       case 'write_file':
       case 'append_file': {
         if (!args.path) return 'error: write_file needs "path" (the file to write) and "content". Nothing was written.'
+        // no "content" at all isn't an empty file (a model that left it out would empty one)
+        if (args.content === undefined || args.content === null) return 'error: write_file needs "content" (the whole file; "" for an empty one). Nothing was written.'
+        if (Array.isArray(args.content) && args.content.every((l) => typeof l === 'string')) args.content = args.content.join('\n') // its lines
+        if (typeof args.content !== 'string') return 'error: write_file\'s "content" must be the file\'s text, a string (JSON too: as text). Nothing was written.'
         const abs = resolveIn(root, args.path)
         const rel = path.relative(root, abs)
         const old = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : ''

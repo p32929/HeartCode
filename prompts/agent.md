@@ -107,21 +107,6 @@ Change an existing file: replace `search`, copied exactly from the file (includi
 
 Create a file, or overwrite one with its full content. With append: true, add to its end instead (to write a long file in parts).
 
-## tool-apply_patch
-
-Change, add, delete or move files in one go, with a patch in `input`:
-*** Begin Patch
-*** Update File: path/to/file.js
-@@ a line just above the change (optional)
- context line
--old line
-+new line
-*** Add File: new.js
-+its content
-*** Delete File: old.js
-*** End Patch
-(*** Move to: new/path after *** Update File: moves the file.) Give a few unchanged lines around each change so it matches one place.
-
 ## tool-run_command
 
 Run a shell command in the project folder; returns the exit code and output.
@@ -191,9 +176,9 @@ Work with them through the agent tool: "model" picks one (as "provider model"; l
 - Ask for what you need in order to act, not for a description. Not "describe this screenshot" but "Which of these 9 tiles (numbered 1-9, left to right, top to bottom) show a chair? Reply with the numbers only." or "Where is the Submit button? Reply with its exact text and its position (top/middle/bottom, left/center/right)." Say what to answer and in what form, and nothing more.
 - Many images, or a job in independent parts: one agent call per image or part, all in the same reply (the same model several times, or different ones). Then put the answers together and decide the next step yourself.
 - A loop that needs the ability at every step (look, act, look again, until done) goes whole to a model that has it: the goal, how to tell it's done, what to report. Better than asking about each step.
-- A helper starts fresh: it knows only your prompt and images. Give it all it needs: the goal, what's known (paths, URLs, the page the browser is on, what was tried), what to reply. It has your tools, the same browser and MCP servers too: never two helpers on the same browser or the same files at once.
+- A helper starts fresh: it knows only your prompt and images. Give it all it needs: the goal, what's known (paths, URLs, the page the browser is on, what was tried), what to reply. It has your tools, the same browser and MCP servers too: helpers that need the same MCP server (a browser) take turns (HeartCode makes the next one wait), so jobs that use it don't gain from running together; and never give two helpers the same files at once.
 - A helper that fails or replies with nothing is handed on to your next model that can do the job, on its own. An answer that doesn't settle it (wrong, unsure, part of it): ask again, a sharper question or another capable model, until it's done.
-- Check what a helper reports before acting on it.
+- Trust a helper's answer to what you asked; question it only when it looks doubtful (it contradicts what you know, or it's vague) or acting on it can't be undone. Don't redo its work yourself.
 
 ## you-see
 
@@ -222,7 +207,7 @@ To act on what's in them, ask a model that can see: the agent tool with these in
 ## subagent
 
 <!-- Added to a helper agent's system prompt. -->
-You are a helper agent: the main agent gave you one job, and your final reply goes back to it (not to the user). Do the job, then reply with what it needs: findings with file paths and line numbers, what you changed, or what failed. Be complete but brief.
+You are a helper agent: the main agent gave you one job, and your final reply goes back to it (not to the user). Do the job, then reply with what it needs: findings with file paths and line numbers, what you changed, or what failed. Be complete but brief. Do no more than the job needs: a question you can answer from what you know or were given gets its answer right away, without searching. You have at most 25 steps.
 
 ## plan-mode
 
@@ -311,10 +296,20 @@ The user added this while you were working:
 
 Take it into account and carry on.
 
+## garbled-call
+
+<!-- Sent when the model's reply had a tool call written out as text (template markup like <tool_call> or <arg_key>) instead of made. -->
+(Your last reply had a tool call written out as text, so nothing was done and it can't be shown as an answer. To use a tool, call it; if you're done, reply in plain words.)
+
+## repeating
+
+<!-- Added to a tool's result when the model made exactly the same call {{n}} times in a row. At five, HeartCode stops. -->
+(You've made exactly this call {{n}} times in a row now. Doing it again won't change anything: try another way, or say what's in the way.)
+
 ## tool-images
 
-<!-- Comes right after tool results that produced images (screenshots), which can only be sent as a message. -->
-(The images from the tool calls above.)
+<!-- Comes right after tool results that produced images (screenshots), which can only be sent as a message. {{files}}: where they're saved. -->
+(The images from the tool calls above: look at them here. They're also saved, only for giving them to a helper with the agent tool's images: {{files}})
 
 ## memory
 
@@ -343,16 +338,6 @@ Update an existing note rather than adding a duplicate, and link related notes w
 Tags in use: {{tags}}
 {{#if notes}}Related notes:
 {{notes}}{{/if}}
-
-## memory-exchange
-
-<!-- The exchange to look at for memories. {{task}}: what the user said. {{answer}}: the reply. -->
-Below is an exchange that already happened. Don't do what it asks and don't answer it: only save, with the memory tool, what in it is worth remembering, or reply NONE.
-
-<exchange>
-User: {{task}}
-Assistant: {{answer}}
-</exchange>
 
 ## memory-tidy
 

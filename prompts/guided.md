@@ -61,7 +61,7 @@ Reply with only yes or no.
 
 ## intent
 
-<!-- Asked only when the wording of the task doesn't say whether it needs changes. -->
+<!-- Asked at the start of each task: does it need changes? -->
 Does the TASK require changing existing code or creating files (not just answering a question)?
 
 ## pick-file
@@ -112,6 +112,11 @@ Here is the current content of {{file}}:
 
 Rewrite this file with the change needed for the TASK. Reply with the COMPLETE new file content and nothing else. Keep everything that should not change. Never use placeholders like "rest of code here".{{#if extra}}
 {{extra}}{{/if}}
+
+## meant-to-remove
+
+<!-- Asked when an edit still removes definitions after a retry. {{names}}: what it removes. -->
+Your edit removes {{names}}. Does the TASK ask for that to be removed or renamed?
 
 ## keep-names
 
@@ -187,8 +192,3 @@ There are no files in the project.
 ## note-unknown-file
 
 Could not work out which file was meant.
-
-## note-tests-are-right
-
-<!-- A weak model tried to edit a failing test instead of the code it tests. {{test}}, {{code}}: the files. -->
-The tests in {{test}} are correct; fix {{code}}, the code they test.

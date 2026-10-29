@@ -67,7 +67,7 @@ export function priceOf(provider, baseUrl, model) {
 // models.dev's providers that are this one: by its name in HeartCode, or its URL.
 const ownBy = (provider, baseUrl) => {
   const host = hostOf(baseUrl)
-  return ([id, p]) => norm(id) === norm(provider) || (p.api && hostOf(p.api) === host) || (host.includes(id) && id.length > 3)
+  return ([id, p]) => norm(id) === norm(provider) || (p.api && hostOf(p.api) === host)
 }
 
 // models.dev's models with a size, by their names made plain (norm), the whole name and its last
@@ -109,10 +109,13 @@ function newestOf(name) {
 export function limitsOf(provider, baseUrl, model) {
   if (!table || !model) return null
   const last = (m) => m.split('/').pop()
-  const want = new Set([model, model.replace(/^models\//, ''), last(model), last(model).replace(/:(free|beta|extended|nitro|floor|online|cloud)$/, '').replace(/-cloud$/, '')].map(norm))
   const own = ownBy(provider, baseUrl)
   const found = { own: [], all: [] }
-  let hits = [...new Set([...want].flatMap((w) => indexOf(table).get(w) ?? []))].sort((a, b) => a.n - b.n)
+  const lookup = (names) => [...new Set(names.map(norm).flatMap((w) => indexOf(table).get(w) ?? []))].sort((a, b) => a.n - b.n)
+  let hits = lookup([model, model.replace(/^models\//, ''), last(model)])
+  // not by its whole name: without what a provider adds at the end (":free", "-cloud", "-instruct-turbo"), one part
+  // at a time, the most specific first
+  for (let name = last(model); !hits.length && /[:-][^:-]+$/.test(name); ) hits = lookup([(name = name.replace(/[:-][^:-]+$/, ''))])
   if (!hits.length) hits = newestOf(last(model)) // "magistral-small-latest" by its dated names only
   for (const { entry, info } of hits) {
     const it = { ...info.limit, ...(info.can ?? { tools: true, thinking: false, images: false }) }
@@ -123,7 +126,9 @@ export function limitsOf(provider, baseUrl, model) {
   if (!list.length) return null
   const count = (x) => list.filter((y) => y.context === x.context).length
   const best = list.reduce((a, b) => (count(b) > count(a) || (count(b) === count(a) && b.context > a.context) ? b : a))
-  return { context: best.context, output: best.output, tools: best.tools, thinking: best.thinking, images: best.images }
+  // not this provider's own entry (a proxy, a provider models.dev doesn't know): images only when
+  // every provider that lists it takes them (one that doesn't would refuse the request)
+  return { context: best.context, output: best.output, tools: best.tools, thinking: best.thinking, images: found.own.length ? best.images : list.every((x) => x.images) }
 }
 
 // Adds one request's usage (OpenAI's names) to the total; returns what it cost (0 if unknown).

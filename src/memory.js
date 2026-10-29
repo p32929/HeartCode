@@ -18,13 +18,15 @@ import { HOME } from './config.js'
 
 export const TYPES = ['user', 'project', 'feedback', 'reference']
 const LINK = /\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g
-export const slug = (s) =>
-  String(s)
+// A note's file name (60 characters at most: a longer name is refused when written, tools.js, so
+// two long names that start alike can't become one note)
+export const fullSlug = (s) =>
+  String(s ?? '')
     .toLowerCase()
     .replace(/\.md$/, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 60) || 'note'
+export const slug = (s) => fullSlug(s).slice(0, 60) || 'note'
 
 // One folder of notes.
 class Notes {
@@ -71,7 +73,7 @@ class Notes {
 
   // Creates or replaces a note; returns its name.
   write({ name, description, type, tags, content }) {
-    const n = slug(name || description)
+    const n = slug(String(name ?? '').trim() || description)
     const old = this.read(n)
     const t = TYPES.includes(type) ? type : (old?.type ?? 'project')
     const d = String(description || old?.description || String(content).split('\n')[0]).replace(/\s+/g, ' ').trim().slice(0, 200)

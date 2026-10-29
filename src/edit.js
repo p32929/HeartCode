@@ -59,8 +59,8 @@ function notFound(lines, sk) {
   return `${msg}. The closest lines are around line ${best + 1}:\n${lines.slice(Math.max(0, best - 2), best + 3).join('\n')}`
 }
 
-// Parses git-conflict-style blocks. Accepts 5-9 marker chars, missing
-// SEARCH/REPLACE words and a missing final marker.
+// Parses git-conflict-style blocks. Accepts 5-9 marker chars and missing SEARCH/REPLACE words; a
+// block without its final marker is a cut-off reply, left out.
 export function parseBlocks(reply) {
   const blocks = []
   let cur = null
@@ -79,7 +79,7 @@ export function parseBlocks(reply) {
       cur[part].push(line)
     }
   }
-  if (cur && part === 'replace') blocks.push(join(cur))
+  // a block with no closing >>>>>>> is a reply that was cut off: its replacement is part of one (left out)
   return blocks
 }
 
@@ -118,10 +118,9 @@ export function cleanCode(reply, original = '') {
 const DEF = /\b(?:function|def|class|fn|func|interface|struct|enum)\s+([A-Za-z_]\w*)|\b(?:const|let|var)\s+([A-Za-z_]\w*)\s*=/g
 const defNames = (t) => new Set([...t.matchAll(DEF)].map((m) => m[1] ?? m[2]))
 
-// Definitions an edit deleted although the task never asked for it — the
-// typical small-model rewrite accident.
+// Definitions an edit deleted that the task doesn't name — the typical small-model rewrite
+// accident (or what the task asked: the model is asked which, guided.js).
 export function lostNames(old, next, task) {
-  if (/\b(remove|delete|drop|rename|replace|rewrite|refactor|clean ?up|merge)\b/i.test(task)) return []
   const now = defNames(next)
   return [...defNames(old)].filter((n) => !now.has(n) && !task.includes(n))
 }

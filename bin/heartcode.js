@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util'
 import { Client } from '../src/client.js'
 import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, DEFAULT_MODEL, VERSION } from '../src/config.js'
 import { probe, loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
-import { learnFromUsage, RATE_CAP_MS } from '../src/context.js'
+import { learnFromUsage, RATE_CAP_MS, LIMIT_MS } from '../src/context.js'
 import { Session, transcript } from '../src/agent.js'
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
 import { UI, c, PERMISSIONS, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys } from '../src/ui.js'
@@ -160,6 +160,7 @@ class App {
     this.memory = new Memory(root) // .heartcode/memory: notes linked with [[name]]
     this.director = new Director(this) // the manage tool: skills, MCP servers and settings by asking
     this.later = [] // setting changes that wait until the current message is done
+    this.failures = {} // "provider model" → failed requests this session (engine: onFail)
   }
 
   newMcp() {
@@ -209,10 +210,13 @@ class App {
     const bad = (choices) => `error: ${name} must be ${choices}`
     const save = (msg) => (saveConfig(cfg), log('director', `setting ${name} = ${v}`), msg)
     switch (name) {
-      case 'permissions':
+      case 'permissions': {
         if (!PERMISSIONS.some(([p]) => p === v)) return bad('all, commands, ask or plan')
-        ui.setPermission(v)
-        return `permissions: ${v}`
+        // allowing more than now: only if you say yes (the model can't give itself more on its own)
+        const free = (p) => ['plan', 'ask', 'commands', 'all'].indexOf(p)
+        if (free(v) <= free(ui.permission)) return (ui.setPermission(v), `permissions: ${v}`)
+        return ui.confirm(`The model wants to change permissions from "${ui.permission}" to "${v}". Allow?`, 'command').then((ok) => (ok === true ? (ui.setPermission(v), `permissions: ${v}`) : `The user didn't allow it; permissions stay "${ui.permission}".`))
+      }
       case 'effort':
         if (!ARGS.set_effort.some(([o]) => o === v)) return bad('default, low, medium or high')
         cfg.effort = v === 'default' ? undefined : v
@@ -228,6 +232,8 @@ class App {
         let [p, ...m] = v.split(/\s+/)
         if (!cfg.providers[p]) [p, m] = [cfg.provider, [v]]
         if (!cfg.providers[p] || !m.join(' ')) return `error: give "provider model" or a model of the current provider; providers: ${Object.keys(cfg.providers).join(', ')}`
+        // headless (-p) and editors (ACP): the program that started HeartCode chooses the model
+        if (this.ui instanceof HeadlessUI) return 'error: the model can\'t be switched here: the program that started HeartCode chooses it'
         this.later.push(() => this.use(p, m.join(' ')).catch((e) => ui.warn(e.message)))
         return `switching to ${p} · ${m.join(' ')} after this reply`
       }
@@ -237,41 +243,69 @@ class App {
   }
 
   // The model, its probe and strategy for a provider and model (probed once, then cached).
-  async engine(provider, model, ui, signal) {
+  // quiet: for a helper (orchestration): nothing printed about the model, the settings left alone.
+  async engine(provider, model, ui, signal, { quiet = false } = {}) {
     const { cfg } = this
     const client = this.client(provider, model)
+    let price = null
     // tokens and cost, into the chat (also a helper's, the probe's, compaction's)
-    let price = priceOf(provider, client.baseUrl, model)
-    loadPrices().then(() => ((price = priceOf(provider, client.baseUrl, model)), ui.render?.()))
     client.price = () => price
     client.onSpend = (u) => addUsage((this.chat.usage ??= {}), u, price)
     client.onRetry = (err, ms, attempt, next) => ui.retrying(err, ms, attempt, next) // keep trying until Esc (also while probing)
-    // the model list (settings page): another model answered; its price from now on
+    // failures per model this session: the main model sees them (Your other models) and helpers
+    // are tried in that order
+    client.onFail = (e, t) => {
+      if (e.name === 'AbortError') return
+      const k = `${t.provider} ${t.model}`
+      this.failures[k] = (this.failures[k] ?? 0) + 1
+    }
+    // the model list (settings page): another model answered
     client.onSwitch = (t) => {
-      price = priceOf(t.provider, t.baseUrl, t.model)
       const i = client.rotation.list.indexOf(t)
       ui.print(c.dim(`↻ ${t.provider} · ${t.model} answered${i ? ` (#${i + 1} in your model list)` : ' (#1 again)'}`))
     }
     if (cfg.maxRetries !== undefined) client.retryIf = (e, attempt) => attempt < cfg.maxRetries // headless: then give up
-    let profile = await getProfile(client, ui, cfg.force, signal)
-    cfg.force = false
-    if (strategy(profile, cfg).thinking) client.effort = cfg.effort
-    const strat = strategy(profile, cfg)
-    // Another model in the list is asked from now on: its own abilities (sees images? its window…)
-    // and profile, not the first one's (whose profile was once saved under the next one's name).
+    let profile = await getProfile(client, ui, !quiet && cfg.force, signal, quiet)
+    if (!quiet) cfg.force = false
+    const strat = {}
+    // The model asked from now on (at first, and when the model list moves on): its own profile,
+    // abilities (sees images? calls tools? its window), thinking effort, price, and what its
+    // provider refuses. client.can: what the conversation is fitted to before each request.
+    const apply = () => {
+      for (const k of Object.keys(strat)) delete strat[k]
+      Object.assign(strat, strategy(profile, cfg))
+      Object.assign(client, { tokenRatio: profile.tokenRatio ?? 1, knownGood: profile.largestAccepted ?? 0, can: strat, effort: strat.thinking ? cfg.effort : undefined })
+      for (const [q, at] of Object.entries(profile.quirks ?? {})) if (Date.now() - at < LIMIT_MS) client.quirks[q] = true
+      price = priceOf(client.provider, client.baseUrl, client.model)
+      if (this.s?.client === client) this.s.profile = profile // /model_info, the settings page
+    }
+    apply()
     client.onUse = (t) => {
       profile = loadProfile(client) || profileFrom(client, limitsOf(t.provider, client.baseUrl, t.model))
-      Object.assign(strat, strategy(profile, cfg))
-      Object.assign(client, { tokenRatio: profile.tokenRatio ?? 1, knownGood: profile.largestAccepted ?? 0 })
+      apply()
       log('rotate', `${t.provider} · ${t.model}: ${strat.actions}${strat.vision ? ', images' : ''}, ~${strat.context} tokens`)
+    }
+    // Saved with what another connection to the same model (a helper on it) learned meanwhile: the
+    // provider's refusals of both are kept (each writes its whole profile).
+    const save = () => {
+      const disk = readJson(profilePath(client), null)
+      if (disk?.model === profile.model) profile.quirks = { ...disk.quirks, ...profile.quirks }
+      writeJson(profilePath(client), profile)
     }
     // What the window is, learned while working (context.js); kept in the profile for next time.
     const learned = () => {
       Object.assign(strat, (({ context, contextSure, ratio, reply }) => ({ context, contextSure, ratio, reply }))(strategy(profile, cfg)))
       Object.assign(client, { tokenRatio: profile.tokenRatio ?? 1, knownGood: profile.largestAccepted ?? 0 })
-      writeJson(profilePath(client), profile)
+      save()
     }
-    Object.assign(client, { tokenRatio: profile.tokenRatio ?? 1, knownGood: profile.largestAccepted ?? 0 })
+    // A part of the request this model's provider refused and the request worked without: kept for
+    // a day (images: the model is treated as not seeing them).
+    client.onLearn = (quirk) => {
+      profile.quirks = { ...profile.quirks, [quirk]: Date.now() }
+      if (quirk === 'noImages') strat.vision = false
+      save()
+      log('quirk', `${client.model}: ${quirk} (kept for a day)`)
+    }
     client.onUsage = (used, estimate) => {
       const was = profile.largestAccepted
       const change = learnFromUsage(profile, used, estimate)
@@ -285,10 +319,11 @@ class App {
       if (rate) profile.rateCap = { tokens: n, until: Date.now() + RATE_CAP_MS }
       else Object.assign(profile, { inputLimit: Math.min(profile.inputLimit ?? Infinity, n), inputLimitAt: Date.now() })
       learned()
-      ui.warn(rate ? `${provider} takes at most ~${n} tokens a minute on your account; shortening the conversation to fit (for today)` : `${client.model} takes at most ~${n} tokens per request here; shortening the conversation to fit`)
+      ui.warn(rate ? `${client.provider} takes at most ~${n} tokens a minute on your account; shortening the conversation to fit (for today)` : `${client.model} takes at most ~${n} tokens per request here; shortening the conversation to fit`)
     }
     // models.dev's published size for the model (a day old at most): used when the server doesn't say
     loadPrices().then(() => {
+      price = priceOf(client.provider, client.baseUrl, client.model)
       const known = limitsOf(provider, client.baseUrl, model) ?? undefined
       if (profile.model !== model || JSON.stringify(known) === JSON.stringify(profile.known)) return // (a switched-to model: its own)
       profile.known = known
@@ -601,7 +636,8 @@ class App {
     Object.assign(this.s, { noFormat: cfg.format === false, noLsp: cfg.lsp === false })
     Object.assign(this.s, { mcp: this.mcp, memory: this.memory, skills: this.skills, director: this.director })
     this.s.team = () => this.team() // your other models: a job this one can't do goes to one of them
-    this.s.engineFor = (t) => this.engine(t.provider, t.model, ui)
+    this.s.engineFor = (t) => this.engine(t.provider, t.model, ui, undefined, { quiet: true })
+    this.s.failures = this.failures
     if (this.allowTools?.length) this.s.allowTools = toolNames(this.allowTools) // headless --allowedTools
     if (this.denyTools?.length) this.s.denyTools = toolNames(this.denyTools)
     if (this.cfg.maxTurns) this.s.maxTurns = this.cfg.maxTurns
@@ -1002,7 +1038,7 @@ function copyText(text) {
 // A model's profile: the saved one; else what models.dev says (nothing is sent to the model to
 // find out); a model it doesn't know: plain assumptions, until you set it up on the settings page.
 // force (/test_model, heart probe): test it now instead, with real requests.
-async function getProfile(client, ui, force, signal) {
+async function getProfile(client, ui, force, signal, quiet = false) {
   let p = !force && loadProfile(client)
   if (!p && !force) {
     await loadPrices()
@@ -1017,7 +1053,7 @@ async function getProfile(client, ui, force, signal) {
     if (known) writeJson(profilePath(client), (p = { ...p, known, source: 'models.dev' }))
   }
   if (p) {
-    if (p.source === 'assumed') ui.warn(`${client.model} isn't in models.dev: assuming it calls tools and streams, with a ~128k window. Set what it can do on /settings`)
+    if (p.source === 'assumed' && !quiet) ui.warn(`${client.model} isn't in models.dev: assuming it calls tools and streams, with a ~128k window. Set what it can do on /settings`)
     return p
   }
   ui.print(c.dim(`Testing ${client.model}…`))
@@ -1235,7 +1271,6 @@ async function slash(app, line) {
   }
   const s = await app.session()
   if (!s) return
-  const restrat = () => (s.strat = strategy(s.profile, cfg))
   switch (cmd) {
     case 'compact': {
       const done = await s.compact({ signal: app.signal, focus: args.join(' ') })
@@ -1245,11 +1280,13 @@ async function slash(app, line) {
     }
     case 'model_info':
       return ui.print(`${c.cyan(s.client.model)}\n${describe(s.profile, s.strat)}`)
-    case 'test_model':
-      s.profile = await getProfile(s.client, ui, true, app.signal)
-      restrat()
+    case 'test_model': {
+      const tested = await getProfile(app.client(s.client.provider, s.client.model), ui, true, app.signal) // tested on a fresh connection (requests not fitted to what it was thought to do), and saved
       s.reset()
-      return ui.print(describe(s.profile, s.strat))
+      app.s = null // built again from the saved profile (one profile and strategy, kept up to date as the model list moves on)
+      await app.session()
+      return ui.print(`${c.cyan(tested.model)}\n${describe(tested, strategy(tested, cfg))}`)
+    }
   }
 }
 
@@ -1390,7 +1427,9 @@ async function main() {
   const argv = process.argv.slice(2)
   const print = argv.includes('-p') || argv.includes('--print') // headless: an id after --resume is always an id
   for (let i = 0; i < argv.length; i++) if (argv[i] === '-w' || argv[i] === '--worktree') argv[i] = '--worktree=' // a name only as --worktree=name
-  for (let i = 0; i < argv.length; i++) if ((argv[i] === '--resume' || argv[i] === '-r') && /^[\w.-]{6,}$/.test(argv[i + 1] ?? '') && (print || loadChat(argv[i + 1]))) argv[i] = '--resume-id'
+  // an id: a saved session's, or (headless) shaped like one: HeartCode's (20261028091723-f44o) or a UUID
+  const idShaped = (x) => /^\d{14}-[a-z0-9]+$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x)
+  for (let i = 0; i < argv.length; i++) if ((argv[i] === '--resume' || argv[i] === '-r') && /^[\w.-]{6,}$/.test(argv[i + 1] ?? '') && (loadChat(argv[i + 1]) || (print && idShaped(argv[i + 1])))) argv[i] = '--resume-id'
   const { values: f, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -1484,7 +1523,8 @@ async function main() {
   if (f.acp) {
     // each editor session gets its own App, for its folder and its MCP servers
     cfg.maxRetries ??= 10
-    const makeApp = (root, ui, mcp) => new App(mcp ? { ...cfg, mcp: { extra: [mcp] } } : cfg, ui, root)
+    // each editor session its own settings (one choosing a model doesn't change the others')
+    const makeApp = (root, ui, mcp) => new App({ ...structuredClone(cfg), ...(mcp && { mcp: { extra: [mcp] } }) }, ui, root)
     process.exit(await runAcp({ makeApp, version: VERSION, permission: f['permission-mode'] ? PERMISSION_MODES[f['permission-mode']] : (cfg.permissions ?? 'ask') }))
   }
   const headless = f.print || f['output-format'] || f['input-format'] === 'stream-json'

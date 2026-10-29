@@ -12,7 +12,7 @@
 // told to the model. Logs and warnings go to stderr (and HEART_LOG), never stdout.
 import readline from 'node:readline'
 import { log } from './log.js'
-import { clip, TOOL_DEFS, extraTools, loadMcpTools } from './tools.js'
+import { clip, TOOL_DEFS, extraTools, loadMcpTools, failed as toolFailed } from './tools.js'
 import { allowed } from './agent.js'
 
 // Claude Code's tool names → HeartCode's (for --allowedTools / --disallowedTools).
@@ -97,11 +97,12 @@ export async function runHeadless(app, opts) {
   let usage = { input_tokens: 0, output_tokens: 0 }
   let byModel = {}
   let requests = 0
-  const count = (client, key) => {
+  // each request under the model that answered it (the model list may have moved on)
+  const count = (client) => {
     const chat = client.chat.bind(client)
     client.chat = async (...a) => {
       const r = await chat(...a)
-      const m = (byModel[key] ??= { inputTokens: 0, outputTokens: 0 })
+      const m = (byModel[`${client.provider}/${client.model}`] ??= { inputTokens: 0, outputTokens: 0 })
       if (client === s.client) requests++
       usage.input_tokens += r.usage?.prompt_tokens ?? 0
       usage.output_tokens += r.usage?.completion_tokens ?? 0
@@ -110,11 +111,11 @@ export async function runHeadless(app, opts) {
       return r
     }
   }
-  count(s.client, model)
+  count(s.client)
   const engineFor = s.engineFor
   if (engineFor) s.engineFor = async (t) => {
     const e = await engineFor(t)
-    count(e.client, `${t.provider}/${t.model}`)
+    count(e.client)
     return e
   }
 
@@ -129,9 +130,9 @@ export async function runHeadless(app, opts) {
         ]
         if (e.content && !e.parent) said = true
         // a helper's (agent) steps too, as Claude Code sends a subagent's: parent_tool_use_id is its agent call
-        if (content.length) emit({ type: 'assistant', message: { role: 'assistant', model: e.parent ? e.model : model, content }, parent_tool_use_id: e.parent ?? null, session_id })
+        if (content.length) emit({ type: 'assistant', message: { role: 'assistant', model: e.model ?? model, content }, parent_tool_use_id: e.parent ?? null, session_id })
       } else if (e.type === 'tool') {
-        emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: e.id, content: e.output, is_error: e.output.startsWith('error') }] }, parent_tool_use_id: e.parent ?? null, session_id })
+        emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: e.id, content: e.output, is_error: toolFailed(e.output) }] }, parent_tool_use_id: e.parent ?? null, session_id })
       }
     }
     if (s.strat.actions === 'tools' && s.mcp?.names.length) await loadMcpTools(s) // their tools are in the list, as in Claude Code's
@@ -164,9 +165,9 @@ export async function runHeadless(app, opts) {
     }
     const subtype = current.maxTurns ? 'error_max_turns' : error ? 'error_during_execution' : 'success' // as Claude Code names them
     current = null
-    const result = { type: 'result', subtype, is_error: Boolean(error), result: error ?? answer, num_turns: Math.max(1, requests), duration_ms: Date.now() - t0, total_cost_usd: (app.chat.usage?.cost ?? 0) - spent, usage, modelUsage: { [model]: { inputTokens: 0, outputTokens: 0 }, ...byModel }, session_id }
+    const result = { type: 'result', subtype, is_error: Boolean(error), result: error ?? answer, num_turns: Math.max(1, requests), duration_ms: Date.now() - t0, total_cost_usd: (app.chat.usage?.cost ?? 0) - spent, usage, modelUsage: Object.keys(byModel).length ? byModel : { [model]: { inputTokens: 0, outputTokens: 0 } }, session_id }
     if (out === 'stream-json') {
-      if (!error && answer && !said) emit({ type: 'assistant', message: { role: 'assistant', model, content: [{ type: 'text', text: answer }] }, parent_tool_use_id: null, session_id }) // guided mode
+      if (!error && answer && !said) emit({ type: 'assistant', message: { role: 'assistant', model: `${s.client.provider}/${s.client.model}`, content: [{ type: 'text', text: answer }] }, parent_tool_use_id: null, session_id }) // guided mode
       emit(result)
     } else if (out === 'json') emit(result)
     else if (error) process.stderr.write(`heartcode: ${error}\n`)
@@ -197,8 +198,14 @@ export async function runHeadless(app, opts) {
       continue
     }
     if (msg.type === 'control_request') {
-      if (msg.request?.subtype === 'interrupt') current?.ctl.abort()
-      emit({ type: 'control_response', response: { subtype: 'success', request_id: msg.request_id } })
+      // as Claude Code answers them: initialize (an SDK's first line), interrupt, a permission mode;
+      // any other is said to be unsupported, not taken as done
+      const kind = msg.request?.subtype
+      const ok = () => emit({ type: 'control_response', response: { subtype: 'success', request_id: msg.request_id } })
+      if (kind === 'interrupt') (current?.ctl.abort(), ok())
+      else if (kind === 'initialize') ok()
+      else if (kind === 'set_permission_mode' && PERMISSION_MODES[msg.request.mode]) (app.ui.setPermission(PERMISSION_MODES[msg.request.mode]), ok())
+      else emit({ type: 'control_response', response: { subtype: 'error', request_id: msg.request_id, error: `HeartCode doesn't support the control request "${kind ?? ''}"` } })
       continue
     }
     if (msg.type !== 'user') continue

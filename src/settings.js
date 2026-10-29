@@ -78,6 +78,21 @@ const ROTATION = { on: ['failure', 'retries', 'any'], next: ['first', 'stay'] }
 const rotationOf = (cfg) => ({ on: 'failure', retries: 2, next: 'first', ...cfg.rotation, then: (cfg.rotation?.then ?? []).filter((t) => cfg.providers[t.provider]) })
 
 const mask = (k) => (k ? (k.length > 12 ? `${k.slice(0, 4)}…${k.slice(-4)}` : '…') : '')
+async function schemeFor(address) {
+  try {
+    await fetch(`https://${address.replace(/\/+$/, '')}/models`, { redirect: 'manual', signal: AbortSignal.timeout(8000) })
+  } catch (e) {
+    // https can't connect at all (refused, or a server that only speaks http): http, if that answers
+    if (e.name !== 'TimeoutError') {
+      try {
+        await fetch(`http://${address.replace(/\/+$/, '')}/models`, { redirect: 'manual', signal: AbortSignal.timeout(8000) })
+        return `http://${address}`
+      } catch {}
+    }
+  }
+  return `https://${address}` // it answered on https, or is slow: never the key in the clear on a guess
+}
+
 const safeName = (n) => String(n ?? '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
 const skillsDir = () => path.join(HOME, 'skills')
 
@@ -191,11 +206,13 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
     'GET /api/state': () => state(),
     'GET /api/log-size': () => logSize(),
     'POST /api/clear-logs': () => ({ gone: clearLogs(), size: logSize() }),
-    'POST /api/provider': ({ name, baseUrl, apiKey, keepKey, was }) => {
+    'POST /api/provider': async ({ name, baseUrl, apiKey, keepKey, was }) => {
       name = safeName(name)
       if (!name) throw new Error('a name is needed')
       baseUrl = String(baseUrl ?? '').trim()
-      if (!/^https?:\/\//i.test(baseUrl)) baseUrl = (/^(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.)/.test(baseUrl) ? 'http://' : 'https://') + baseUrl
+      // an address without http(s)://: whichever of the two the server answers on (any answer, even
+      // a 401, means it's there), https first
+      if (!/^https?:\/\//i.test(baseUrl)) baseUrl = await schemeFor(baseUrl)
       try {
         if (!new URL(baseUrl).hostname) throw new Error()
       } catch {

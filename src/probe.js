@@ -3,7 +3,7 @@ import path from 'node:path'
 import { deflateSync } from 'node:zlib'
 import { HOME, readJson, writeJson } from './config.js'
 import { est } from './client.js'
-import { contextWindow, contextSource, LOCAL_SERVERS, ASSUMED_REMOTE } from './context.js'
+import { contextWindow, contextSource, LOCAL_SERVERS, ASSUMED_REMOTE, LIMIT_MS } from './context.js'
 import { loadPrices, limitsOf } from './usage.js'
 import { applyEdit, parseBlocks } from './edit.js'
 import { c } from './ui.js'
@@ -107,6 +107,9 @@ async function runProbe(client, report = () => {}, signal) {
       return Boolean(await fn())
     } catch (e) {
       if (e.name === 'AbortError' || /^cannot reach/.test(e.message)) throw e
+      // no answer (a timeout, a stalled reply): nothing learned, nothing saved; an answer it can't
+      // read (not JSON) counts as "not supported" below
+      if (e.name === 'TimeoutError') throw new Error(`probe stopped, nothing saved: ${e.message}`)
       if ([401, 429].includes(e.status) || e.status >= 500 || ([403, 404].includes(e.status) && !calls))
         throw new Error(`probe stopped, nothing saved: ${e.message}`)
       lastError = e
@@ -297,7 +300,7 @@ export function strategy(p, cfg = {}) {
     toolsStream: stream && (said ? true : Boolean(p.toolsStream)),
     stop: said ? !thinking : Boolean(p.stop), // stop sequences cut into a thinking model's thinking
     mergeSystem: said ? false : !most(p.system),
-    vision: set.images ?? (said ? Boolean(said.images) : all(p.vision)),
+    vision: !(Date.now() - (p.quirks?.noImages ?? -Infinity) < LIMIT_MS) && (set.images ?? (said ? Boolean(said.images) : all(p.vision))), // its provider refused images this week: none
     thinking,
     context: cfg.context || set.context || win.size, // context.js: measured, said, models.dev, learned, or assumed
     contextSure: Boolean(cfg.context || set.context) || win.sure,
@@ -318,7 +321,7 @@ export function describe(p, s) {
   if (p.source) {
     const from = { 'models.dev': 'models.dev', you: 'you, on /settings', assumed: "nothing: it isn't in models.dev. Set what it can do on /settings" }[p.source]
     const mine = (k) => (p.set?.[k] !== undefined ? c.dim('  (set by you)') : '')
-    return [['from', from], context, ['tool calls', yn(s.actions === 'tools') + mine('tools')], ['thinking', yn(s.thinking) + mine('thinking')], ['images', yn(s.vision) + mine('images')], ['streaming', yn(s.stream) + mine('stream')]]
+    return [['from', from], context, ['tool calls', yn(s.actions === 'tools') + mine('tools')], ['thinking', yn(s.thinking) + mine('thinking')], ['images', yn(s.vision) + (Date.now() - (p.quirks?.noImages ?? -Infinity) < LIMIT_MS ? c.dim('  (its provider refused an image today)') : mine('images'))], ['streaming', yn(s.stream) + mine('stream')]]
       .map(([k, v]) => `  ${c.dim(k.padEnd(15))} ${v}`)
       .join('\n')
   }

@@ -63,8 +63,10 @@ export class Director {
       if (!existing) return `error: no ${kind} "${name}"`
       const ok = await s.ui.confirm(`Delete the ${kind} ${name} (${existing.file})?`, 'edit')
       if (ok !== true) return declined(ok)
-      const isFolder = /SKILL\.md$/.test(existing.file)
-      fs.rmSync(isFolder ? path.dirname(existing.file) : existing.file, { recursive: true, force: true })
+      // a skill in its own folder (<name>/SKILL.md): that folder; never a skills folder itself
+      const folder = path.dirname(existing.file)
+      const isFolder = path.basename(existing.file) === 'SKILL.md' && !skillDirs(app.root).some((d) => path.resolve(d) === path.resolve(folder))
+      fs.rmSync(isFolder ? folder : existing.file, { recursive: true, force: true })
       app.reload(kind)
       return `Deleted the ${kind} ${name}.`
     }
@@ -126,10 +128,11 @@ export class Director {
     }
     if (cfg?.mcpServers) cfg = cfg.mcpServers[name] ?? Object.values(cfg.mcpServers)[0] // pasted a whole mcp.json
     else if (cfg && !cfg.command && Object.keys(cfg).length === 1 && typeof Object.values(cfg)[0] === 'object') cfg = Object.values(cfg)[0] // { "name": { … } }
-    if (!cfg?.command && !(DEFAULT_SERVERS[name] && cfg)) return 'error: config needs "command" (and usually "args"), like {"command": "npx", "args": ["-y", "some-mcp"]}'
-    const clean = Object.fromEntries(['command', 'args', 'env', 'description', 'disabled'].filter((k) => cfg[k] !== undefined).map((k) => [k, cfg[k]]))
+    // a program to run (command), or a server on the web (url)
+    if (!cfg?.command && !cfg?.url && !(DEFAULT_SERVERS[name] && cfg)) return 'error: config needs "command" (and usually "args"), like {"command": "npx", "args": ["-y", "some-mcp"]}, or "url" for a remote server, like {"url": "https://example.com/mcp"}'
+    const clean = Object.fromEntries(['command', 'args', 'env', 'url', 'headers', 'description', 'disabled'].filter((k) => cfg[k] !== undefined).map((k) => [k, cfg[k]]))
     s.ui.print(`${c.bold(name)} ${c.faint(`→ ${tilde(file)}`)}\n  ${c.muted(JSON.stringify(clean))}`)
-    const ok = await s.ui.confirm(`Save the MCP server ${name}? HeartCode will run: ${clean.command ?? ''} ${(clean.args ?? []).join(' ')}`, 'command')
+    const ok = await s.ui.confirm(clean.url && !clean.command ? `Save the MCP server ${name}? HeartCode will connect to ${clean.url}` : `Save the MCP server ${name}? HeartCode will run: ${clean.command ?? ''} ${(clean.args ?? []).join(' ')}`, 'command')
     if (ok !== true) return declined(ok)
     data.mcpServers[name] = { ...data.mcpServers[name], ...clean }
     writeJson(file, data)
