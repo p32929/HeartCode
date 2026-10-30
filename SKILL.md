@@ -71,8 +71,9 @@ all refused the request outright, else after `--max-retries` (10) whole rounds o
 model (`-m <model>`) waits out rate limits and outages, up to `--max-retries` tries, and stops at
 any other error. A provider that refuses a part of the request HeartCode can do without (the
 model's thinking sent back, keys in the tools' schemas, images) gets it again without that part,
-and that is remembered for the model for a day. A long conversation is summarized every 100
-messages.
+and that is remembered for the model for a day. A conversation is summarized when it takes 85% of
+the window of the model answering (room is kept for the reply); when the list moves on to a model
+with a smaller window, it's summarized for that model before it's sent.
 Each request is fitted to the model it goes to: one that can't see gets a note in place of each
 image, one that can't call tools gets the tool calls as text.
 

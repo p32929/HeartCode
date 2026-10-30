@@ -288,17 +288,38 @@ class App {
       if (this.s?.client === client) this.s.profile = profile // /model_info, the settings page
     }
     apply()
+    // the profile file as this run last read or wrote it: changed since (the settings page, another
+    // HeartCode, a helper on the same model), it's read again before the next request
+    let stamp = stampOf(profilePath(client))
     client.onUse = (t) => {
       profile = loadProfile(client) || profileFrom(client, limitsOf(t.provider, client.baseUrl, t.model))
+      stamp = stampOf(profilePath(client))
       apply()
       log('rotate', `${t.provider} · ${t.model}: ${strat.actions}${strat.vision ? ', images' : ''}, ~${strat.context} tokens`)
     }
-    // Saved with what another connection to the same model (a helper on it) learned meanwhile: the
-    // provider's refusals of both are kept (each writes its whole profile).
+    // The settings as they are now, whatever did or didn't tell this run they changed: before every
+    // request (this model's, a helper's, guided mode's, a summary's) and before a tool's result is cut
+    // to the window (a command can run for minutes). Nothing goes on with an old copy.
+    client.refresh = () => {
+      syncSettings()
+      if (stampOf(profilePath(client)) !== stamp) client.onUse({ provider: client.provider, model: client.model })
+    }
+    // What this run learned about the model, onto its file as it is now: the rest (what you set up for
+    // it on the settings page, a measured window, models.dev's word) stays the file's. The provider's
+    // refusals that another connection to it (a helper) learned meanwhile are kept too.
     const save = () => {
-      const disk = readJson(profilePath(client), null)
-      if (disk?.model === profile.model) profile.quirks = { ...disk.quirks, ...profile.quirks }
-      writeJson(profilePath(client), profile)
+      const file = profilePath(client)
+      const disk = readJson(file, null)
+      if (disk?.model === profile.model) {
+        const out = { ...disk, quirks: { ...disk.quirks, ...profile.quirks } }
+        for (const k of LEARNED) k in profile ? (out[k] = profile[k]) : delete out[k]
+        if (disk.source === 'assumed' && profile.source !== 'assumed') out.source = profile.source // models.dev knows it now
+        profile = out
+      }
+      writeJson(file, profile)
+      stamp = stampOf(file)
+      settingsSeen('profile') // its own write: not a change to take in
+      apply()
     }
     // What the window is, learned while working (context.js); kept in the profile for next time.
     const learned = () => {
@@ -921,6 +942,12 @@ function applySettings(apps, cfg, what) {
 // taken in as the page's own are (applySettings). config.json: the keys others changed (takeIn; a
 // model given for this run with -m stays unless the list's #1 changes); the other files by their
 // size and time, and only when this run didn't just apply them itself.
+// A model's profile fields a running HeartCode learns itself (context.js, the models.dev lookup); the
+// rest of the file is the settings page's.
+const LEARNED = ['inputLimit', 'inputLimitAt', 'cutAt', 'tokenRatio', 'largestAccepted', 'rateCap', 'known']
+// The settings as they are now, into every HeartCode in this process (watchSettings): run before each
+// request too, so a change the file watcher hasn't passed on yet (or never will) is still taken in.
+let syncSettings = () => {}
 const WATCHED = { 'mcp.json': 'mcp', 'hooks.json': 'hooks', 'keybindings.json': 'keys', 'theme.json': 'theme', models: 'profile', prompts: 'prompts', 'HEARTCODE.md': 'prompts', skills: 'skill' }
 const seenStamp = {}
 const stampOf = (p) => {
@@ -944,6 +971,7 @@ function watchSettings(apps, cfg) {
   }
   let timer = null
   const check = () => {
+    clearTimeout(timer)
     timer = null
     configChanged()
     for (const [name, what] of Object.entries(WATCHED)) {
@@ -954,6 +982,7 @@ function watchSettings(apps, cfg) {
       applySettings(apps(), cfg, what)
     }
   }
+  syncSettings = check
   try {
     const watcher = fs.watch(HOME, { recursive: true }, (_, file) => {
       const top = String(file ?? '').split(path.sep)[0]

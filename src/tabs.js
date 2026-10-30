@@ -117,7 +117,7 @@ export class Tabs {
     this.list.forEach((t, i) => {
       const on = t === this.at
       const s = this.state(t)
-      const name = cut(t.name || t.app?.chat?.title || pathTail(t.app?.root), room)
+      const name = cut(t.name || t.app?.chat?.title || pathTail(t.app?.root), Math.min(NAME_MAX, room))
       const text = ` ${i + 1} ${name}${s ? ' ' + s : ''} `
       const w = width(text)
       const line = on ? c.brand : c.ghost
@@ -133,15 +133,19 @@ export class Tabs {
   }
 }
 
-// At most n cells, with … when cut.
+// A tab's name: at most 20 cells, "..." included (fewer when many tabs share a narrow screen).
+const NAME_MAX = 20
+
+// At most n cells, ending in "..." when cut.
 function cut(s, n) {
+  s = String(s ?? '').replace(/\s+/g, ' ').trim()
   if (width(s) <= n) return s
   let out = ''
   for (const ch of s) {
-    if (width(out + ch) > n - 1) break
+    if (width(out + ch) > n - 3) break
     out += ch
   }
-  return out + '…'
+  return out.trimEnd() + '...'
 }
 
 const pathTail = (p = '') => p.split(/[\\/]/).filter(Boolean).pop() ?? p

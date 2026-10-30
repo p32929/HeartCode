@@ -18,6 +18,13 @@ export function estMessages(messages) {
   const text = JSON.stringify(messages ?? [], (k, v) => (k === 'url' && typeof v === 'string' && v.startsWith('data:') ? (images++, '') : v))
   return est(text) + images * 800
 }
+// A request's size in a model's tokens, estimated: its messages and tools, by that model's ratio of
+// counted to estimated tokens (context.js). The same measure decides when to compact (agent.js) and
+// whether a request fits the model the list moves on to.
+export const tokensOf = (messages, tools, ratio = 1) => Math.round((estMessages(messages) + (tools?.length ? est(JSON.stringify(tools)) : 0)) * ratio)
+// The share of a model's window a conversation may take: the rest is room for the reply. Past it,
+// the conversation is compacted first.
+export const COMPACT_SHARE = 0.85
 
 // "Request too large" (the context window, or a provider's per-request or per-minute input cap):
 // the same request can never work, so it isn't retried; the caller sends less. Returns the
@@ -402,6 +409,7 @@ export class Client {
   // 60s, or the server's Retry-After) until it works or the signal aborts. onRetry(error, ms,
   // attempt) reports each wait; onRetry(null) reports the recovery.
   async chat(body, opts = {}) {
+    this.refresh?.() // the settings and this model's profile as they are now (bin/heartcode.js)
     if (!this.onRetry) {
       return await this.#timed(body, opts)
     }
@@ -412,6 +420,12 @@ export class Client {
     const tried = new Set() // places in the model list tried for this request
     const down = new Set() // providers that answered it with an error (400 or above): their other models are skipped
     for (let attempt = 0; ; attempt++) {
+      // The list moved on to a model whose window can't hold this request (a smaller one): not sent
+      // to it as it is; the caller compacts the conversation for that model, then sends it (fit: the
+      // caller can; agent.js).
+      if (attempt && opts.fit && this.can?.context && tokensOf(body.messages, body.tools, this.tokenRatio) > this.can.context * COMPACT_SHARE) {
+        throw Object.assign(new Error(`the conversation is too big for ${this.provider} · ${this.model} (~${tokensOf(body.messages, body.tools, this.tokenRatio)} tokens; its window is ${this.can.context})`), { tooBig: true })
+      }
       try {
         const r = await this.#timed(body, { ...opts, once: true })
         if (attempt) this.onRetry(null)

@@ -4,7 +4,7 @@ import { log } from './log.js'
 import { prompt, userInstructions } from './prompts.js'
 import { newChat } from './sessions.js'
 import path from 'node:path'
-import { est, Client, writtenBy } from './client.js'
+import { est, Client, writtenBy, tokensOf, COMPACT_SHARE } from './client.js'
 import { runGuided } from './guided.js'
 import { TOOL_DEFS, PLAN_HIDDEN, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, OUTPUTS, imageUrl, MAX_IMAGE, failed } from './tools.js'
 import { loadHooks, runHooks } from './hooks.js'
@@ -97,7 +97,8 @@ export class Session {
   // midTask: compacting in the middle of a task, so the model is told to carry on with `task`
   // (the user's request, kept word for word).
   // The conversation before is kept per compaction ("epoch"), so /rewind can still go back.
-  async compact({ signal, focus = '', midTask = false, task = '' } = {}) {
+  // why: what the spinner says the compacting is for ("context 85% full (650k/768k)").
+  async compact({ signal, focus = '', midTask = false, task = '', why = '' } = {}) {
     const { chat, client, strat, ui } = this
     const native = Boolean(chat.messages?.length)
     const head = native ? chat.messages.slice(0, chat.messages[0].role === 'system' ? 1 : 2) : [] // the system prompt stays
@@ -107,7 +108,7 @@ export class Session {
     const room = Math.floor((strat.context * 0.6 * 3.5) / (strat.ratio ?? 1)) // characters of conversation the summary request can carry
     const cut = () => (conversation.length > room ? `[… the earliest part is cut]\n${conversation.slice(-room)}` : conversation)
     const before = native ? size(body) : est(conversation)
-    ui.spinner(midTask ? 'context almost full: compacting the conversation' : 'compacting the conversation')
+    ui.spinner(why ? `${why}: compacting the conversation` : 'compacting the conversation')
     // A model shown its own work tends to carry on with it (calling tools, or writing tool calls
     // as text) instead of summarizing: so it's told what it is, and a reply that isn't a summary
     // is asked for again once; then the compaction fails (the conversation is trimmed instead).
@@ -133,7 +134,9 @@ export class Session {
     }
     chat.history.splice(0, chat.history.length, { task: '(the conversation before this point, summarized)', answer: summary })
     const after = native ? size(chat.messages.slice(head.length)) : est(summary)
-    log('compact', `${midTask ? 'auto' : 'manual'}: ~${before} → ~${after} tokens`, summary)
+    log('compact', `${midTask ? 'auto' : 'manual'}${why ? ` (${why})` : ''}: ~${before} → ~${after} tokens`, summary)
+    client.lastTokens = 0 // the server's count was for the conversation before: none yet for this one
+    this.counted = null
     ui.stopSpin()
     ui.print(`${c.faint('✻')} ${c.muted(`Compacted the conversation: ~${kTokens(before)} → ~${kTokens(after)} tokens`)}`)
     return summary
@@ -402,10 +405,17 @@ export class Session {
 // A program's own instructions (--append-system-prompt: Nibedita, a script) come last, and HeartCode's
 // own say less then (caller): no role of its own, no "stay in the folder", no way to finish of its
 // own, no director; they're told to follow the program's where they differ.
+// One line of context about where HeartCode runs, so the model knows the OS, shell and tools to expect.
+const OS_NAMES = { darwin: 'macOS', linux: 'Linux', win32: 'Windows' }
+const envLine = () => {
+  const shell = (process.env.SHELL || process.env.ComSpec || '').split(/[/\\]/).pop()
+  return `${OS_NAMES[process.platform] ?? process.platform} (${process.platform} ${os.release()}, ${process.arch})${shell ? `, shell ${shell}` : ''}`
+}
+
 const SYSTEM = (s) => {
   const instructions = userInstructions(s.root)
   return [
-    prompt('agent/system', { root: s.root, files: '', more: '', caller: Boolean(s.appendSystem) }),
+    prompt('agent/system', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), files: '', more: '', caller: Boolean(s.appendSystem) }),
     instructions && prompt('agent/instructions', { instructions }),
     s.memory && prompt('agent/memory', { tags: s.memory.tagSummary() || '(none yet)' }),
     s.strat.vision && prompt('agent/you-see'), // models that can see often say they can't
@@ -594,13 +604,28 @@ async function runNative(s, task, images, signal) {
     delete s.chat.branchNote
   }
   s.compactedAt = -1
-  // Auto-compact: every 100 messages, the conversation is summarized (what fits each model is
-  // models.dev's business and the model list's: one that fails, the next takes over)
-  const COMPACT_AT = 100
-  const nearlyFull = () => s.autoCompact && s.messages.length >= COMPACT_AT + (s.compactFailedAt ?? 0)
+  // Auto-compact: when the conversation takes 85% of the window of the model answering now (its
+  // window as set up, measured or learned; also when that changes mid-task, or the model list moves
+  // on to a model with a smaller one), so there's room left for the reply. Its size: what the server
+  // counted for this conversation's last request (s.counted) plus the estimate of what came since
+  // (the tool results), or the estimate of all of it when that's more (no count yet: a resumed
+  // session, just compacted). After a failed try: again once it has grown by another 5%.
+  const used = () => {
+    const ratio = strat.ratio ?? 1
+    const all = tokensOf(s.messages, [...TOOL_DEFS, ...extraTools(s)], ratio)
+    const k = s.counted
+    if (!k?.tokens || k.upTo > s.messages.length) return all
+    return Math.max(all, k.tokens + tokensOf(s.messages.slice(k.upTo), null, ratio))
+  }
+  const nearlyFull = () => s.autoCompact && strat.context > 0 && used() >= strat.context * COMPACT_SHARE && used() >= (s.compactFailedAt ?? 0)
+  const fullness = () => `context ${Math.round((used() / strat.context) * 100)}% full (~${kTokens(used())} of ${kTokens(strat.context)})`
+  // Still that full after compacting (what every request carries, the system prompt and the tools'
+  // schemas, takes most of the window): compacting again won't free anything, so not until it has
+  // grown by another 5% (not a summary request at every step).
+  const afterCompact = () => (s.compactFailedAt = used() >= strat.context * COMPACT_SHARE ? used() + Math.round(strat.context * 0.05) : 0)
   // Already that long from earlier messages: compact first, so the new message stays word for word.
   if (nearlyFull()) {
-    await s.compact({ signal }).catch((e) => (e.name === 'AbortError' ? Promise.reject(e) : ui.warn(`could not compact: ${e.message}`)))
+    await s.compact({ signal, why: fullness() }).then(afterCompact, (e) => (e.name === 'AbortError' ? Promise.reject(e) : ui.warn(`could not compact: ${e.message}`)))
   }
   // only the memory notes this message matches go with it (the system prompt has just the tags)
   // each note once per conversation (again if it changed, or after compacting dropped it)
@@ -610,7 +635,10 @@ async function runNative(s, task, images, signal) {
   s.chat.sentNotes = [...sent, ...notes.map(key)]
   const text = notes.length ? `${task}\n\n${prompt('agent/memory-relevant', { notes: notes.map((n) => `[[${n.name}]] — ${n.description}`).join('\n') })}` : task
   const planning = ui.permission === 'plan'
-  const said = planning && !s.isSub ? `${text}\n\n${prompt('agent/plan-mode')}` : text
+  // the research-first reminder: small models follow the user's message far more than the system
+  // prompt (not a helper's job, nor a program's own task with its own instructions)
+  const noted = !s.isSub && !s.appendSystem ? `${text}\n\n${prompt('agent/research-first', { today: new Date().toISOString().slice(0, 10) })}` : text
+  const said = planning && !s.isSub ? `${noted}\n\n${prompt('agent/plan-mode')}` : noted
   const content = images.length ? [{ type: 'text', text: said }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))] : said
   s.messages.push({ role: 'user', content })
   attachNamed(s, task) // files the message names: as if already read (saves a round trip each)
@@ -628,6 +656,7 @@ async function runNative(s, task, images, signal) {
   let stuck = null // a tool called the same way five times this message: stop
   let garbled = 0 // replies with a tool call written as text (template markup), this message
   let movedOn = 0 // models given up on for that, in this message
+  let refitted = false // this step's conversation was just compacted for a smaller model the list moved on to
   // No step limit: a long fix takes many steps, and Esc stops it. A caller can set one (--max-turns).
   for (let step = 0; ; step++) {
     const tools = toolList()
@@ -641,15 +670,15 @@ async function runNative(s, task, images, signal) {
       ui.warn(`stopped after ${s.maxTurns} steps (--max-turns); say "continue" to go on`)
       throw Object.assign(new Error(`stopped after ${s.maxTurns} steps (--max-turns)`), { maxTurns: true })
     }
-    // after a failed compaction, the next try waits for 20 more messages
+    // after a failed compaction, the next try waits until the conversation has grown by 5% of the window
     if (nearlyFull() && step !== s.compactedAt) {
       s.compactedAt = step
-      await s.compact({ signal, midTask: true, task }).then(
-        () => (s.compactFailedAt = 0),
+      await s.compact({ signal, midTask: true, task, why: fullness() }).then(
+        afterCompact,
         (e) => {
           if (e.name === 'AbortError') throw e
-          s.compactFailedAt = (s.compactFailedAt ?? 0) + 20
-          log('compact', `failed (${e.message}); trying again 20 messages later`)
+          s.compactFailedAt = used() + Math.round(strat.context * 0.05)
+          log('compact', `failed (${e.message}); trying again once it's ~${s.compactFailedAt} tokens`)
         },
       )
     }
@@ -672,7 +701,26 @@ async function runNative(s, task, images, signal) {
     // the prompts or HEARTCODE.md changed meanwhile (applySettings): the system prompt again, now
     if (s.refreshSystem && (s.messages[0]?.role === 'system' || strat.mergeSystem)) s.messages[0] = { ...s.messages[0], content: SYSTEM(s) }
     s.refreshSystem = false
-    const res = await client.chat({ messages: s.messages, tools, stream }, { signal, onToken: out.text, onReasoning: out.think, onToolDelta })
+    let res
+    try {
+      res = await client.chat({ messages: s.messages, tools, stream }, { signal, onToken: out.text, onReasoning: out.think, onToolDelta, fit: !refitted })
+    } catch (e) {
+      if (!e.tooBig) throw e
+      // The model list moved on (the one before failed) to a model whose window can't hold the
+      // conversation: compacted for it (by it, to its size), then the same step again. Once: still
+      // too big after that (its window can't even hold the start), it's sent anyway.
+      ui.stopSpin()
+      out.end()
+      log('compact', e.message)
+      refitted = true
+      await s.compact({ signal, midTask: true, task, why: `${client.model} took over and its window is smaller` }).catch((err) => {
+        if (err.name === 'AbortError') throw err
+        log('compact', `failed (${err.message}); sending it anyway`)
+      })
+      step--
+      continue
+    }
+    refitted = false
     ui.stopSpin()
     if (!stream) {
       out.think(res.reasoning)
@@ -680,6 +728,7 @@ async function runNative(s, task, images, signal) {
     }
     out.end()
     s.messages.push({ role: 'assistant', content: res.content || '', ...(res.toolCalls.length && { tool_calls: res.toolCalls }), ...(res.reasoning && res.toolCalls.length && { reasoning_content: res.reasoning }) }) // client.js sends it by the name the provider uses, or not at all
+    s.counted = { tokens: client.lastTokens, upTo: s.messages.length } // the server's count: up to this reply (auto-compact)
     writtenBy.set(s.messages.at(-1), client.model) // its thinking goes back to this model only
     // a tool call written out as text instead of made (some models do, after a long conversation): made
     const leak = !res.toolCalls.length && leakedCall(res.content)
@@ -775,6 +824,7 @@ async function runNative(s, task, images, signal) {
       if (name === 'read_file' || name === 'search' || name === 'list_files' || name === 'web_fetch' || name === 'web_search') ui.result(`${out.split('\n').length} lines`)
       else if (name === 'agent' && !failed(out)) ui.result(`${s.ui.permission === 'plan' ? 'planned' : 'done'}: ${clip(out.split('\n').find((l) => l.trim()) ?? '', 100)}`)
       else if (failed(out)) ui.result(clip(out, 120))
+      client.refresh?.() // a setting changed while the tool ran (the window): its result is cut by the new one
       const msg = { role: 'tool', tool_call_id: call.id, content: fitResult(s, name, out) }
       if (name === 'read_file' && args && !args.start_line && !args.end_line && !failed(out)) replaceCopy(s, args.path, msg)
       s.messages.push(msg)
