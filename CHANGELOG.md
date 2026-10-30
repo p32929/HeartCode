@@ -2,6 +2,35 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.18 (2026-10-30)
+
+- Before building anything, the model researches it first (the current, most recommended way and
+  the latest stable versions, from the web and the official docs), plans the whole job, and asks
+  what it still isn't sure of: free models' training data is old.
+- Tab names are at most 20 characters, "..." included.
+- Settings changed while HeartCode works now reach it at once, every time: before every request and
+  before each tool's result is cut to the context window, HeartCode takes in what changed (it no longer
+  depends on the file watcher being quick enough). A model's context window, set up on the settings
+  page mid-task, is used from the next step, also by helpers (the agent tool) already at work, which
+  used to keep the old one until they finished.
+- Auto-compact when the conversation takes 85% of the window of the model answering (room is kept
+  for the reply), no longer every 100 messages: a long session is no longer summarized at a few
+  percent of a big window. When the model list moves on to a model with a smaller window, the
+  conversation is compacted for that model before it's sent, instead of being refused as too big.
+  The spinner says how full it is ("context 86% full (~660k of 768k)").
+- A running HeartCode no longer overwrites what you set up for a model: saving what it learned
+  about the model (token counts, limits) used to write its old copy of your settings back over them.
+
+## 0.1.17 (2026-10-30)
+
+- Stronger system prompts (tool mode and guided mode for small models): act instead of describing,
+  don't guess paths or APIs, search the web when unsure or knowledge is dated, never stop until the
+  request is done, verify by output, and answer short and to the point. Small local models follow
+  these far better.
+- The system prompt now tells the model the OS and shell it's running on (e.g. "macOS (darwin, arm64),
+  shell zsh"), and how to find and install a tool it needs: use what's already there, else install it
+  the right way for this OS (asking first unless commands are already allowed).
+
 ## 0.1.16 (2026-10-30)
 
 - Switch a provider off (and on again) on the settings page, without deleting it: its key and its
