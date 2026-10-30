@@ -147,29 +147,29 @@
   .preset span { color: var(--muted); font-size: 12px; }
   .preset.on { border-color: var(--accent); background: var(--accent-soft); }
 
-  /* Providers & models: every provider's models on the left (pick one), yours in order on the right;
-     both fill the screen's height and scroll inside */
-  .work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; } /* the catalog and your models, half and half */
-  .work > .card { padding: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-  .cat-top { padding: 14px 16px 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
-  .cat-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .cat-row input { flex: 1; min-width: 160px; }
-  .cat-row select { flex: none; width: auto; padding-right: 30px; }
-  .cat-row button { flex: none; height: 28px; }
-  .cat-row button.ghost { padding: 3px 8px; }
-  .cat-row button.ghost:hover:not(:disabled) { color: var(--text); border-color: transparent; }
-  .cat-group { display: flex; align-items: center; gap: 6px; }
-  .cat-group.end { margin-left: auto; }
+  /* Providers & models: every provider's models in one list, full width; it fills the screen's height and scrolls inside */
+  .head-actions { display: flex; gap: 8px; align-items: center; }
+  .work { display: flex; flex-direction: column; }
+  .work > .card { flex: 1; padding: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .cat-top { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .cat-top input[type=search] { flex: 1; min-width: 140px; }
+  .cat-top select { flex: none; width: auto; padding-right: 30px; }
+  .cat-top button { flex: none; }
+  .cat-top button.ghost:hover:not(:disabled) { color: var(--text); border-color: transparent; }
+  .cat-top input[type=checkbox], .prov-h .pick-all, .mwrap .pick { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+  /* what to do with the ticked models: at the bottom of the list, only while some are ticked */
+  .picks { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--accent-soft); font-size: 13px; }
+  .picks .n { font-weight: 600; margin-right: auto; }
   .prov-h { cursor: pointer; }
-  .prov-h .fold { border: 0; background: none; color: var(--muted); padding: 2px 4px; font-size: 16px; line-height: 1; transition: transform .15s; align-self: flex-start; margin-top: 1px; }
+  .prov-h .fold { border: 0; background: none; color: var(--muted); padding: 2px 4px; font-size: 16px; line-height: 1; transition: transform .15s; }
   .prov-h .fold:hover { color: var(--text); }
   section.collapsed .prov-h .fold { transform: rotate(-90deg); }
   section.collapsed > :not(.prov-h) { display: none; } /* folded: just its header */
   .cat-list { flex: 1; overflow-y: auto; }
-  .prov-h { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; background: var(--panel2); border-bottom: 1px solid var(--line); }
-  .prov-h .who { flex: 1; min-width: 200px; }
+  .prov-h { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--panel2); border-bottom: 1px solid var(--line); }
+  .prov-h .who { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; }
   .prov-h .name { font-weight: 700; font-size: 15px; }
-  .prov-h .meta { font-size: 12px; color: var(--muted); }
+  .prov-h .meta { font-size: 12px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .prov-h .meta .mono { font-size: 12px; }
   .rows { display: flex; flex-direction: column; } /* one model per line, A to Z */
   .mrow { break-inside: avoid; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 16px; border: 0; border-radius: 0; border-bottom: 1px solid var(--line); background: none; cursor: pointer; min-width: 0; }
@@ -185,11 +185,9 @@
   .mwrap { display: flex; break-inside: avoid; border-bottom: 1px solid var(--line); }
   .mwrap .mrow { border-bottom: 0; }
   .mwrap .forget { border: 0; background: none; color: var(--faint); padding: 0 12px; }
+  .mwrap { padding-left: 16px; align-items: center; }
+  .mwrap .pick + .mrow { padding-left: 12px; }
   .mwrap .forget:hover { color: var(--err); }
-  .cat-top .listsw { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); white-space: nowrap; margin-right: 6px; }
-  .cat-top .listsw .sw { margin-top: 0; }
-  .prov-h .listsw { margin-top: 8px; width: fit-content; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
-  .prov-h .listsw .sw { margin-top: 0; }
   .log-opts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; }
   .log-opts .opt { border-bottom: 0; padding-bottom: 0; }
   @media (max-width: 860px) { .log-opts { grid-template-columns: 1fr; } }
@@ -219,8 +217,6 @@
   .req-detail h3 { font-size: 14px; margin: 16px 0 4px; }
   @media (max-width: 860px) { .reqs { grid-template-columns: 1fr; } .req-list { border-right: 0; max-height: 50vh; } }
   .cat-note { padding: 12px 16px; color: var(--muted); font-size: 12.5px; }
-  .byname { display: flex; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
-  .byname input { height: 32px; font-family: var(--mono); font-size: 12.5px; }
   /* one line: what models.dev says (cut short, all of it on hover), its buttons on the right */
   .olist .test { font-size: 12px; color: var(--faint); display: flex; align-items: center; gap: 6px; min-width: 0; }
   .olist .test .msg { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
@@ -269,6 +265,11 @@
   .mt { min-width: 1116px; }
   .mt-h input[type=checkbox], .mtable input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(--brand); cursor: pointer; }
   .mtable li.picked { background: var(--brand-soft); }
+  .mt-rules { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 28px; padding: 12px 18px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .mt-rules .rule { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .mt-rules select { width: auto; height: 32px; padding: 4px 30px 4px 10px; }
+  .mt-rules input { width: 64px; height: 32px; }
+  .mt-rules .hint { flex-basis: 100%; margin: 0; }
   .mt-outcomes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
   .mt-outcomes > span:first-child { margin-right: 4px; }
   /* a test result: what it was and how many (a click selects them), and ↻ to test them again */
@@ -430,26 +431,23 @@
     <!-- Providers & models -->
     <section class="page" id="page-providers">
       <div class="head">
-        <div><h1>Providers &amp; models</h1><p class="lead">A provider is a service with models (OpenRouter, Groq, Ollama on this machine…). Add one, then choose which of its models HeartCode uses.</p></div>
-        <button class="primary" id="p-open">+ Add a provider</button>
+        <div><h1>Providers &amp; models</h1><p class="lead">Click a model to add it to your list, or tick several and add them at once. HeartCode uses your list in order: #1, then the next when one fails.</p></div>
+        <div class="head-actions"><button id="p-mine" type="button"></button><button class="primary" id="p-open">+ Add a provider</button></div>
       </div>
       <div class="steps" id="steps"></div>
-      <div class="stack">
-          <div class="work" id="p-work" hidden>
-            <div class="card catalog">
-              <div class="cat-top">
-                <div class="cat-row"><input type="search" id="m-search" placeholder="Search all models…"><select id="m-sort" aria-label="sort the models"><option value="name">Sort by name</option><option value="price">Sort by price</option></select></div>
-                <div class="cat-row">
-                  <div class="cat-group"><span class="listsw" id="lists-all" title="load every provider's model list, or none"></span>
-                  <button class="small ghost" id="fold-all" type="button">Collapse all</button><button class="small ghost" id="unfold-all" type="button">Expand all</button></div>
-                  <div class="cat-group end"><button class="small" id="dev-all" type="button" title="ask models.dev what each listed model can do: tool calls, context, thinking, images">Get from models.dev</button><button class="small" id="add-all" type="button" title="add every model shown here (only the matches when searching) to your list">Add all</button></div>
-                </div>
-              </div>
-              <div class="job-slot" data-where="catalog"></div>
-              <div class="cat-list" id="p-list"></div>
-            </div>
-            <div class="card mine" id="inuse"></div>
+      <div class="work" id="p-work" hidden>
+        <div class="card catalog">
+          <div class="cat-top">
+            <input type="checkbox" id="pick-shown" aria-label="select every model shown">
+            <input type="search" id="m-search" placeholder="Search all models…">
+            <select id="m-sort" aria-label="sort the models"><option value="name">Sort by name</option><option value="price">Sort by price</option></select>
+            <button class="small ghost" id="fold-all" type="button">Collapse all</button>
+            <button class="small" id="dev-all" type="button" title="ask models.dev what each listed model can do: tool calls, context, thinking, images">Get from models.dev</button>
           </div>
+          <div class="job-slot" data-where="catalog"></div>
+          <div class="cat-list" id="p-list"></div>
+          <div class="picks" id="picks" hidden></div>
+        </div>
       </div>
     </section>
 
@@ -607,7 +605,11 @@
   <label class="f" for="p-key">API key <span class="muted" id="p-keynote" style="font-weight:normal"></span></label>
   <input type="password" id="p-key" autocomplete="off" placeholder="paste it here (none for a server on this machine, like Ollama)">
   <div class="hint">Kept in config.json on this machine. This page only shows its first and last characters.</div>
-  <div class="actions"><button id="p-cancel">Cancel</button><button class="primary" id="p-save">Add provider</button></div>
+  <div id="p-more" hidden>
+    <label class="opt" style="margin-top:16px"><div class="t"><b>Load its model list</b><span>On: its models are asked from the provider. Off: never asked; only the models you add by name show (type one's exact name in the search).</span></div><span class="sw"><input type="checkbox" id="p-list-on"><i></i></span></label>
+    <div class="actions" id="p-added"></div>
+  </div>
+  <div class="actions"><button class="danger" id="p-delete" hidden>Delete provider</button><span class="spacer"></span><button id="p-cancel">Cancel</button><button class="primary" id="p-save">Add provider</button></div>
 </dialog>
 <dialog id="c-form" aria-labelledby="c-title">
   <h2 id="c-title">Add a server</h2>
@@ -654,7 +656,7 @@ function toast(text, err = false) {
 }
 // What's running (a test, lists loading, models.dev), shown at the top of the panels it's about
 // while it runs: job(id, { what, where, done, total, detail, stop }) to show or update it (no total:
-// a bar that just moves), job(id) when it's over. where: the panels ('catalog', 'mine', 'table').
+// a bar that just moves), job(id) when it's over. where: the panels ('catalog', 'table').
 // Updated in place, so nothing jumps while it counts.
 const JOBS = new Map()
 function job(id, state) {
@@ -901,11 +903,25 @@ function openForm(p = null) {
   $('p-key').placeholder = p?.key ? 'empty: keep the key it has' : 'paste it here (none for a server on this machine, like Ollama)'
   $('p-keynote').textContent = p?.key ? `(now ${p.key})` : ''
   $('p-save').textContent = p ? 'Save changes' : 'Add provider'
+  // editing: what used to crowd its header
+  $('p-more').hidden = $('p-delete').hidden = !p
+  $('presets').hidden = Boolean(p)
+  $('p-form').querySelector('.sub').hidden = Boolean(p)
+  if (p) {
+    $('p-list-on').checked = p.list
+    put($('p-added'), p.added.length ? [h('span', { className: 'muted', style: 'font-size:13px', textContent: `${p.added.length} model${p.added.length === 1 ? '' : 's'} you added by name` }), h('button', { className: 'small danger', textContent: 'Forget them', onclick: () => ($('p-form').close(), clearAdded(p)) })] : [])
+  }
   drawPresets()
   $('p-form').showModal()
   ;(p ? $('p-url') : $('p-name')).focus()
 }
 const closeForm = () => $('p-form').close()
+$('p-delete').onclick = () => {
+  const p = editing
+  if (!p || !confirm(`Delete the provider "${p.name}"? Its models leave your list too.`)) return
+  closeForm()
+  act('/api/provider/delete', { name: p.name }, `deleted ${p.name}`)
+}
 $('p-form').onclose = () => (editing = null)
 $('p-open').onclick = () => openForm()
 $('p-cancel').onclick = closeForm
@@ -917,6 +933,7 @@ $('p-save').onclick = async () => {
   if (!r) return
   const added = r.providers.find((p) => p.name === name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, ''))
   if (!added) return
+  if (was && $('p-list-on').checked !== was.list) await act('/api/provider/list', { name: added.name, on: $('p-list-on').checked }) // its list switched on or off
   if (was) delete MODELS[was.name]
   loadModels(added.name, true) // a new one, or a new URL or key: its models (again)
   toast(was ? `saved ${added.name}` : `added ${added.name}: its models are loading`)
@@ -945,6 +962,7 @@ const costOf = (d) => (d?.price ? (d.price.input ?? 0) + (d.price.output ?? 0) :
 let searchOpen = false
 const FOLDED = new Set()
 function applyFolds() {
+  $('fold-all').textContent = allFolded() ? 'Expand all' : 'Collapse all'
   for (const sec of $('p-list').querySelectorAll('section[data-provider]')) {
     const folded = FOLDED.has(sec.dataset.provider) && !(searchOpen && modelQuery.trim())
     sec.classList.toggle('collapsed', folded)
@@ -959,17 +977,14 @@ function settle() {
 }
 const folds = () => (applyFolds(), savePref('folded', [...FOLDED])) // a fold changed: shown and kept
 const fold = (name) => (settle(), FOLDED.has(name) ? FOLDED.delete(name) : FOLDED.add(name), folds())
-$('fold-all').onclick = () => (settle(), S?.providers.forEach((p) => FOLDED.add(p.name)), folds())
-$('unfold-all').onclick = () => (settle(), FOLDED.clear(), folds())
-// every model shown on the left (the search's matches, when searching) added to the end of your list
-$('add-all').onclick = () => {
-  if (!S) return
-  const seen = new Set(S.order.map(keyOf))
-  const add = CATALOG.flatMap(({ provider, ids }) => ids.map((model) => ({ provider, model }))).filter((t) => !seen.has(keyOf(t)) && seen.add(keyOf(t)))
-  if (!add.length) return toast(modelQuery.trim() ? 'every match is in your list already' : 'every model shown is in your list already')
-  if (!confirm(`Add ${add.length} model${add.length === 1 ? '' : 's'} to your list${modelQuery.trim() ? ` (the ones matching "${modelQuery.trim()}")` : ''}?`)) return
-  saveOrder([...S.order, ...add], `${add.length} added: your list has ${S.order.length + add.length} models`)
+// one button: collapse them all, or (all collapsed) expand them all
+const allFolded = () => Boolean(S?.providers.length) && S.providers.every((p) => FOLDED.has(p.name))
+$('fold-all').onclick = () => (settle(), allFolded() ? FOLDED.clear() : S?.providers.forEach((p) => FOLDED.add(p.name)), folds())
+$('pick-shown').onchange = (e) => {
+  for (const [provider, ids] of SHOWN) for (const id of ids) e.target.checked ? pickedOf(provider).add(id) : PICKED_CAT.get(provider)?.delete(id)
+  drawPicks()
 }
+$('p-mine').onclick = () => (location.hash = 'models')
 // models.dev fetched again (your models' profiles too), then every listed provider's models with it
 $('dev-all').onclick = async () => {
   if (!(await lookUp())) return
@@ -980,21 +995,8 @@ $('m-search').oninput = (e) => ((modelQuery = e.target.value), (searchOpen = tru
 // list and its own test), and what a click does. Shown on hover and on keyboard focus.
 const kTok = (n) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n))
 const usd = (x) => (x === 0 ? 'free' : `$${x < 0.01 ? x.toFixed(4) : x < 1 ? x.toFixed(3).replace(/0$/, '') : x.toFixed(2)}`)
-// What a model is, under it in your list, in the two lines its card keeps for it (at most two
-// lines of text, its button on the right): where that comes from, and Edit (or Set it up, for one
-// models.dev doesn't know). Replaced in place when it changes (streamed).
+// where what a model can do comes from (the Your models table)
 const FROM = { 'models.dev': 'from models.dev', you: 'set by you', tested: 'tested' }
-function testLine(t) {
-  const x = t.tested
-  const edit = (label) => h('button', { className: 'small', textContent: label, onclick: (e) => (e.stopPropagation(), openSetup(t)) })
-  const [cls, text, action] =
-    !x ? ['none', 'looking it up in models.dev…', null]
-      : x.source === 'assumed' ? ['warn', 'not in models.dev', edit('Set up')] // its Retry: on the Your models page, and Refresh from models.dev
-      : ['ok', `✓ ${testedText(x)} · ${Object.keys(x.set ?? {}).length ? 'yours' : FROM[x.source]}`, edit('Edit')]
-  const about = x?.source === 'assumed' ? "not in models.dev: Retry, or set up what it can do" : text
-  return h('div', { className: 'test ' + cls }, h('span', { className: 'msg', textContent: text, title: about }), action)
-}
-
 // Test: one short message to the model, to see that it really answers (the key, access to it, its
 // name, the server). The result stays under it until the page is reloaded.
 const TRIES = {} // "provider/model" → { going } | { ok, ms, reply, at } | { ok: false, status, error, at } (from the server)
@@ -1077,7 +1079,7 @@ function showRun(run) {
     if (run?.over) toast(`${run.stopping ? `stopped after ${run.done} of ${run.total}: ` : ''}${run.good} of ${run.done} work${run.good === run.done ? '' : `; ${run.done - run.good} don't (Works? says why, on hover)`}`, run.good < run.done)
   } else
     job('test-all', {
-      where: ['table', 'mine'],
+      where: ['table'],
       what: run.stopping ? 'Stopping the tests…' : `Testing ${run.some ? '' : 'your '}${run.total} model${run.total === 1 ? '' : 's'}${run.each > 1 ? ` · ${run.each} at a time per provider` : ''}`,
       done: run.done, total: run.total, stopping: run.stopping,
       detail: [h('span', { className: 'ok', textContent: `✓ ${run.good} work` }), ' · ', h('span', { className: 'bad', textContent: `✗ ${run.done - run.good} don't` }), run.busy.length ? ` · now: ${run.busy.join(', ')}` : '', Object.keys(run.paused ?? {}).length ? ` · paused (busy, 429): ${Object.entries(run.paused).map(([p, secs]) => `${p} ${secs}s`).join(', ')}` : ''],
@@ -1089,7 +1091,7 @@ function showRun(run) {
 // models.dev looked up again: one model (its Retry), or all of yours (Refresh from models.dev)
 const retry = (t) => h('button', { className: 'small', textContent: 'Retry', title: 'look it up in models.dev again', onclick: (e) => (e.stopPropagation(), lookUp(t)) })
 async function lookUp(t) {
-  job('models.dev', { where: ['catalog', 'mine', 'table'], what: t ? `Looking up ${t.model} in models.dev` : 'Asking models.dev about your models', detail: 'context, tool calls, thinking, images' })
+  job('models.dev', { where: ['catalog', 'table'], what: t ? `Looking up ${t.model} in models.dev` : 'Asking models.dev about your models', detail: 'context, tool calls, thinking, images' })
   const r = await act('/api/models-dev', t ? { provider: t.provider, model: t.model } : {})
   job('models.dev')
   if (r) toast(t ? (r.found ? `${t.model}: found in models.dev` : `${t.model}: still not in models.dev`) : `models.dev: ${r.found} of ${r.of} found`)
@@ -1179,73 +1181,21 @@ function drawProviders(s) {
   // the steps: always on the page (nothing jumps when one is done), ticked off as you go
   put($('steps'), [
     ['Add a provider', 'the service with your models', s.providers.length ? 'done' : 'now'],
-    ['Choose a model', 'click one in the list', order.length ? 'done' : s.providers.length ? 'now' : ''],
+    ['Choose models', 'click one, or tick several and add them', order.length ? 'done' : s.providers.length ? 'now' : ''],
     ['Start HeartCode', 'heart, in your project', order.length ? 'now' : ''],
   ].map(([t, d, cls], i) => h('div', { className: 'step ' + cls }, h('span', { className: 'num', textContent: cls === 'done' ? '✓' : i + 1 }), h('div', {}, h('b', { textContent: t }), d))))
+  $('steps').hidden = order.length > 0 // the first start only
   $('p-work').hidden = none
+  // your list, at the top: how many, and the way to its page (order, tests, what to do when one fails)
+  $('p-mine').hidden = !order.length
+  $('p-mine').textContent = `Your models (${order.length}) →`
+  $('p-mine').title = order.length ? `#1: ${order[0].provider} · ${order[0].model}. Open the Your models page: the order, tests, and what happens when one fails` : ''
   fillHeight()
 
-  // right: your models, in order (#1 is the one in use); drag or ↑ ↓ to reorder
-  const side = innerWidth > 860 ? 'on the left' : 'below' // where the models are (a phone: under this)
-  const save = (list, done) => saveOrder(list, done)
-  const move = (i, j) => {
-    if (i === j) return
-    const list = [...order]
-    const [t] = list.splice(i, 1)
-    list.splice(j, 0, t)
-    return save(list, list[0] !== order[0] ? `HeartCode now uses ${list[0].provider} · ${list[0].model}` : 'order saved')
-  }
-  // a row of your list (the last: where the next one goes)
-  const mineRow = (i) => {
-    if (i === order.length) return h('li', { className: 'next', textContent: `#${order.length + 1} · click a model ${side} to add it here (a fallback)` })
-    const t = order[i]
-    return h('li', {
-        className: 'in' + (i === 0 ? ' use' : ''), tabIndex: 0, 'data-key': `${t.provider}/${t.model}`, title: order.length > 1 ? 'Drag to move it (or Alt+↑ / Alt+↓)' : '',
-        onkeydown: (e) => e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && (e.preventDefault(), move(i, Math.max(0, Math.min(order.length - 1, i + (e.key === 'ArrowUp' ? -1 : 1))))),
-      },
-      h('span', { className: 'grip', textContent: '⋮⋮', title: 'drag to reorder', 'aria-hidden': 'true', style: order.length > 1 ? '' : 'visibility:hidden' }),
-      h('span', { className: 'n', textContent: `#${i + 1}`, title: i === 0 ? 'in use: the one HeartCode uses' : 'a fallback: tried, in order, when the ones above fail' }),
-      h('span', { className: 'm', textContent: t.model, title: t.model }),
-      h('span', { className: 'p' + (i === 0 ? ' use' : ''), textContent: t.provider, title: `${t.provider}${i === 0 ? ': in use' : ''}` }),
-      testLine(t),
-      h('button', { className: 'danger', textContent: '✕', title: 'take it off the list', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) }))
-  }
-  const mine = order.length ? h('ol', { className: 'olist' }) : null
-  const mineV = mine && virtual(mine, { count: order.length + 1, height: MINE_ROW, row: mineRow })
-  if (mineV) mineV.items = order.length
-  put($('inuse'),
-    h('div', { className: 'mine-top' },
-      h('div', { className: 'mine-title' },
-        h('h2', { textContent: 'Your models' }),
-        h('button', { className: 'small', textContent: 'Table', style: order.length ? '' : 'visibility:hidden', title: 'all of them in a table, to compare and sort', onclick: () => (location.hash = 'models') }),
-        h('button', { className: 'small', textContent: 'Refresh from models.dev', title: 'ask models.dev again what each model can do: context, tools, thinking, images, price', style: order.length ? '' : 'visibility:hidden', onclick: () => lookUp() }),
-        h('button', { className: 'small danger', textContent: 'Remove all', title: 'take every model off this list', style: order.length ? '' : 'visibility:hidden', onclick: () => confirm(`Take all ${order.length} model${order.length === 1 ? '' : 's'} off your list? HeartCode then has none to use until you choose one. (They stay under their providers.)`) && saveOrder([], 'all removed: no model chosen now') })),
-      h('p', { className: 'sub', style: 'margin:0', textContent: order.length > 1 ? 'HeartCode uses #1. If it fails, it tries #2, then #3… and round again. Drag to change the order.' : order.length ? `HeartCode uses this one. Click more ${side} to add fallbacks: tried, in order, when one fails.` : `The models HeartCode uses, in the order it tries them. Click one ${side} to start.` })),
-    jobSlot('mine'),
-    order.length ? h('div', { className: 'ohead' }, h('span'), h('span', { textContent: '#' }), h('span', { textContent: 'Model' }), h('span', { textContent: 'Provider' }), h('span', { textContent: 'What it can do' }), h('span')) : null,
-    order.length ? mine
-      : h('div', { className: 'mine-empty' }, h('b', { textContent: 'No model chosen yet' }), `Click a model ${side}: it becomes #1, the one HeartCode uses.`),
-    order.length > 1 ? h('div', { className: 'mine-rules' },
-      h('label', { className: 'f', for: 'r-on', textContent: 'When the one in use fails, go on to the next' }),
-      h('div', { className: 'row', style: 'gap:8px' },
-        h('select', { id: 'r-on', style: 'flex:1', onchange: (e) => save(order, 'saved', { on: e.target.value }) },
-          [['failure', 'at its first failure'], ['retries', 'after some tries of the same model (rate limits, outages)']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.on === v }))),
-        s.rotation.on === 'retries' ? h('input', { type: 'number', 'aria-label': 'tries', title: 'tries of the same model first', style: 'width:76px', min: 1, max: 20, value: s.rotation.retries, onchange: (e) => save(order, 'saved', { retries: Number(e.target.value) }) }) : null),
-      h('div', { className: 'hint', textContent: { failure: 'Any error moves on at once, to another provider\'s model first. It stops only when every model fails.', retries: 'A rate limit or outage: the same model is tried again (with a short wait) that many times first. Any other error moves on at once.' }[s.rotation.on] ?? 'Any error moves on at once, to another provider\'s model first.' }),
-      h('label', { className: 'f', for: 'r-next', textContent: 'A new message starts with' }),
-      h('select', { id: 'r-next', onchange: (e) => save(order, 'saved', { next: e.target.value }) },
-        [['first', '#1 again'], ['stay', 'the model that answered last']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.next === v })))) : null)
-
-  mineV?.draw()
-  sortable(mineV, move)
-
-  // left: every provider's models, A to Z; one click adds it (the first one becomes #1). Built
+  // every provider's models, A to Z; one click adds it (the first one becomes #1). Built
   // again only when what it lists changes (a provider, its models, the search); a change to your
   // list only updates the rows it touches (markCatalog), so the list stays where you scrolled it.
   const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + ((MODELS[p.name] ?? { loading: true }).loading ? 'loading' : '')), modelQuery.trim(), catSort])
-  // every provider's list at once: on when all are
-  const allOn = s.providers.length > 0 && s.providers.every((p) => p.list)
-  put($('lists-all'), [sw({ checked: allOn, 'aria-label': "load every provider's model list", onchange: (e) => act('/api/provider/list', { on: e.target.checked }, `every provider's model list ${e.target.checked ? 'on' : 'off'}`) }), 'Load all lists'])
   if (shape !== catalogShape) (buildCatalog(s), applyFolds())
   catalogShape = shape
   markCatalog()
@@ -1258,7 +1208,6 @@ function drawProviders(s) {
 // Drag a row of a long list (virtual) to move it: it follows the pointer, the others make room, and
 // near the list's top or bottom edge it scrolls (faster nearer the edge). onMove(from, to) when
 // dropped; the list is drawn again once the order is saved (put back if saving failed).
-const MINE_ROW = 50 // your models, on the right
 const TABLE_ROW = 46 // the Your models page's table
 function sortable(v, onMove) {
   if (!v || v.items < 2) return
@@ -1392,12 +1341,56 @@ async function clearAdded(p) {
   act('/api/provider/added', { name: p.name, all: true }, `${p.name}: the models you added are forgotten`)
 }
 const CAT_ROW = 56 // a model's row on the left: its name, and what it can do under it
-let CATALOG = [] // what the left shows: [{ provider, ids }] (Add all adds these)
+// The models ticked (provider → Set of ids): kept while you search, so ones ticked for one search
+// and the next are added (or taken off) together. SHOWN: each provider's models shown now (the
+// search's matches).
+const PICKED_CAT = new Map()
+const SHOWN = new Map()
+const pickedOf = (name) => PICKED_CAT.get(name) ?? PICKED_CAT.set(name, new Set()).get(name)
+// The ticked models (every provider's) and what to do with them, on the bar over the list: all the
+// shown ones ticked (or none), added to your list, taken off it. The tick boxes drawn now (rows and
+// each provider's) follow.
+function drawPicks() {
+  if (!S) return
+  const all = [...PICKED_CAT].flatMap(([provider, ids]) => [...ids].map((model) => ({ provider, model })))
+  const shown = [...SHOWN].flatMap(([provider, ids]) => ids.map((model) => ({ provider, model })))
+  const isPicked = (t) => Boolean(PICKED_CAT.get(t.provider)?.has(t.model))
+  const toAdd = all.filter((t) => placeOf(t.provider, t.model) === undefined)
+  const toTake = all.filter((t) => placeOf(t.provider, t.model) !== undefined)
+  for (const box of $('p-list').querySelectorAll('input.pick')) box.checked = Boolean(PICKED_CAT.get(box.closest('section').dataset.provider)?.has(box.dataset.model))
+  for (const box of $('p-list').querySelectorAll('input.pick-all')) {
+    const ids = SHOWN.get(box.dataset.provider) ?? []
+    const n = ids.filter((id) => PICKED_CAT.get(box.dataset.provider)?.has(id)).length
+    box.checked = n > 0 && n === ids.length
+    box.indeterminate = n > 0 && n < ids.length
+  }
+  const top = $('pick-shown')
+  const n = shown.filter(isPicked).length
+  top.checked = n > 0 && n === shown.length
+  top.indeterminate = n > 0 && n < shown.length
+  top.disabled = !shown.length
+  top.title = top.checked ? 'unselect every model shown' : `select every model shown (${shown.length}${modelQuery.trim() ? ': the matches' : ''})`
+  const take = () => {
+    const off = new Set(toTake.map(keyOf))
+    const rest = S.order.filter((t) => !off.has(keyOf(t)))
+    if (!confirm(`Take ${toTake.length} model${toTake.length === 1 ? '' : 's'} off your list?${!rest.length ? ' None is left then: HeartCode has no model to use until you choose one.' : keyOf(rest[0]) !== keyOf(S.order[0]) ? ` HeartCode then uses ${rest[0].provider} · ${rest[0].model}.` : ''}`)) return
+    PICKED_CAT.clear()
+    saveOrder(rest, `${toTake.length} removed`)
+  }
+  const was = $('picks').hidden
+  $('picks').hidden = !all.length
+  put($('picks'),
+    h('span', { className: 'n', textContent: `${all.length} selected` }),
+    h('button', { className: 'small ghost', textContent: 'Clear', onclick: () => (PICKED_CAT.clear(), drawPicks()) }),
+    toTake.length ? h('button', { className: 'small danger', textContent: `Remove ${toTake.length} from your list`, onclick: take }) : null,
+    toAdd.length ? h('button', { className: 'small primary', textContent: `Add ${toAdd.length} to your list`, onclick: () => (PICKED_CAT.clear(), saveOrder([...S.order, ...toAdd], `${toAdd.length} added: your list has ${S.order.length + toAdd.length} models`)) }) : null)
+  if (was !== $('picks').hidden) fillHeight() // the list gives it room
+}
 function buildCatalog(s) {
-  CATALOG = []
   const q = modelQuery.trim()
   // a name no provider lists (anywhere): offered under each provider, to use it anyway
   const anyMatch = !q || s.providers.some((p) => (MODELS[p.name]?.list ?? []).some((id) => id.toLowerCase().includes(q.toLowerCase())))
+  SHOWN.clear()
   put($('p-list'), s.providers.map((p) => {
     if (!p.list) MODELS[p.name] = { list: [], details: {}, off: true } // its list switched off: never asked for
     else loadModels(p.name, MODELS[p.name]?.off)
@@ -1411,8 +1404,9 @@ function buildCatalog(s) {
         h('span', { className: 'id', title: id }, id, canCell(m.details?.[id], S.order[placeOf(p.name, id)])),
         own ? h('span', { className: 'tag', textContent: 'not in its list' }) : p.added.includes(id) ? h('span', { className: 'tag', textContent: 'added by you' }) : null,
         rowTail(p.name, id))
-    // one you added: ✕ forgets it (it leaves your list too)
-    const item = (id) => !p.added.includes(id) ? row(id) : h('div', { className: 'mwrap' }, row(id),
+    // its tick box (to add or take off several at once), and one you added: ✕ forgets it (it leaves your list too)
+    const tick = (id) => h('input', { type: 'checkbox', className: 'pick', checked: pickedOf(p.name).has(id), 'data-model': id, 'aria-label': `select ${id}`, onchange: (e) => (e.target.checked ? pickedOf(p.name).add(id) : pickedOf(p.name).delete(id), drawPicks()) })
+    const item = (id) => h('div', { className: 'mwrap' }, tick(id), row(id), !p.added.includes(id) ? null :
       h('button', { className: 'forget', textContent: '✕', title: 'forget this model', 'aria-label': `forget ${id}`, onclick: async () => {
         if (placeOf(p.name, id) !== undefined && !confirm(`Forget ${id}? It leaves your list too.`)) return
         if (placeOf(p.name, id) !== undefined) await saveOrder(S.order.filter((t) => t.provider !== p.name || t.model !== id), `${id} removed`)
@@ -1421,43 +1415,29 @@ function buildCatalog(s) {
     const typed = !anyMatch ? [row(q, true)] : []
     if (typed[0]) typed[0].dataset.typed = '1' // a name no provider lists: not part of Add all
     if (q && anyMatch && !ids.length) return null // searching: only the providers with a match
-    // a model its list leaves out (some servers don't list them all): by its exact name
-    const name = h('input', { type: 'text', placeholder: m.off ? 'List off: a model\'s exact name' : 'Custom model: its exact name', 'aria-label': `add a model to ${p.name} by name` })
-    const go = () => {
-      const id = name.value.trim()
-      if (!id) return name.focus()
-      name.value = ''
-      // only under this provider, with its others: you choose whether to use it (click it, like any)
-      if ([...(MODELS[p.name]?.list ?? []), ...p.added].includes(id)) return showRow(p.name, id, `${id} is in ${p.name}'s models already`)
-      act('/api/provider/added', { name: p.name, model: id }).then((r) => r && showRow(p.name, id, `${id} added to ${p.name}'s models: click it to use it`))
-    }
-    name.addEventListener('keydown', (e) => e.key === 'Enter' && go())
     return h('section', { 'data-provider': p.name },
       // the header folds it (a click on it, or its arrow; not on its buttons and switch)
       h('div', { className: 'prov-h', onclick: (e) => !e.target.closest('button:not(.fold), input, label, a') && fold(p.name) },
         h('button', { className: 'fold', type: 'button', textContent: '▾', 'aria-label': `fold ${p.name}`, 'aria-expanded': 'true' }),
+        ids.length ? h('input', { type: 'checkbox', className: 'pick-all', 'data-provider': p.name, 'aria-label': `select ${p.name}'s models`, title: `select all of ${p.name}'s models shown (or none)`, onchange: (e) => (ids.forEach((id) => (e.target.checked ? pickedOf(p.name).add(id) : pickedOf(p.name).delete(id))), drawPicks()) }) : null,
         h('div', { className: 'who' },
-          h('span', { className: 'name', textContent: p.name }), ' ',
-          m.off ? h('span', { className: 'tag', textContent: 'list off' }) : m.loading ? h('span', { className: 'tag', textContent: 'loading…' }) : m.error ? h('span', { className: 'tag err', textContent: "can't list its models", title: m.error }) : h('span', { className: 'tag ok', textContent: `${m.list.length} model${m.list.length === 1 ? '' : 's'}` }),
-          ' ', h('span', { className: 'tag inlist' }),
-          h('div', { className: 'meta' }, h('span', { className: 'mono', textContent: p.baseUrl }), ' · key ', h('span', { className: 'mono', textContent: p.key || 'none' })),
-          withTip(h('label', { className: 'listsw' }, sw({ checked: p.list, 'aria-label': `load ${p.name}'s model list`, onchange: (e) => act('/api/provider/list', { name: p.name, on: e.target.checked }, `${p.name}: model list ${e.target.checked ? 'on' : 'off'}`) }), 'Load its model list'),
-            () => 'On: its models are loaded from the provider. Off: never asked for; only the models you add by name show.')),
-        h('button', { className: 'small', textContent: 'Edit', onclick: () => openForm(p) }),
-        h('button', { className: 'small danger', textContent: 'Delete', onclick: () => confirm(`Delete the provider "${p.name}"? Its models leave your list too.`) && act('/api/provider/delete', { name: p.name }, `deleted ${p.name}`) })),
-      h('div', { className: 'byname' }, name, h('button', { className: 'small byname-go', textContent: 'Add', onclick: go }),
-        p.added.length ? h('button', { className: 'small danger', textContent: `Clear added (${p.added.length})`, title: `forget the ${p.added.length} model${p.added.length === 1 ? '' : 's'} you added to ${p.name} by name`, onclick: () => clearAdded(p) }) : null),
+          h('span', { className: 'name', textContent: p.name }),
+          m.off ? h('span', { className: 'tag', textContent: 'list off', title: "its list isn't loaded: type a model's exact name in the search to add it" }) : m.loading ? h('span', { className: 'tag', textContent: 'loading…' }) : m.error ? h('span', { className: 'tag err', textContent: "can't list its models", title: m.error }) : h('span', { className: 'tag ok', textContent: `${m.list.length} model${m.list.length === 1 ? '' : 's'}` }),
+          h('span', { className: 'tag inlist' }),
+          h('span', { className: 'meta mono', textContent: p.baseUrl, title: `${p.baseUrl} · key ${p.key || 'none'}` })),
+        h('button', { className: 'small', textContent: 'Edit', title: 'its address and key, its model list, delete it', onclick: () => openForm(p) })),
       // what's listed first; loading and errors under it (the models already shown stay where they are)
       typed.length ? h('div', { className: 'rows' }, typed) : null,
       (() => {
         if (!ids.length) return null
-        CATALOG.push({ provider: p.name, ids })
+        SHOWN.set(p.name, ids)
         const box = h('div', { className: 'rows' })
         box._ids = ids
         box._v = virtual(box, { count: ids.length, height: CAT_ROW, row: (i) => item(ids[i]), scroller: $('p-list') })
         return box
       })(),
-      m.error ? h('div', { className: 'cat-note', style: 'color:var(--err)' }, `can't list its models: ${shortError(m.error)} `, h('button', { className: 'small', textContent: 'Try again', onclick: () => loadModels(p.name, true) }), h('div', { className: 'muted', style: 'margin-top:4px', textContent: 'Or add a model by its exact name, above.' })) : null,
+      m.error ? h('div', { className: 'cat-note', style: 'color:var(--err)' }, `can't list its models: ${shortError(m.error)} `, h('button', { className: 'small', textContent: 'Try again', onclick: () => loadModels(p.name, true) }), h('div', { className: 'muted', style: 'margin-top:4px', textContent: "Or type a model's exact name in the search, and click it." })) : null,
+      m.off && !ids.length && !typed.length ? h('div', { className: 'cat-note', textContent: "Its list is off: type a model's exact name in the search, and click it to add it." }) : null,
       m.loading ? h('div', { className: 'cat-note', textContent: 'Loading its models…' }) : null)
   }))
 }
@@ -1609,6 +1589,18 @@ function drawMine(s) {
       order.length > 1 ? h('button', { className: 'small primary', textContent: 'Save order', title: 'save the order shown as your model order (#1 first)', onclick: () => keep(view) }) : null,
       order.length ? h('button', { className: 'small', textContent: 'Refresh from models.dev', title: 'ask models.dev again what each model can do: context, tools, thinking, images, price', onclick: () => lookUp() }) : null,
       order.length ? h('button', { className: 'small', textContent: 'Test all', disabled: testingAll, title: 'send each a short message to see which really answer: every provider at once, a few from each (one at a time per 100 models)', onclick: () => tryAll() }) : null),
+    // when the one in use fails, and what a new message starts with
+    order.length > 1 ? h('div', { className: 'mt-rules' },
+      h('span', { className: 'rule' },
+        h('label', { for: 'r-on', textContent: 'When a model fails, go on to the next' }),
+        h('select', { id: 'r-on', onchange: (e) => saveOrder(order, 'saved', { on: e.target.value }) },
+          [['failure', 'at its first failure'], ['retries', 'after some tries of the same model']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.on === v }))),
+        s.rotation.on === 'retries' ? h('input', { type: 'number', 'aria-label': 'tries', title: 'tries of the same model first (rate limits, outages)', min: 1, max: 20, value: s.rotation.retries, onchange: (e) => saveOrder(order, 'saved', { retries: Number(e.target.value) }) }) : null),
+      h('span', { className: 'rule' },
+        h('label', { for: 'r-next', textContent: 'A new message starts with' }),
+        h('select', { id: 'r-next', onchange: (e) => saveOrder(order, 'saved', { next: e.target.value }) },
+          [['first', '#1 again'], ['stay', 'the model that answered last']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.next === v })))),
+      h('span', { className: 'hint', textContent: s.rotation.on === 'retries' ? 'A rate limit or outage: that model is tried again that many times first; any other error moves on at once.' : "Any error moves on at once, to another provider's model first." })) : null,
     order.length
       ? h('div', { className: 'mt-scroll' }, h('div', { className: 'mt' },
           jobSlot('table'),
@@ -1663,6 +1655,7 @@ function markCatalog() {
     tag.hidden = !n
     tag.textContent = `${n} in your list${S.order[0]?.provider === sec.dataset.provider ? ' · #1' : ''}`
   }
+  drawPicks()
 }
 
 function drawUsing(s) {
@@ -2038,7 +2031,6 @@ if (token) {
         const t = S.order[placeOf(...d.key.split(/\/(.*)/s))]
         if (!t) continue
         Object.assign(t, { tested: d.tested ?? t.tested, known: d.known ?? t.known })
-        document.querySelector(`#inuse li[data-key="${CSS.escape(d.key)}"] .test`)?.replaceWith(testLine(t))
       }
       news.clear()
       drawMine(S)
