@@ -155,8 +155,9 @@
   .cat-top input[type=search] { flex: 1; min-width: 140px; }
   .cat-top select { flex: none; width: auto; padding-right: 30px; }
   .cat-top button { flex: none; }
+  .cat-top .free-only { display: flex; align-items: center; gap: 7px; flex: none; font-size: 13px; color: var(--muted); cursor: pointer; white-space: nowrap; }
   .cat-top button.ghost:hover:not(:disabled) { color: var(--text); border-color: transparent; }
-  .cat-top input[type=checkbox], .prov-h .pick-all, .mwrap .pick { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+  .cat-top input[type=checkbox], .prov-h .pick-all, .mwrap .pick, .free-only input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
   /* what to do with the ticked models: at the bottom of the list, only while some are ticked */
   .picks { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--accent-soft); font-size: 13px; }
   .picks .n { font-weight: 600; margin-right: auto; }
@@ -185,6 +186,22 @@
   .mwrap { display: flex; break-inside: avoid; border-bottom: 1px solid var(--line); }
   .mwrap .mrow { border-bottom: 0; }
   .mwrap .forget { border: 0; background: none; color: var(--faint); padding: 0 12px; }
+  .mwrap .try { flex: none; margin-right: 12px; }
+  .prov-h .by-name { display: flex; gap: 6px; flex: none; }
+  .prov-h .by-name input { width: 200px; height: 28px; padding: 0 8px; font-size: 12.5px; font-family: var(--mono); }
+  .prov-h .by-name button, .prov-h > button.small { height: 28px; }
+  .hello-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  .hello-cols pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; max-height: 55vh; overflow: auto; }
+  #hello-status.ok { color: var(--ok); }
+  #hello-status.bad { color: var(--err); }
+  @media (max-width: 860px) { .hello-cols { grid-template-columns: 1fr; } }
+  #hellos-list { max-height: 60vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  #hellos-list button { display: flex; gap: 12px; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; padding: 9px 12px; font-size: 12.5px; }
+  #hellos-list button:last-child { border-bottom: 0; }
+  #hellos-list .id { flex: none; width: 40%; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #hellos-list .said { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #hellos-list .ok .said { color: var(--ok); }
+  #hellos-list .bad .said { color: var(--err); }
   .mwrap { padding-left: 16px; align-items: center; }
   .mwrap .pick + .mrow { padding-left: 12px; }
   .mwrap .forget:hover { color: var(--err); }
@@ -440,7 +457,8 @@
           <div class="cat-top">
             <input type="checkbox" id="pick-shown" aria-label="select every model shown">
             <input type="search" id="m-search" placeholder="Search all models…">
-            <select id="m-sort" aria-label="sort the models"><option value="name">Sort by name</option><option value="price">Sort by price</option></select>
+            <label class="free-only" title="only the models their provider lists at $0 (a provider whose list has no prices can't say)"><input type="checkbox" id="free-only">Free only</label>
+            <select id="m-sort" aria-label="sort the models"><option value="name">Sort by name</option><option value="price">Sort by price (free first)</option></select>
             <button class="small ghost" id="fold-all" type="button">Collapse all</button>
             <button class="small" id="dev-all" type="button" title="ask models.dev what each listed model can do: tool calls, context, thinking, images">Get from models.dev</button>
           </div>
@@ -606,7 +624,7 @@
   <input type="password" id="p-key" autocomplete="off" placeholder="paste it here (none for a server on this machine, like Ollama)">
   <div class="hint">Kept in config.json on this machine. This page only shows its first and last characters.</div>
   <div id="p-more" hidden>
-    <label class="opt" style="margin-top:16px"><div class="t"><b>Load its model list</b><span>On: its models are asked from the provider. Off: never asked; only the models you add by name show (type one's exact name in the search).</span></div><span class="sw"><input type="checkbox" id="p-list-on"><i></i></span></label>
+    <label class="opt" style="margin-top:16px"><div class="t"><b>Load its model list</b><span>On: its models are asked from the provider. Off: never asked; only the models you add by name show (the box next to its name).</span></div><span class="sw"><input type="checkbox" id="p-list-on"><i></i></span></label>
     <div class="actions" id="p-added"></div>
   </div>
   <div class="actions"><button class="danger" id="p-delete" hidden>Delete provider</button><span class="spacer"></span><button id="p-cancel">Cancel</button><button class="primary" id="p-save">Add provider</button></div>
@@ -624,6 +642,21 @@
   <div class="actions"><button id="c-cancel">Cancel</button><button class="primary" id="c-add">Add server</button></div>
 </dialog>
 <dialog id="k-form" aria-labelledby="k-title"></dialog>
+<dialog id="hello" aria-labelledby="hello-title">
+  <h2 id="hello-title"></h2>
+  <p class="sub" id="hello-said"></p>
+  <div class="hello-cols">
+    <div><h3>Sent</h3><pre id="hello-sent"></pre></div>
+    <div><h3>Received <span id="hello-status"></span></h3><pre id="hello-got"></pre></div>
+  </div>
+  <div class="actions"><button id="hello-again" type="button">Send again</button><span class="spacer"></span><button class="primary" id="hello-close" type="button">Close</button></div>
+</dialog>
+<dialog id="hellos" aria-labelledby="hellos-title">
+  <h2 id="hellos-title"></h2>
+  <p class="sub" id="hellos-said"></p>
+  <div id="hellos-list"></div>
+  <div class="actions"><button id="hellos-ok" type="button">Tick the ones that answered</button><span class="spacer"></span><button class="primary" id="hellos-close" type="button">Close</button></div>
+</dialog>
 <dialog id="pr" aria-labelledby="pr-title">
   <form>
     <h2 id="pr-title">Provider ranking</h2>
@@ -951,6 +984,14 @@ let modelQuery = ''
 // storage isn't: the page's address has a new port each time)
 const savePref = (key, value) => api('/api/prefs', { key, value }).catch((e) => toast(`not kept: ${e.message}`, true))
 let catSort = 'name'
+// only the models their provider lists at $0 (what its own list says: the price shown under each)
+let freeOnly = false
+const isFree = (d) => Boolean(d?.price) && !d.price.input && !d.price.output
+$('free-only').onchange = (e) => {
+  freeOnly = e.target.checked
+  savePref('freeOnly', freeOnly)
+  if (S) drawProviders(S)
+}
 $('m-sort').onchange = (e) => {
   catSort = e.target.value
   savePref('catSort', catSort)
@@ -1194,12 +1235,14 @@ function drawProviders(s) {
 
   // every provider's models, A to Z; one click adds it (the first one becomes #1). Built
   // again only when what it lists changes (a provider, its models, the search); a change to your
-  // list only updates the rows it touches (markCatalog), so the list stays where you scrolled it.
-  const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + ((MODELS[p.name] ?? { loading: true }).loading ? 'loading' : '')), modelQuery.trim(), catSort])
+  // list only updates the rows it touches (markCatalog), so the list stays where you scrolled it
+  // (but one of yours a provider doesn't list gets a row of its own).
+  const unlisted = order.filter((t) => !(MODELS[t.provider]?.list ?? []).includes(t.model)).map(keyOf).sort()
+  const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + ((MODELS[p.name] ?? { loading: true }).loading ? 'loading' : '')), modelQuery.trim(), catSort, freeOnly, unlisted])
   if (shape !== catalogShape) (buildCatalog(s), applyFolds())
   catalogShape = shape
   markCatalog()
-  $('m-search').placeholder = `Search ${Object.values(MODELS).reduce((n, m) => n + (m.list?.length ?? 0), 0) || 'all'} models, or type a model name…`
+  $('m-search').placeholder = `Search ${Object.values(MODELS).reduce((n, m) => n + (m.list?.length ?? 0), 0) || 'all'} models…`
   $('n-providers').textContent = s.providers.length || ''
 }
 // Your models: pick one up (anywhere on it with a mouse, by its ⋮⋮ on a touch screen) and the
@@ -1333,6 +1376,80 @@ function canCell(d, mine) {
   const text = [can, priceText(price)].filter(Boolean).join(' · ')
   return text ? h('span', { className: 'can', textContent: text }) : null
 }
+// Test on a model's row: "Hello" sent to it (by the server), and the request and the answer shown.
+// r: an answer already had (from Test on the ticked ones): shown, not sent again.
+let helloOf = null
+async function hello(provider, model, had) {
+  helloOf = { provider, model }
+  const show = (sent, got, status, cls) => {
+    $('hello-sent').textContent = sent
+    $('hello-got').textContent = got
+    $('hello-status').textContent = status
+    $('hello-status').className = cls
+  }
+  $('hello-title').textContent = `${provider} · ${model}`
+  $('hello-said').textContent = 'Sending "Hello"…'
+  show('', '', '', '')
+  $('hello-again').disabled = true
+  if (!$('hello').open) $('hello').showModal()
+  const asked = helloOf
+  const r = had ?? (await sendHello(provider, model))
+  if (asked !== helloOf) return // another one asked meanwhile
+  $('hello-again').disabled = false
+  if (r.failed) return ($('hello-said').textContent = `Not sent: ${r.failed}`)
+  const json = (x) => (typeof x === 'string' ? x : JSON.stringify(x, null, 2))
+  const s = r.sent
+  const g = r.received
+  show(`${s.method} ${s.url}\n${Object.entries(s.headers).map(([k, v]) => `${k}: ${v}`).join('\n')}\n\n${json(s.body)}`,
+    g.error ? g.error : `${g.type ? `content-type: ${g.type}\n\n` : ''}${json(g.body) || '(empty)'}`,
+    g.error ? '· no answer' : `· ${g.status} · ${g.ms} ms`, g.ok ? 'ok' : 'bad')
+  $('hello-said').textContent = helloSaid(r, 200)
+}
+const sendHello = (provider, model) => api('/api/hello', { provider, model }).catch((e) => ({ failed: e.message }))
+const helloSaid = (r, n) => {
+  const g = r.received
+  return r.failed ? `Not sent: ${r.failed}` : g.error ? `It didn't answer: ${g.error}` : !g.ok ? `The provider refused it (${g.status}).` : r.reply ? `It answered: ${r.reply.length > n ? r.reply.slice(0, n) + '…' : r.reply}` : 'It answered, but with no text in choices[0].message.content.'
+}
+const answered = (r) => Boolean(r?.received?.ok && r.reply)
+// Test on the ticked models: "Hello" to each, a provider's one after another (its rate limit), the
+// providers at once. Each row: what came back; clicked, what was sent and received. Closing the
+// dialog stops the ones not sent yet.
+let hellos = null
+async function helloAll(list) {
+  const run = (hellos = { list: list.map((t) => ({ ...t, r: null })) })
+  $('hellos-title').textContent = `Hello to ${list.length} model${list.length === 1 ? '' : 's'}`
+  const draw = () => {
+    if (run !== hellos) return
+    const done = run.list.filter((t) => t.r)
+    const ok = done.filter((t) => answered(t.r)).length
+    $('hellos-said').textContent = `${done.length} of ${run.list.length} done${done.length ? ` · ${ok} answered, ${done.length - ok} didn't` : ''}${done.length < run.list.length ? ' · sending…' : ''}`
+    $('hellos-ok').disabled = !ok
+    put($('hellos-list'), run.list.map((t) => h('button', { type: 'button', className: !t.r ? '' : answered(t.r) ? 'ok' : 'bad', title: t.r ? 'see what was sent and what came back' : 'not answered yet', disabled: !t.r, onclick: () => hello(t.provider, t.model, t.r) },
+      h('span', { className: 'id', textContent: keyOf(t) }),
+      h('span', { className: 'said', textContent: t.r ? helloSaid(t.r, 120) : 'waiting…' }))))
+  }
+  draw()
+  if (!$('hellos').open) $('hellos').showModal()
+  const byProvider = Map.groupBy(run.list, (t) => t.provider)
+  await Promise.all([...byProvider.values()].map(async (ts) => {
+    for (const t of ts) {
+      if (run !== hellos) return
+      t.r = await sendHello(t.provider, t.model)
+      draw()
+    }
+  }))
+}
+$('hellos-close').onclick = () => $('hellos').close()
+$('hellos').addEventListener('close', () => (hellos = null))
+// the ticks: the ones that answered, only
+$('hellos-ok').onclick = () => {
+  PICKED_CAT.clear()
+  for (const t of hellos?.list ?? []) if (answered(t.r)) pickedOf(t.provider).add(t.model)
+  $('hellos').close()
+  drawPicks()
+}
+$('hello-again').onclick = () => helloOf && hello(helloOf.provider, helloOf.model)
+$('hello-close').onclick = () => $('hello').close()
 // every model added to a provider by name forgotten; the ones in your list leave it too
 async function clearAdded(p) {
   const inList = S.order.filter((t) => t.provider === p.name && p.added.includes(t.model))
@@ -1382,14 +1499,13 @@ function drawPicks() {
   put($('picks'),
     h('span', { className: 'n', textContent: `${all.length} selected` }),
     h('button', { className: 'small ghost', textContent: 'Clear', onclick: () => (PICKED_CAT.clear(), drawPicks()) }),
+    h('button', { className: 'small', textContent: `Test ${all.length}`, title: 'send each ticked model "Hello" and see which answer', onclick: () => helloAll(all) }),
     toTake.length ? h('button', { className: 'small danger', textContent: `Remove ${toTake.length} from your list`, onclick: take }) : null,
     toAdd.length ? h('button', { className: 'small primary', textContent: `Add ${toAdd.length} to your list`, onclick: () => (PICKED_CAT.clear(), saveOrder([...S.order, ...toAdd], `${toAdd.length} added: your list has ${S.order.length + toAdd.length} models`)) }) : null)
   if (was !== $('picks').hidden) fillHeight() // the list gives it room
 }
 function buildCatalog(s) {
   const q = modelQuery.trim()
-  // a name no provider lists (anywhere): offered under each provider, to use it anyway
-  const anyMatch = !q || s.providers.some((p) => (MODELS[p.name]?.list ?? []).some((id) => id.toLowerCase().includes(q.toLowerCase())))
   SHOWN.clear()
   put($('p-list'), s.providers.map((p) => {
     if (!p.list) MODELS[p.name] = { list: [], details: {}, off: true } // its list switched off: never asked for
@@ -1398,23 +1514,37 @@ function buildCatalog(s) {
     // and the models added by name (and any of yours it doesn't list), marked as yours
     const listed = new Set(m.list ?? [])
     const yours = [...new Set([...p.added, ...s.order.filter((t) => t.provider === p.name).map((t) => t.model)])].filter((id) => !listed.has(id))
-    const ids = [...listed, ...yours].sort((a, b) => (catSort === 'price' && costOf(m.details?.[a]) - costOf(m.details?.[b])) || byName(a, b)).filter((id) => id.toLowerCase().includes(q.toLowerCase()))
+    const ids = [...listed, ...yours].sort((a, b) => (catSort === 'price' && costOf(m.details?.[a]) - costOf(m.details?.[b])) || byName(a, b)).filter((id) => id.toLowerCase().includes(q.toLowerCase()) && (!freeOnly || isFree(m.details?.[id])))
     const row = (id, own) =>
       h('button', { className: 'mrow', 'data-provider': p.name, 'data-model': id, onclick: () => (placeOf(p.name, id) === undefined ? addModel(p.name, id) : removeMine(p.name, id)) },
         h('span', { className: 'id', title: id }, id, canCell(m.details?.[id], S.order[placeOf(p.name, id)])),
+        isFree(m.details?.[id]) ? h('span', { className: 'tag ok', textContent: 'free', title: `${p.name}'s model list says $0` }) : null,
         own ? h('span', { className: 'tag', textContent: 'not in its list' }) : p.added.includes(id) ? h('span', { className: 'tag', textContent: 'added by you' }) : null,
         rowTail(p.name, id))
     // its tick box (to add or take off several at once), and one you added: ✕ forgets it (it leaves your list too)
     const tick = (id) => h('input', { type: 'checkbox', className: 'pick', checked: pickedOf(p.name).has(id), 'data-model': id, 'aria-label': `select ${id}`, onchange: (e) => (e.target.checked ? pickedOf(p.name).add(id) : pickedOf(p.name).delete(id), drawPicks()) })
-    const item = (id) => h('div', { className: 'mwrap' }, tick(id), row(id), !p.added.includes(id) ? null :
+    const item = (id) => h('div', { className: 'mwrap' }, tick(id), row(id),
+      h('button', { className: 'small try', textContent: 'Test', title: `send ${id} "Hello" and see what was sent and what came back`, onclick: () => hello(p.name, id) }),
+      !p.added.includes(id) ? null :
       h('button', { className: 'forget', textContent: '✕', title: 'forget this model', 'aria-label': `forget ${id}`, onclick: async () => {
         if (placeOf(p.name, id) !== undefined && !confirm(`Forget ${id}? It leaves your list too.`)) return
         if (placeOf(p.name, id) !== undefined) await saveOrder(S.order.filter((t) => t.provider !== p.name || t.model !== id), `${id} removed`)
         act('/api/provider/added', { name: p.name, model: id, remove: true }, `forgot ${id}`)
       } }))
-    const typed = !anyMatch ? [row(q, true)] : []
-    if (typed[0]) typed[0].dataset.typed = '1' // a name no provider lists: not part of Add all
-    if (q && anyMatch && !ids.length) return null // searching: only the providers with a match
+    // a model by its name, into your list; one it has already: said, and shown
+    const addByName = (e) => {
+      e.preventDefault()
+      const box = e.target.elements.name
+      const id = box.value.trim()
+      if (!id) return
+      const at = placeOf(p.name, id)
+      if (at !== undefined) return showRow(p.name, id, `${id} is already in your list (#${at + 1})`)
+      if (listed.has(id) || yours.includes(id)) return showRow(p.name, id, `${p.name} already has ${id}: click it to add it`)
+      box.value = ''
+      addModel(p.name, id)
+    }
+    if (q && !ids.length) return null // searching: only the providers with a match
+    if (freeOnly && !ids.length) return null // free only: the providers with a free one
     return h('section', { 'data-provider': p.name },
       // the header folds it (a click on it, or its arrow; not on its buttons and switch)
       h('div', { className: 'prov-h', onclick: (e) => !e.target.closest('button:not(.fold), input, label, a') && fold(p.name) },
@@ -1422,12 +1552,14 @@ function buildCatalog(s) {
         ids.length ? h('input', { type: 'checkbox', className: 'pick-all', 'data-provider': p.name, 'aria-label': `select ${p.name}'s models`, title: `select all of ${p.name}'s models shown (or none)`, onchange: (e) => (ids.forEach((id) => (e.target.checked ? pickedOf(p.name).add(id) : pickedOf(p.name).delete(id))), drawPicks()) }) : null,
         h('div', { className: 'who' },
           h('span', { className: 'name', textContent: p.name }),
-          m.off ? h('span', { className: 'tag', textContent: 'list off', title: "its list isn't loaded: type a model's exact name in the search to add it" }) : m.loading ? h('span', { className: 'tag', textContent: 'loading…' }) : m.error ? h('span', { className: 'tag err', textContent: "can't list its models", title: m.error }) : h('span', { className: 'tag ok', textContent: `${m.list.length} model${m.list.length === 1 ? '' : 's'}` }),
+          m.off ? h('span', { className: 'tag', textContent: 'list off', title: "its list isn't loaded: add a model by its name, in the box on the right" }) : m.loading ? h('span', { className: 'tag', textContent: 'loading…' }) : m.error ? h('span', { className: 'tag err', textContent: "can't list its models", title: m.error }) : h('span', { className: 'tag ok', textContent: `${m.list.length} model${m.list.length === 1 ? '' : 's'}` }),
           h('span', { className: 'tag inlist' }),
           h('span', { className: 'meta mono', textContent: p.baseUrl, title: `${p.baseUrl} · key ${p.key || 'none'}` })),
+        h('form', { className: 'by-name', onsubmit: addByName },
+          h('input', { type: 'text', name: 'name', placeholder: 'model name', 'aria-label': `add a model to ${p.name} by its name`, title: `a model's exact name: added to your list, also one ${p.name} doesn't list` }),
+          h('button', { className: 'small', textContent: 'Add' })),
         h('button', { className: 'small', textContent: 'Edit', title: 'its address and key, its model list, delete it', onclick: () => openForm(p) })),
       // what's listed first; loading and errors under it (the models already shown stay where they are)
-      typed.length ? h('div', { className: 'rows' }, typed) : null,
       (() => {
         if (!ids.length) return null
         SHOWN.set(p.name, ids)
@@ -1436,10 +1568,11 @@ function buildCatalog(s) {
         box._v = virtual(box, { count: ids.length, height: CAT_ROW, row: (i) => item(ids[i]), scroller: $('p-list') })
         return box
       })(),
-      m.error ? h('div', { className: 'cat-note', style: 'color:var(--err)' }, `can't list its models: ${shortError(m.error)} `, h('button', { className: 'small', textContent: 'Try again', onclick: () => loadModels(p.name, true) }), h('div', { className: 'muted', style: 'margin-top:4px', textContent: "Or type a model's exact name in the search, and click it." })) : null,
-      m.off && !ids.length && !typed.length ? h('div', { className: 'cat-note', textContent: "Its list is off: type a model's exact name in the search, and click it to add it." }) : null,
+      m.error ? h('div', { className: 'cat-note', style: 'color:var(--err)' }, `can't list its models: ${shortError(m.error)} `, h('button', { className: 'small', textContent: 'Try again', onclick: () => loadModels(p.name, true) }), h('div', { className: 'muted', style: 'margin-top:4px', textContent: "Or add a model by its name, in the box above." })) : null,
+      m.off && !ids.length ? h('div', { className: 'cat-note', textContent: "Its list is off: add a model by its name, in the box above." }) : null,
       m.loading ? h('div', { className: 'cat-note', textContent: 'Loading its models…' }) : null)
   }))
+  if (freeOnly && !$('p-list').querySelector('section')) put($('p-list'), h('div', { className: 'cat-note', textContent: "None of your providers lists a model at $0. (A provider whose model list has no prices can't say what's free: Free only leaves those out.)" }))
 }
 // --- Your models page: the list as a table; sorted by several columns at once (each a tie-break
 // for the ones before it), the sort kept in this browser ---
@@ -1958,6 +2091,8 @@ function render(s) {
     const p = s.prefs
     catSort = p.catSort === 'price' ? 'price' : 'name'
     $('m-sort').value = catSort
+    freeOnly = p.freeOnly === true
+    $('free-only').checked = freeOnly
     FOLDED.clear()
     for (const n of Array.isArray(p.folded) ? p.folded : []) FOLDED.add(n)
     SORT = Array.isArray(p.sort) ? p.sort.filter((x) => COLS[x?.key]) : []

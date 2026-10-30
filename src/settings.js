@@ -102,10 +102,11 @@ const skillsDir = () => path.join(HOME, 'skills')
 // what the provider said (names, sizes, prices; not what's known from models.dev or tests, which
 // changes). Asked for again when its list is switched on or off, or the provider is changed.
 const LISTS = path.join(HOME, 'model-lists.json')
+const LIST_V = 2 // how a saved list was read (2: airforce's cents, Cloudflare's prices); another: read again
 // The page's own choices (sorts, folded providers, the provider ranking): kept here, not in the
 // browser, whose storage is per address (a new port each time)
 const PREFS = path.join(HOME, 'settings-page.json')
-const PREF_KEYS = ['catSort', 'folded', 'sort', 'rank']
+const PREF_KEYS = ['catSort', 'freeOnly', 'folded', 'sort', 'rank']
 function forgetList(...names) {
   const all = readJson(LISTS, {})
   if (!names.some((n) => n in all)) return
@@ -437,11 +438,11 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
       if (!p) throw new Error(`no provider "${name}"`)
       if (p.list === false) return { models: [], details: {}, off: true }
       const lists = readJson(LISTS, {})
-      let saved = lists[name]?.baseUrl === p.baseUrl && lists[name].models?.length ? lists[name] : null // an empty one: asked again
+      let saved = lists[name]?.baseUrl === p.baseUrl && lists[name].models?.length && lists[name].v === LIST_V ? lists[name] : null // an empty one, or one read the old way: asked again
       if (!saved) {
         const entries = await new Client({ baseUrl: p.baseUrl, apiKey: p.apiKey }).modelEntries()
         const num = (...xs) => xs.map(Number).find((x) => x > 0)
-        saved = { baseUrl: p.baseUrl, at: Date.now(), models: entries.map((m) => String(m.id ?? m.name)), details: Object.fromEntries(entries.map((m) => [String(m.id ?? m.name), {
+        saved = { v: LIST_V, baseUrl: p.baseUrl, at: Date.now(), models: entries.map((m) => String(m.id ?? m.name)), details: Object.fromEntries(entries.map((m) => [String(m.id ?? m.name), {
           name: m.name && m.name !== String(m.id ?? m.name) ? String(m.name) : undefined,
           context: num(m.context_length, m.context_window, m.max_model_len, m.max_context_length, m.top_provider?.context_length),
           owner: m.owned_by && m.owned_by !== 'system' ? String(m.owned_by) : undefined,
@@ -505,6 +506,28 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
     // itself). In the requests log as a model test. Never throws: { ok, ms, reply } or { ok: false, error }.
     'POST /api/try': ({ provider, model } = {}) => testOne({ provider, model: String(model ?? '') }),
     // the tests' results, and the run going now (with the models it hasn't tested yet)
+    // Test, on a model's row: one "Hello" to it, and exactly what was sent and what came back (the
+    // key masked), for the page to show. Not streamed, so the answer is the provider's own JSON.
+    'POST /api/hello': async ({ provider, model }) => {
+      const c = clientFor({ provider, model })
+      if (!c || !model) throw new Error(`no provider "${provider}"`)
+      const url = `${c.baseUrl}/chat/completions`
+      const body = { model, messages: [{ role: 'user', content: 'Hello' }] }
+      const sent = { method: 'POST', url, headers: { 'content-type': 'application/json', ...(c.apiKey && { authorization: `Bearer ${mask(c.apiKey)}` }) }, body }
+      const t0 = Date.now()
+      try {
+        const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(c.apiKey && { authorization: `Bearer ${c.apiKey}` }) }, body: JSON.stringify(body), signal: AbortSignal.timeout(90_000) })
+        const text = await res.text()
+        let json = null
+        try {
+          json = JSON.parse(text)
+        } catch {}
+        const reply = json?.choices?.[0]?.message?.content ?? null
+        return { sent, received: { status: res.status, ok: res.ok, ms: Date.now() - t0, type: res.headers.get('content-type'), body: json ?? text.slice(0, 20_000) }, reply }
+      } catch (e) {
+        return { sent, received: { error: e.name === 'TimeoutError' ? 'no answer within 90 seconds' : `couldn't send it: ${e.cause?.code || e.cause?.message || e.message}`, ms: Date.now() - t0 } }
+      }
+    },
     'POST /api/tests': () => ({ results: tests, run: run && { ...runState(), pending: [...run.pending] } }),
     // a run: all your models, or the ones given (only); one at a time if one is going already
     'POST /api/tests/start': ({ only } = {}) => {
@@ -772,7 +795,11 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
 // output } (either may be missing), or undefined. Not models.dev's: the same model costs differently
 // at different providers. The forms lists use: pricing.prompt/completion (per token, OpenRouter's);
 // pricing.input/output with a unit (per million when it says so; no unit: per token when it's that
-// small); input_price/output_price (per token); pricepermilliontokens; only a free tier.
+// small); input_price/output_price (per token); pricepermilliontokens (in cents: api.airforce's 88
+// is its own 880000 micro-dollars); Cloudflare's properties ("per M input tokens"); only a free
+// tier (is_free, or a tier named free when nothing else is said: a list's "free tier" with a price
+// is a plan that may use it, not a model that costs nothing).
+const cfPrice = (m, unit) => (Array.isArray(m.properties) ? m.properties.find((p) => p?.property_id === 'price')?.value?.find?.((v) => unit.test(v?.unit ?? ''))?.price : undefined)
 export function listedPrice(m) {
   const num = (x) => (x === null || x === undefined || x === '' || !(Number(x) >= 0) ? undefined : Number(x)) // -1: varies (a router's "auto")
   const pr = m.pricing && typeof m.pricing === 'object' && !Array.isArray(m.pricing) ? m.pricing : {}
@@ -781,7 +808,8 @@ export function listedPrice(m) {
     [num(pr.prompt), num(pr.completion), () => 1e6],
     [num(pr.input), num(pr.output), unit],
     [num(m.input_price), num(m.output_price), () => 1e6],
-    [num(m.pricepermilliontokens), num(m.output_pricepermilliontokens), () => 1],
+    [num(m.pricepermilliontokens), num(m.output_pricepermilliontokens), () => 0.01],
+    [num(cfPrice(m, /^per M input tokens$/i)), num(cfPrice(m, /^per M output tokens$/i)), () => 1],
   ]) {
     if (i === undefined && o === undefined) continue
     const per = (x) => (x === undefined ? undefined : Number((x * k(x)).toPrecision(6)))
