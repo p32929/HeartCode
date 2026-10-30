@@ -262,7 +262,7 @@
   /* Your models: a table, one row a model */
   .mt-card { padding: 0; }
   .mt-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 14px 18px; border-bottom: 1px solid var(--line); min-height: 58px; }
-  .mt-top .sorts { flex: 1; min-width: 0; color: var(--muted); font-size: 13px; }
+  .mt-top .sorts { flex: 1 1 320px; min-width: 0; color: var(--muted); font-size: 13px; } /* too narrow beside the buttons: a line of its own */
   .mt-top .chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--brand); background: var(--brand-soft); border-radius: 999px; padding: 1px 4px 1px 9px; margin: 2px 4px 2px 0; color: var(--text); font-size: 12.5px; }
   .mt-top .chip button { border: 0; background: none; padding: 0 4px; font-size: 12px; color: var(--muted); }
   .mt-scroll { overflow-x: auto; }
@@ -930,36 +930,21 @@ for (const id of ['p-name', 'p-url', 'p-key']) $(id).addEventListener('keydown',
 const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare // one collator: thousands of names sort fast
 let modelQuery = ''
 // the models under each provider: by name, or by what its list says they cost (cheapest first; no price: last)
-let catSort = (() => {
-  try {
-    return localStorage.getItem('heart.catSort') === 'price' ? 'price' : 'name'
-  } catch {
-    return 'name'
-  }
-})()
-$('m-sort').value = catSort
+// The page's own choices (sorts, folds, the provider ranking), kept in ~/.heart (the browser's
+// storage isn't: the page's address has a new port each time)
+const savePref = (key, value) => api('/api/prefs', { key, value }).catch((e) => toast(`not kept: ${e.message}`, true))
+let catSort = 'name'
 $('m-sort').onchange = (e) => {
   catSort = e.target.value
-  try {
-    localStorage.setItem('heart.catSort', catSort)
-  } catch {}
+  savePref('catSort', catSort)
   if (S) drawProviders(S)
 }
 const costOf = (d) => (d?.price ? (d.price.input ?? 0) + (d.price.output ?? 0) : Infinity)
-// Providers folded on the page (the browser remembers them). Typing a search opens them all, until
-// you fold or unfold one (or all) again.
+// Providers folded on the page (kept: savePref). Typing a search opens them all, until you fold or
+// unfold one (or all) again.
 let searchOpen = false
-const FOLDED = new Set((() => {
-  try {
-    return JSON.parse(localStorage.getItem('heart.folded') ?? '[]')
-  } catch {
-    return []
-  }
-})())
+const FOLDED = new Set()
 function applyFolds() {
-  try {
-    localStorage.setItem('heart.folded', JSON.stringify([...FOLDED]))
-  } catch {}
   for (const sec of $('p-list').querySelectorAll('section[data-provider]')) {
     const folded = FOLDED.has(sec.dataset.provider) && !(searchOpen && modelQuery.trim())
     sec.classList.toggle('collapsed', folded)
@@ -972,9 +957,10 @@ function settle() {
   if (searchOpen && modelQuery.trim()) for (const sec of $('p-list').querySelectorAll('section[data-provider]')) FOLDED.delete(sec.dataset.provider)
   searchOpen = false
 }
-const fold = (name) => (settle(), FOLDED.has(name) ? FOLDED.delete(name) : FOLDED.add(name), applyFolds())
-$('fold-all').onclick = () => (settle(), S?.providers.forEach((p) => FOLDED.add(p.name)), applyFolds())
-$('unfold-all').onclick = () => (settle(), FOLDED.clear(), applyFolds())
+const folds = () => (applyFolds(), savePref('folded', [...FOLDED])) // a fold changed: shown and kept
+const fold = (name) => (settle(), FOLDED.has(name) ? FOLDED.delete(name) : FOLDED.add(name), folds())
+$('fold-all').onclick = () => (settle(), S?.providers.forEach((p) => FOLDED.add(p.name)), folds())
+$('unfold-all').onclick = () => (settle(), FOLDED.clear(), folds())
 // every model shown on the left (the search's matches, when searching) added to the end of your list
 $('add-all').onclick = () => {
   if (!S) return
@@ -1491,21 +1477,9 @@ const COLS = {
   output: { label: 'Out $/M', how: 'cheap', get: (t) => t.price?.output ?? null },
   works: { label: 'Works?', get: (t) => { const r = TRIES[keyOf(t)]; return !r || r.going ? 1 : r.ok ? 2 : 0 } }, // tested and working first; not tested; not working
 }
-let SORT = (() => {
-  try {
-    return JSON.parse(localStorage.getItem('heart.sort') ?? '[]').filter((x) => COLS[x?.key])
-  } catch {
-    return []
-  }
-})()
-// your ranking of the providers, best first, kept in this browser; a provider not ranked yet comes after, A to Z
-let RANK = (() => {
-  try {
-    return JSON.parse(localStorage.getItem('heart.rank') ?? '[]').filter((x) => typeof x === 'string')
-  } catch {
-    return []
-  }
-})()
+let SORT = []
+// your ranking of the providers, best first (kept: savePref); a provider not ranked yet comes after, A to Z
+let RANK = []
 const ranked = () => {
   const names = [...new Set(S.order.map((t) => t.provider))]
   return [...RANK.filter((n) => names.includes(n)), ...names.filter((n) => !RANK.includes(n)).sort(byName)]
@@ -1530,18 +1504,14 @@ $('pr-cancel').onclick = () => $('pr').close()
 $('pr-save').onclick = () => {
   const list = [...$('pr-list').children].map((li) => li.textContent)
   RANK = [...list, ...RANK.filter((n) => !list.includes(n))] // providers not in your list now keep their place for later
-  try {
-    localStorage.setItem('heart.rank', JSON.stringify(RANK))
-  } catch {}
+  savePref('rank', RANK)
   $('pr').close()
   setSort(SORT.some((x) => x.key === 'provider') ? SORT : [{ key: 'provider', dir: 'up' }, ...SORT]) // sorted by it now
 }
 const firstDir = (key) => (COLS[key].how ? 'up' : 'down') // up: A to Z, low to high
 function setSort(next) {
   SORT = next
-  try {
-    localStorage.setItem('heart.sort', JSON.stringify(SORT))
-  } catch {}
+  savePref('sort', SORT)
   drawMine(S)
 }
 // a column's header: first click adds it (after those already sorted by), the second flips it, the third drops it
@@ -1594,13 +1564,10 @@ function drawMine(s) {
       what === 'works' ? null : h('button', { type: 'button', className: 'again', textContent: '↻', title: `Test these ${n} again`, 'aria-label': `test the ${what} ones again`, disabled: testingAll, onclick: () => tryAll(models) }))
   })
 
-  const same = view.every((t, i) => t === order[i])
   // the order you see, saved as yours; the sort then goes (your own order from here on: drag on)
   const keep = (list, moved) => {
     SORT = []
-    try {
-      localStorage.setItem('heart.sort', '[]')
-    } catch {}
+    savePref('sort', SORT)
     return saveOrder(list, list[0] !== order[0] ? `${moved ? '' : 'order saved: '}HeartCode now uses ${list[0].provider} · ${list[0].model}` : 'order saved')
   }
   // a row dragged (in the order shown, sorted or not)
@@ -1636,9 +1603,10 @@ function drawMine(s) {
       PICKED.size ? h('button', { className: 'small danger', textContent: `Remove ${PICKED.size} selected`, onclick: removePicked }) : null,
       PICKED.size ? h('button', { className: 'small', textContent: `Test ${PICKED.size} selected`, disabled: testingAll, onclick: () => tryAll(order.filter((t) => PICKED.has(keyOf(t)))) }) : null,
       PICKED.size ? h('button', { className: 'small', textContent: 'Clear selection', onclick: () => (PICKED.clear(), drawMine(S)) }) : null,
+      PICKED.size ? h('button', { className: 'small', textContent: 'Invert selection', title: 'tick the ones not ticked, untick the ones ticked', onclick: () => (view.forEach((t) => (PICKED.has(keyOf(t)) ? PICKED.delete(keyOf(t)) : PICKED.add(keyOf(t)))), (lastPicked = null), drawMine(S)) }) : null,
       order.some((t) => t.provider !== order[0].provider) ? h('button', { className: 'small', textContent: 'Provider ranking', title: 'drag your providers into order; the Provider column sorts by it', onclick: openRanking }) : null,
       SORT.length ? h('button', { className: 'small', textContent: 'Clear sort', onclick: () => setSort([]) }) : null,
-      SORT.length ? h('button', { className: 'small primary', textContent: same ? 'This is your order' : 'Use this order', disabled: same, onclick: () => keep(view) }) : null,
+      order.length > 1 ? h('button', { className: 'small primary', textContent: 'Save order', title: 'save the order shown as your model order (#1 first)', onclick: () => keep(view) }) : null,
       order.length ? h('button', { className: 'small', textContent: 'Refresh from models.dev', title: 'ask models.dev again what each model can do: context, tools, thinking, images, price', onclick: () => lookUp() }) : null,
       order.length ? h('button', { className: 'small', textContent: 'Test all', disabled: testingAll, title: 'send each a short message to see which really answer: every provider at once, a few from each (one at a time per 100 models)', onclick: () => tryAll() }) : null),
     order.length
@@ -1992,9 +1960,20 @@ function drawFiles(s) {
 }
 
 function render(s) {
+  if (s.prefs) {
+    // the page's choices, as kept (also changed on another page: shown here too)
+    const p = s.prefs
+    catSort = p.catSort === 'price' ? 'price' : 'name'
+    $('m-sort').value = catSort
+    FOLDED.clear()
+    for (const n of Array.isArray(p.folded) ? p.folded : []) FOLDED.add(n)
+    SORT = Array.isArray(p.sort) ? p.sort.filter((x) => COLS[x?.key]) : []
+    RANK = Array.isArray(p.rank) ? p.rank.filter((x) => typeof x === 'string') : []
+  }
   S = s
   for (const [key, r] of Object.entries(TRIES)) if (!r.going && placeOf(...key.split(/\/(.*)/s)) === undefined) delete TRIES[key] // off your list: its result too
   drawProviders(s)
+  applyFolds()
   drawMine(s)
   drawUsing(s)
   drawGeneral(s)
@@ -2012,6 +1991,7 @@ if (!token) put($('page-providers'), h('h1', { textContent: 'Open the link Heart
 else {
   job('state', { where: ['page'], what: 'Loading your settings', detail: 'providers, models, logging, prompts, MCP servers, skills' })
   api('/api/state').then(render, (e) => toast(e.message, true)).finally(() => job('state'))
+
     .then(() => api('/api/tests', {}))
     .then(({ results, run }) => (Object.assign(TRIES, results), showRun(run)), (e) => toast(`the tests so far: ${e.message}`, true)) // and one going
   job('requests', { where: ['requests'], what: 'Loading the request log', detail: 'every request HeartCode logged' })
@@ -2021,6 +2001,15 @@ else {
 if (token) {
   const events = new EventSource(`/api/events?t=${token}`)
   // a request logged: at the top of the list, nothing else redrawn
+  // the settings changed (another HeartCode or page, a hand): shown at once; while a dialog is open,
+  // when it closes (what's typed in it stays)
+  let later = null
+  events.addEventListener('state', (e) => {
+    const s = JSON.parse(e.data)
+    if (!document.querySelector('dialog[open]')) return render(s)
+    later = s
+  })
+  for (const d of document.querySelectorAll('dialog')) d.addEventListener('close', () => later && !document.querySelector('dialog[open]') && (render(later), (later = null)))
   events.addEventListener('request', (e) => {
     const r = JSON.parse(e.data)
     if (page() === 'logging') drawDisk() // the logs grew
