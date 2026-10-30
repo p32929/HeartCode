@@ -2,6 +2,13 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.16 (2026-10-30)
+
+- Switch a provider off (and on again) on the settings page, without deleting it: its key and its
+  models in your list stay, but `auto` skips them, also in a HeartCode running already. `-m
+  provider/model` still runs one of its models. `heart providers` says which are off; `heart models
+  --all --json` gives them `off: true`.
+
 ## 0.1.15 (2026-10-30)
 
 - Settings page, Providers & models: Test on each model sends it "Hello" and shows what was sent
