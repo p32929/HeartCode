@@ -669,6 +669,9 @@ async function runNative(s, task, images, signal) {
     const stream = strat.toolsStream
     // A long tool call (a whole file) streams in silently: say what's being written.
     const onToolDelta = (name, args) => ui.spinner(`${name === 'run_command' ? 'preparing a command' : `writing ${/"path"\s*:\s*"([^"]+)"/.exec(args)?.[1] ?? name}`} · ${args.length >= 1000 ? `${(args.length / 1000).toFixed(1)}k` : args.length} chars`)
+    // the prompts or HEARTCODE.md changed meanwhile (applySettings): the system prompt again, now
+    if (s.refreshSystem && (s.messages[0]?.role === 'system' || strat.mergeSystem)) s.messages[0] = { ...s.messages[0], content: SYSTEM(s) }
+    s.refreshSystem = false
     const res = await client.chat({ messages: s.messages, tools, stream }, { signal, onToken: out.text, onReasoning: out.think, onToolDelta })
     ui.stopSpin()
     if (!stream) {

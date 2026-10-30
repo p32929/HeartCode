@@ -112,14 +112,60 @@ export function loadConfig(flags = {}) {
   }
   const model = flags.model || process.env.HEART_MODEL
   if (model && !isAuto(model)) Object.assign(cfg, parseModel(model, cfg.providers, cfg.provider), { fixed: true })
+  synced(cfg, readJson(CONFIG_FILE, {}))
   return cfg
 }
 
-export function saveConfig(cfg) {
+// What a cfg stands for in config.json (the run-only provider and model left out).
+function saved(cfg) {
   const providers = byName(cfg.providers)
   if (cfg.adhoc) delete providers[cfg.adhoc]
   const keep = cfg.adhoc && cfg.provider === cfg.adhoc ? fromFile() : null // the run-only provider isn't saved as current
   const out = { providers, provider: keep ? keep.provider : cfg.provider, model: keep ? keep.model : cfg.model }
   for (const k of SETTINGS) if (cfg[k] !== undefined) out[k] = cfg[k]
-  writeJson(CONFIG_FILE, out)
+  return JSON.parse(JSON.stringify(out))
+}
+
+// Several HeartCodes (and the settings page in each) keep a copy of the settings. A save writes only
+// what this one changed since it last read or wrote the file, onto the file as it is now, and
+// takeIn brings in what the others changed: no copy undoes another's change with an old value.
+// file: config.json as last read or written here; mine: what this run's cfg stood for then (a -m
+// model for this run is no change of its own, so a save doesn't write it as #1).
+let file = null
+let mine = null
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+const keysOf = (...objs) => [...new Set(objs.flatMap((o) => Object.keys(o ?? {})))]
+const synced = (cfg, disk) => ((file = disk), (mine = saved(cfg)))
+
+export function saveConfig(cfg) {
+  const out = saved(cfg)
+  const was = mine ?? {}
+  const disk = readJson(CONFIG_FILE, {})
+  for (const k of keysOf(out, was)) {
+    if (k === 'providers') {
+      // provider by provider: a key changed here and a provider added elsewhere both stay
+      const ps = { ...disk.providers }
+      for (const n of keysOf(out.providers, was.providers)) if (!same(out.providers?.[n], was.providers?.[n])) out.providers?.[n] === undefined ? delete ps[n] : (ps[n] = out.providers[n])
+      disk.providers = byName(ps)
+    } else if (!same(out[k], was[k])) out[k] === undefined ? delete disk[k] : (disk[k] = out[k])
+  }
+  writeJson(CONFIG_FILE, disk)
+  synced(cfg, disk)
+}
+
+// What others changed in config.json since this run last read or wrote it, into cfg (the run-only
+// provider stays). The keys that changed: a running HeartCode applies them (the model list…).
+// what a changed key of config.json means to a running HeartCode (applySettings)
+export const whatOf = (k) => (['provider', 'model', 'providers'].includes(k) ? 'model' : k === 'rotation' ? 'setting:rotation' : `setting:${k}`)
+export function takeIn(cfg) {
+  const disk = readJson(CONFIG_FILE, null)
+  if (!disk || same(disk, file)) return []
+  const keys = keysOf(disk, file).filter((k) => (k === 'providers' || k === 'provider' || k === 'model' || SETTINGS.includes(k)) && !same(disk[k], file?.[k]))
+  for (const k of keys) {
+    const value = k === 'providers' ? { ...byName(disk.providers), ...(cfg.adhoc && { [cfg.adhoc]: cfg.providers[cfg.adhoc] }) } : disk[k]
+    value === undefined ? delete cfg[k] : (cfg[k] = value)
+  }
+  file = disk
+  mine = saved(cfg)
+  return keys
 }

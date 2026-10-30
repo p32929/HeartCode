@@ -2,7 +2,7 @@
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { Client } from '../src/client.js'
-import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, AUTO_MODEL, isAuto, parseModel, VERSION } from '../src/config.js'
+import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, AUTO_MODEL, isAuto, parseModel, takeIn, whatOf, VERSION } from '../src/config.js'
 import { probe, loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
 import { learnFromUsage, LIMIT_MS } from '../src/context.js'
 import { Session, transcript } from '../src/agent.js'
@@ -26,6 +26,7 @@ import { createWorktree, worktreeState, removeWorktree } from '../src/worktree.j
 import { runAcp } from '../src/acp.js'
 import { Tabs } from '../src/tabs.js'
 import { startSettings } from '../src/settings.js'
+import { loadHooks } from '../src/hooks.js'
 import { RESETS, reset, resetPaths, resetCode } from '../src/reset.js'
 
 const LOCAL_SERVERS = ['http://localhost:11434/v1', 'http://localhost:1234/v1', 'http://localhost:8080/v1']
@@ -55,8 +56,9 @@ ${c.bold('options')}
       --ask              ask before every edit and command, this run
       --hide-thinking    collapse the model's thinking to one line
   -C, --cwd <dir>        project folder (default: current folder)
-      --temp             a throwaway settings folder for this run (your providers, model tests
-                         and prices copied in; deleted after); ~/.heart isn't touched
+      --temp             a throwaway settings folder (your providers, model tests and prices
+                         copied in), shared by the --temp runs going on at once and deleted
+                         after the last; ~/.heart isn't touched
       --context <n>      context window size in tokens
       --force            re-run the probe
       --save             keep the given -u/-m/--api-key/... in ${CONFIG_FILE}
@@ -179,12 +181,15 @@ class App {
     return mcp
   }
 
-  // After a skill or MCP server was saved or deleted (by the director or /import).
-  reload(kind) {
+  // After a skill or MCP server was saved or deleted (the settings page, the director, /import):
+  // from the next tool call. The old servers are stopped once the message in progress is done
+  // (busy), so a call to one of them finishes.
+  reload(kind, busy = false) {
     if (kind === 'skill') this.skills = loadSkills(this.root)
     if (kind === 'mcp') {
-      this.mcp.dispose()
+      const old = this.mcp
       this.mcp = this.newMcp()
+      busy ? this.later.push(() => old.dispose()) : old.dispose()
     }
     if (this.s) Object.assign(this.s, { skills: this.skills, mcp: this.mcp })
   }
@@ -852,13 +857,13 @@ function openBrowser(url) {
   spawnSync(cmd, args, { stdio: 'ignore' })
 }
 
-// A change on the settings page (in cfg, saved), brought into every open tab and run (also -p and
-// ACP): right away, the model list too (the running task's next request goes to the new #1); MCP
-// servers and skills after the reply in progress.
+// A change of the settings (the settings page, another HeartCode on the same folder, a hand), brought
+// into every open tab and run (also -p and ACP) right away: the running task's next request has it
+// (the model list's #1, the prompts, hooks, skills, MCP servers…).
 function applySettings(apps, cfg, what) {
   const before = themeCodes()
   if (what === 'theme' || what === 'setting:theme') setTheme(cfg.theme)
-  if (what === 'prompts') reloadPrompts() // from each tab's next message
+  if (what === 'prompts') reloadPrompts()
   if (['setting:log', 'setting:logRequests', 'setting:logDetail'].includes(what)) useRequestLog(cfg) // the run's log and the requests', on or off now
   if (what === 'setting:logDays') pruneLogs(logDays(cfg))
   settingsSeen(what) // the watcher (watchSettings) mustn't take it in a second time
@@ -888,7 +893,9 @@ function applySettings(apps, cfg, what) {
     // the window size, or a model set up or measured on the page: the model in use takes it again
     // from its profile now (it saves its profile as it learns, so it mustn't keep the old one)
     if ((what === 'setting:context' || what === 'profile') && app.s) app.s.client.onUse?.({ provider: app.s.client.provider, model: app.s.client.model })
-    if (what === 'mcp' || what === 'skill') now(() => app.reload(what))
+    if (what === 'mcp' || what === 'skill') app.reload(what, busy)
+    if (what === 'prompts' && app.s) app.s.refreshSystem = true // the system prompt, again before the next request
+    if (what === 'hooks' && app.s && app.s.hooks !== false) app.s.hooks = loadHooks(app.root)
     if (what === 'keys') ui.keys = { ...DEFAULT_KEYS, ...loadKeys() }
     if (what === 'theme' || what === 'setting:theme') ui.recolor(before, themeCodes())
     else ui.render()
@@ -897,10 +904,10 @@ function applySettings(apps, cfg, what) {
 }
 
 // Changes saved by another HeartCode, or \`heart settings\` in another terminal, while this one runs:
-// taken in as the page's own are (applySettings). config.json is compared key by key with what it
-// was (so a model given for this run with -m stays unless the list's #1 changes); the other files
-// by their size and time, and only when this run didn't just apply them itself.
-const WATCHED = { 'mcp.json': 'mcp', 'keybindings.json': 'keys', 'theme.json': 'theme', models: 'profile', prompts: 'prompts', skills: 'skill' }
+// taken in as the page's own are (applySettings). config.json: the keys others changed (takeIn; a
+// model given for this run with -m stays unless the list's #1 changes); the other files by their
+// size and time, and only when this run didn't just apply them itself.
+const WATCHED = { 'mcp.json': 'mcp', 'hooks.json': 'hooks', 'keybindings.json': 'keys', 'theme.json': 'theme', models: 'profile', prompts: 'prompts', 'HEARTCODE.md': 'prompts', skills: 'skill' }
 const seenStamp = {}
 const stampOf = (p) => {
   try {
@@ -915,21 +922,9 @@ function settingsSeen(what) {
   for (const [name, w] of Object.entries(WATCHED)) if (w === what || (what === 'setting:theme' && w === 'theme')) seenStamp[name] = stampOf(path.join(HOME, name))
 }
 function watchSettings(apps, cfg) {
-  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
-  let last = readJson(CONFIG_FILE, {})
   for (const name of Object.keys(WATCHED)) seenStamp[name] = stampOf(path.join(HOME, name))
   const configChanged = () => {
-    const now = readJson(CONFIG_FILE, null)
-    if (!now) return
-    const keys = [...new Set([...Object.keys(now), ...Object.keys(last)])].filter((k) => !same(now[k], last[k]))
-    last = now
-    const whats = new Set()
-    for (const k of keys) {
-      const value = k === 'providers' ? { ...now.providers, ...(cfg.adhoc && { [cfg.adhoc]: cfg.providers[cfg.adhoc] }) } : now[k]
-      if (same(value, cfg[k])) continue
-      value === undefined ? delete cfg[k] : (cfg[k] = value)
-      whats.add(['provider', 'model', 'providers'].includes(k) ? 'model' : k === 'rotation' ? 'setting:rotation' : `setting:${k}`)
-    }
+    const whats = new Set(takeIn(cfg).map(whatOf))
     for (const what of whats) applySettings(apps(), cfg, what)
     if (whats.size) log('settings', `taken in from config.json: ${[...whats].join(', ')}`)
   }

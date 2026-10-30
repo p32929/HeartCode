@@ -77,9 +77,10 @@ image, one that can't call tools gets the tool calls as text.
 
 `--provider <name>` and `-u <url>` (a server for this run) also mean one model, alone.
 
-A run picks up settings the user changes meanwhile (`heart settings`, or `~/.heart` by hand)
-without being restarted: a new model order from its next request, MCP servers and skills from its
-next message.
+A run picks up settings the user changes meanwhile (`heart settings`, another HeartCode, or
+`~/.heart` by hand) without being restarted, from its next request: the model order, prompts,
+hooks, skills, MCP servers. `--temp` runs share one throwaway folder, so a change in one reaches the
+other `--temp` runs going on, never the real ones.
 
 `heart` is installed by `npm start` in the HeartCode folder. `heartcode` is the same command.
 Needs Node.js 20 or newer. No providers? See "Setting up a model" below.
@@ -133,7 +134,7 @@ can't switch the model you chose.
 | Everything (edits and commands) | `--permission-mode all` (the default unless the user set another) |
 | Changes kept apart from the user's files | `--worktree=<name>` (in a git repo): it works in `.heartcode/worktrees/<name>` on the branch `heartcode/<name>`; kept if anything changed (merge it from there), removed if nothing did |
 | A cap on how long it works | `--max-turns 30` (model steps), `--max-retries 3` (a failing provider) |
-| Nothing written to the user's `~/.heart` (sessions, logs, settings) | `--temp` |
+| Nothing written to the user's `~/.heart` (sessions, logs, settings) | `--temp` (a throwaway copy, shared by the `--temp` runs going on at once) |
 
 Tool names: HeartCode's own (`read_file`, `edit_file`, `write_file`, `run_command`, `search`,
 `list_files`, `web_fetch`, `web_search`…) or Claude Code's (`Read`, `Edit`, `Write`, `Bash`,

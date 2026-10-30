@@ -4,9 +4,10 @@
 //   heart .                   this folder
 //   heart ~/code/my-app       that folder (a folder: a file is an error)
 //   heart ~/code/my-app "fix the failing test" -m …   then anything heartcode takes (heart --help)
-//   heart --temp …            a throwaway ~/.heart: only your config.json (providers, keys), the
-//                             models' test results and prices copied in; deleted when HeartCode
-//                             quits; your own is never written to
+//   heart --temp …            a throwaway ~/.heart, shared by the --temp runs going on at once:
+//                             your config.json (providers, keys), the models' test results and
+//                             prices copied in; deleted when the last of them quits; your own is
+//                             never written to
 // Logs, when they're switched on (the settings page: Logging): each run's log in
 // ~/.heart/logs/runs/<day-month-year-hour-min-sec>/, a file per tab ("log": true in config.json);
 // each request to a model in ~/.heart/logs/requests/<same>/, a file per request ("logRequests").
@@ -30,15 +31,36 @@ const stamp = (() => {
   return `${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()}-${d.getHours()}-${d.getMinutes()}-${d.getSeconds()}`.replace(/\b(\d)\b/g, '0$1')
 })()
 
-// --temp: HeartCode's folder is a new one in the system's temp folder
+// --temp: HeartCode's folder is one in the system's temp folder, shared by every --temp run going
+// on at the same time (a setting changed in one reaches the others, as ~/.heart's do for the real
+// ones). The first one makes it, the last one to quit deletes it. Each run's pid is a file in
+// .runs/ (a run that crashed leaves one: its process is gone, so it doesn't count).
 const temp = args.includes('--temp')
 if (temp) {
   args.splice(args.indexOf('--temp'), 1)
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'heart-temp-'))
-  // your providers and keys; what HeartCode learned about each model and prices (or it tests them again)
-  for (const f of ['config.json', 'models', 'prices.json']) if (fs.existsSync(path.join(realHome, f))) fs.cpSync(path.join(realHome, f), path.join(dir, f), { recursive: true })
+  const dir = path.join(os.tmpdir(), `heart-temp-${os.userInfo().username}`)
+  const runs = path.join(dir, '.runs')
+  const alive = (pid) => {
+    try {
+      return process.kill(Number(pid), 0), true
+    } catch (e) {
+      return e.code === 'EPERM'
+    }
+  }
+  const others = () => (fs.existsSync(runs) ? fs.readdirSync(runs).filter((pid) => Number(pid) !== process.pid && (alive(pid) || (fs.rmSync(path.join(runs, pid), { force: true }), false))) : [])
+  if (!others().length) {
+    fs.rmSync(dir, { recursive: true, force: true }) // left by a crashed run: from your settings again
+    fs.mkdirSync(runs, { recursive: true })
+    // your providers and keys; what HeartCode learned about each model and prices (or it tests them again)
+    for (const f of ['config.json', 'models', 'prices.json']) if (fs.existsSync(path.join(realHome, f))) fs.cpSync(path.join(realHome, f), path.join(dir, f), { recursive: true })
+  }
+  fs.writeFileSync(path.join(runs, String(process.pid)), '')
   process.env.HEART_HOME = dir
-  process.on('exit', () => fs.rmSync(dir, { recursive: true, force: true }))
+  process.on('exit', () => {
+    fs.rmSync(path.join(runs, String(process.pid)), { force: true })
+    if (!others().length) fs.rmSync(dir, { recursive: true, force: true })
+  })
+  process.once('SIGINT', () => process.exit(130)) // Ctrl+C (heart settings, -p): through 'exit', so the folder goes too
 }
 
 // a folder first: HeartCode opens it (subcommands and options go straight through)

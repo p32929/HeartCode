@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import os from 'node:os'
-import { HOME, saveConfig, readJson, writeJson, byName } from './config.js'
+import { HOME, saveConfig, readJson, writeJson, byName, takeIn, whatOf } from './config.js'
 import { DEFAULT_SERVERS } from './mcp.js'
 import { sections, BUILTIN_PROMPTS } from './prompts.js'
 import { Client } from './client.js'
@@ -102,6 +102,10 @@ const skillsDir = () => path.join(HOME, 'skills')
 // what the provider said (names, sizes, prices; not what's known from models.dev or tests, which
 // changes). Asked for again when its list is switched on or off, or the provider is changed.
 const LISTS = path.join(HOME, 'model-lists.json')
+// The page's own choices (sorts, folded providers, the provider ranking): kept here, not in the
+// browser, whose storage is per address (a new port each time)
+const PREFS = path.join(HOME, 'settings-page.json')
+const PREF_KEYS = ['catSort', 'folded', 'sort', 'rank']
 function forgetList(...names) {
   const all = readJson(LISTS, {})
   if (!names.some((n) => n in all)) return
@@ -342,11 +346,17 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
     mcp: mcpServers(),
     prompts: prompts(),
     home: tilde(HOME),
+    prefs: readJson(PREFS, {}),
   })
 
   const routes = {
     'GET /api/state': () => state(),
     'GET /api/log-size': () => logSize(),
+    'POST /api/prefs': ({ key, value }) => {
+      if (!PREF_KEYS.includes(key)) throw new Error(`no such choice: ${key}`)
+      writeJson(PREFS, { ...readJson(PREFS, {}), [key]: value })
+      return {}
+    },
     'POST /api/clear-logs': () => ({ gone: clearLogs(), size: logSize() }),
     'POST /api/provider': async ({ name, baseUrl, apiKey, keepKey, was }) => {
       name = safeName(name)
@@ -680,6 +690,29 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
     },
   }
 
+  // Settings changed by anyone else (another HeartCode or page on this folder, a hand): taken in, and
+  // every open page shown them at once (an event: the whole state, when it's different)
+  const SETTINGS_FILES = ['config.json', 'settings-page.json', 'mcp.json', 'hooks.json', 'keybindings.json', 'theme.json', 'format.json', 'HEARTCODE.md', 'prompts', 'skills']
+  let shown = ''
+  const pushState = () => {
+    for (const what of new Set(takeIn(cfg).map(whatOf))) changed(what)
+    const now = state()
+    const text = JSON.stringify(now)
+    if (text !== shown && listeners.size) emit('state', now)
+    shown = text
+  }
+  let pending = null
+  try {
+    const w = fs.watch(HOME, { recursive: true }, (_, f) => {
+      if (!SETTINGS_FILES.includes(String(f ?? '').split(path.sep)[0])) return
+      clearTimeout(pending)
+      pending = setTimeout(pushState, 150) // a file written in parts, several at once: one look
+    })
+    w.on('error', () => {})
+    w.unref()
+  } catch (e) {
+    log('web', `can't watch ${HOME}: ${e.message}`)
+  }
   const server = http.createServer(async (req, res) => {
     const send = (code, body, type = 'application/json') => {
       res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' })
@@ -705,6 +738,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
       }
       const route = routes[`${req.method} ${url.pathname}`]
       if (!route) return send(404, { error: 'not found' })
+      // what another HeartCode (or a hand) changed meanwhile, first: shown, and changed from, not undone
+      for (const what of new Set(takeIn(cfg).map(whatOf))) changed(what)
       let raw = ''
       for await (const ch of req) {
         raw += ch
