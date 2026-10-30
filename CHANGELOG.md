@@ -2,6 +2,17 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.12 (2026-10-30)
+
+- `auto` is the name for your model list (#1, then the next when one fails); `default` still works.
+- Models are written `provider/model` (`-m groq/openai/gpt-oss-120b`); the old `"provider model"` still works.
+- `heart models` prints what `-m` takes, one per line (`auto` first); `--json` gives an `id` for each.
+- `--fallback-model <provider/model>`, as in `claude -p`: tried after the `-m` model when it fails.
+- Settings changed while HeartCode runs (also `-p`, stream-json and editors over ACP) are taken in
+  without a restart: a new model order from the running task's next request.
+- Settings page: adding a provider, an MCP server or a skill opens a dialog; every dialog is 70% of
+  the screen wide. Your models can be sorted by a provider ranking you drag into order.
+
 ## 0.1.11 (2026-10-30)
 
 - A changelog (this file) in place of the old TODO list.
