@@ -228,11 +228,15 @@
   .olist .test button { flex: none; }
   .olist .test.ok { color: var(--ok); }
   .olist .test.warn { color: var(--accent); }
-  dialog#ms { width: min(480px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--text); padding: 22px 24px; }
-  dialog#ms::backdrop { background: rgba(0, 0, 0, .55); }
-  dialog#ms h2 { margin: 0 0 6px; font-family: var(--mono); font-size: 15px; overflow-wrap: anywhere; }
+  dialog { width: 70vw; max-width: none; max-height: calc(100vh - 32px); overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--text); padding: 22px 24px; }
+  dialog::backdrop { background: rgba(0, 0, 0, .55); }
+  dialog h2 { margin: 0 0 6px; font-family: var(--mono); font-size: 15px; overflow-wrap: anywhere; }
   dialog#ms .opt:last-of-type { border-bottom: 0; }
-  dialog#ms .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  #pr-list { list-style: none; margin: 12px 0 0; padding: 0; counter-reset: rank; }
+  #pr-list li { counter-increment: rank; padding: 9px 12px; margin-bottom: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); cursor: grab; user-select: none; }
+  #pr-list li::before { content: counter(rank) ".  ⋮⋮  "; color: var(--muted); }
+  #pr-list li.dragging { opacity: .4; }
+  dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
   .olist .test.failed { color: var(--err); }
   .olist .test.testing, .olist .test.waiting { color: var(--accent); }
   .olist .test button { padding: 0 7px; font-size: 11px; }
@@ -431,19 +435,6 @@
       </div>
       <div class="steps" id="steps"></div>
       <div class="stack">
-          <div class="card" id="p-form" hidden>
-            <h2 id="p-title">Add a provider</h2>
-            <p class="sub">Pick one to fill in its address, or type any OpenAI-compatible API below.</p>
-            <div class="presets" id="presets"></div>
-            <div class="row" style="margin-top:6px">
-              <div class="grow"><label class="f" for="p-name">Name</label><input type="text" id="p-name" placeholder="openrouter, groq, work…"></div>
-              <div class="grow" style="flex:2"><label class="f" for="p-url">Base URL</label><input type="text" id="p-url" placeholder="https://openrouter.ai/api/v1"></div>
-            </div>
-            <label class="f" for="p-key">API key <span class="muted" id="p-keynote" style="font-weight:normal"></span></label>
-            <input type="password" id="p-key" autocomplete="off" placeholder="paste it here (none for a server on this machine, like Ollama)">
-            <div class="hint">Kept in config.json on this machine. This page only shows its first and last characters.</div>
-            <div class="actions"><button class="primary" id="p-save">Add provider</button><button class="ghost" id="p-cancel">Cancel</button></div>
-          </div>
           <div class="work" id="p-work" hidden>
             <div class="card catalog">
               <div class="cat-top">
@@ -565,20 +556,8 @@
 
     <!-- MCP servers -->
     <section class="page" id="page-mcp">
-      <div class="head"><div><h1>MCP servers</h1><p class="lead">Programs that give the model more tools: a browser, a database, your issue tracker. Off: HeartCode doesn't start it or offer it to the model.</p></div></div>
+      <div class="head"><div><h1>MCP servers</h1><p class="lead">Programs that give the model more tools: a browser, a database, your issue tracker. Off: HeartCode doesn't start it or offer it to the model.</p></div><button class="primary" id="c-open">+ Add a server</button></div>
       <div class="stack">
-        <div class="card">
-          <h2>Add a server</h2>
-          <p class="sub">The command that starts it on this machine, or the URL of a remote one (a sign-in page opens if it needs one).</p>
-          <div class="row">
-            <div style="width:200px"><label class="f" for="c-name">Name</label><input type="text" id="c-name" placeholder="github"></div>
-            <div><label class="f">Kind</label><div class="seg" id="c-kind">
-              <label class="on"><input type="radio" name="c-kind" value="command" checked>Command</label><label><input type="radio" name="c-kind" value="url">URL</label>
-            </div></div>
-            <div class="grow" style="flex:3"><label class="f" for="c-what" id="c-what-label">Command</label><input type="text" id="c-what" placeholder="npx -y @modelcontextprotocol/server-github"></div>
-            <button class="primary" id="c-add">Add server</button>
-          </div>
-        </div>
         <div class="card" id="c-list"></div>
         <details class="card" id="c-raw"><summary style="cursor:pointer;font-weight:600">Edit mcp.json directly</summary><p class="sub" style="margin-top:10px">For what the form doesn't have: environment variables (<span class="mono">"env"</span>), headers, and so on.</p><div id="c-file"></div></details>
       </div>
@@ -615,6 +594,40 @@
     <label class="opt"><div class="t"><b>Images</b><span>Reads screenshots and pictures you send.</span></div><span class="sw"><input type="checkbox" id="ms-images"><i></i></span></label>
     <label class="opt"><div class="t"><b>Streaming</b><span>Its reply shows as it's written. Off: all at once at the end.</span></div><span class="sw"><input type="checkbox" id="ms-stream"><i></i></span></label>
     <div class="actions"><button id="ms-cancel" type="button">Cancel</button><button class="primary" id="ms-save" type="button">Save</button></div>
+  </form>
+</dialog>
+<dialog id="p-form" aria-labelledby="p-title">
+  <h2 id="p-title">Add a provider</h2>
+  <p class="sub">Pick one to fill in its address, or type any OpenAI-compatible API below.</p>
+  <div class="presets" id="presets"></div>
+  <div class="row" style="margin-top:6px">
+    <div class="grow"><label class="f" for="p-name">Name</label><input type="text" id="p-name" placeholder="openrouter, groq, work…"></div>
+    <div class="grow" style="flex:2"><label class="f" for="p-url">Base URL</label><input type="text" id="p-url" placeholder="https://openrouter.ai/api/v1"></div>
+  </div>
+  <label class="f" for="p-key">API key <span class="muted" id="p-keynote" style="font-weight:normal"></span></label>
+  <input type="password" id="p-key" autocomplete="off" placeholder="paste it here (none for a server on this machine, like Ollama)">
+  <div class="hint">Kept in config.json on this machine. This page only shows its first and last characters.</div>
+  <div class="actions"><button id="p-cancel">Cancel</button><button class="primary" id="p-save">Add provider</button></div>
+</dialog>
+<dialog id="c-form" aria-labelledby="c-title">
+  <h2 id="c-title">Add a server</h2>
+  <p class="sub">The command that starts it on this machine, or the URL of a remote one (a sign-in page opens if it needs one).</p>
+  <div class="row">
+    <div style="width:200px"><label class="f" for="c-name">Name</label><input type="text" id="c-name" placeholder="github"></div>
+    <div><label class="f">Kind</label><div class="seg" id="c-kind">
+      <label class="on"><input type="radio" name="c-kind" value="command" checked>Command</label><label><input type="radio" name="c-kind" value="url">URL</label>
+    </div></div>
+    <div class="grow" style="flex:3"><label class="f" for="c-what" id="c-what-label">Command</label><input type="text" id="c-what" placeholder="npx -y @modelcontextprotocol/server-github"></div>
+  </div>
+  <div class="actions"><button id="c-cancel">Cancel</button><button class="primary" id="c-add">Add server</button></div>
+</dialog>
+<dialog id="k-form" aria-labelledby="k-title"></dialog>
+<dialog id="pr" aria-labelledby="pr-title">
+  <form>
+    <h2 id="pr-title">Provider ranking</h2>
+    <p class="sub">Drag the providers into order, best first. Your models are then sorted by it.</p>
+    <ol id="pr-list"></ol>
+    <div class="actions"><button id="pr-cancel" type="button">Cancel</button><button class="primary" id="pr-save" type="button">Save</button></div>
   </form>
 </dialog>
 <div id="toast" role="status"></div>
@@ -766,7 +779,7 @@ const DRAFTS = { prompts: {}, skills: {}, files: {} }
 const SEL = { prompts: 'agent/system', skills: null, files: null }
 function masterDetail(kind, itemsEl, detailEl, groups, draw) {
   const all = groups.flatMap((g) => g.items)
-  if (!all.some((x) => x.id === SEL[kind]) && SEL[kind] !== '+new') SEL[kind] = all[0]?.id ?? null
+  if (!all.some((x) => x.id === SEL[kind])) SEL[kind] = all[0]?.id ?? null
   // the list: built when its items change; otherwise each item is updated in place (the chosen
   // one, a dot for unsaved changes, "yours"), so it stays where you scrolled it
   const inside = (x) => [h('div', { className: 't' }, DRAFTS[kind][x.id] !== undefined ? h('span', { className: 'dot', title: 'not saved' }) : null, x.title, x.badge ?? null), x.sub ? h('div', { className: 'd', textContent: x.sub }) : null]
@@ -787,7 +800,7 @@ function masterDetail(kind, itemsEl, detailEl, groups, draw) {
   }
   itemsEl.closest('.md').classList.toggle('solo', !all.length) // nothing to list: no list column
   itemsEl.closest('.md').classList.toggle('tabs', all.length > 0 && all.length <= 8) // a few: tabs on top
-  put(detailEl, draw(SEL[kind] === '+new' ? '+new' : all.find((x) => x.id === SEL[kind])))
+  put(detailEl, draw(all.find((x) => x.id === SEL[kind])))
   itemsEl.closest('.md').classList.add('fill')
   fillHeight()
 }
@@ -879,10 +892,8 @@ const useModel = (provider, model) => act('/api/model', { provider, model }, `He
 const saveOrder = (list, done, opts = {}) => act('/api/order', { list, ...opts }, done)
 
 let editing = null
-let formOpen = false
 function openForm(p = null) {
   editing = p
-  formOpen = true
   $('p-title').textContent = p ? `Edit ${p.name}` : 'Add a provider'
   $('p-name').value = p?.name ?? ''
   $('p-url').value = p?.baseUrl ?? ''
@@ -891,15 +902,11 @@ function openForm(p = null) {
   $('p-keynote').textContent = p?.key ? `(now ${p.key})` : ''
   $('p-save').textContent = p ? 'Save changes' : 'Add provider'
   drawPresets()
-  drawProviders(S)
-  $('p-form').scrollIntoView({ behavior: 'smooth', block: 'start' })
+  $('p-form').showModal()
   ;(p ? $('p-url') : $('p-name')).focus()
 }
-function closeForm() {
-  editing = null
-  formOpen = false
-  drawProviders(S)
-}
+const closeForm = () => $('p-form').close()
+$('p-form').onclose = () => (editing = null)
 $('p-open').onclick = () => openForm()
 $('p-cancel').onclick = closeForm
 $('p-save').onclick = async () => {
@@ -1183,17 +1190,12 @@ addEventListener('scroll', () => $('tip').classList.remove('show'), true)
 function drawProviders(s) {
   const order = s.order
   const none = !s.providers.length
-  // the steps: always on the page (nothing jumps when one is done), ticked off as you go; with
-  // no provider yet, the form is open (the only way in: no other button)
+  // the steps: always on the page (nothing jumps when one is done), ticked off as you go
   put($('steps'), [
     ['Add a provider', 'the service with your models', s.providers.length ? 'done' : 'now'],
     ['Choose a model', 'click one in the list', order.length ? 'done' : s.providers.length ? 'now' : ''],
     ['Start HeartCode', 'heart, in your project', order.length ? 'now' : ''],
   ].map(([t, d, cls], i) => h('div', { className: 'step ' + cls }, h('span', { className: 'num', textContent: cls === 'done' ? '✓' : i + 1 }), h('div', {}, h('b', { textContent: t }), d))))
-  const showForm = formOpen || none
-  $('p-form').hidden = !showForm
-  $('p-cancel').hidden = none // nothing to go back to
-  $('p-open').hidden = showForm
   $('p-work').hidden = none
   fillHeight()
 
@@ -1479,7 +1481,7 @@ const can = (t) => ({ tools: t.tested ? t.tested.mode === 'tools' : t.known?.too
 // how: text (A to Z first), cheap (lowest first), else most first
 const COLS = {
   model: { label: 'Model', how: 'text', get: (t) => t.model },
-  provider: { label: 'Provider', how: 'text', get: (t) => t.provider },
+  provider: { label: 'Provider', how: 'rank', get: (t) => RANKED.get(t.provider) }, // by your ranking of the providers
   context: { label: 'Context', get: (t) => t.tested?.context ?? t.known?.context ?? 0 },
   abilities: { label: 'Abilities', get: (t) => Object.values(can(t)).filter(Boolean).length },
   tools: { label: 'Tools', get: (t) => can(t).tools },
@@ -1496,6 +1498,44 @@ let SORT = (() => {
     return []
   }
 })()
+// your ranking of the providers, best first, kept in this browser; a provider not ranked yet comes after, A to Z
+let RANK = (() => {
+  try {
+    return JSON.parse(localStorage.getItem('heart.rank') ?? '[]').filter((x) => typeof x === 'string')
+  } catch {
+    return []
+  }
+})()
+const ranked = () => {
+  const names = [...new Set(S.order.map((t) => t.provider))]
+  return [...RANK.filter((n) => names.includes(n)), ...names.filter((n) => !RANK.includes(n)).sort(byName)]
+}
+// the ranking dialog: drag a provider to its place, then Save
+function openRanking() {
+  const list = $('pr-list')
+  let held = null
+  put(list, ranked().map((name) => h('li', { draggable: true, textContent: name })))
+  list.ondragstart = (e) => (held = e.target).classList.add('dragging')
+  list.ondragend = () => held?.classList.remove('dragging')
+  list.ondragover = (e) => {
+    e.preventDefault()
+    const over = e.target.closest('li')
+    if (!held || !over || over === held) return
+    const r = over.getBoundingClientRect()
+    list.insertBefore(held, e.clientY > r.top + r.height / 2 ? over.nextSibling : over)
+  }
+  $('pr').showModal()
+}
+$('pr-cancel').onclick = () => $('pr').close()
+$('pr-save').onclick = () => {
+  const list = [...$('pr-list').children].map((li) => li.textContent)
+  RANK = [...list, ...RANK.filter((n) => !list.includes(n))] // providers not in your list now keep their place for later
+  try {
+    localStorage.setItem('heart.rank', JSON.stringify(RANK))
+  } catch {}
+  $('pr').close()
+  setSort(SORT.some((x) => x.key === 'provider') ? SORT : [{ key: 'provider', dir: 'up' }, ...SORT]) // sorted by it now
+}
 const firstDir = (key) => (COLS[key].how ? 'up' : 'down') // up: A to Z, low to high
 function setSort(next) {
   SORT = next
@@ -1511,7 +1551,9 @@ function clickSort(key) {
   if (at.dir === firstDir(key)) return setSort(SORT.map((x) => (x === at ? { key, dir: at.dir === 'up' ? 'down' : 'up' } : x)))
   setSort(SORT.filter((x) => x !== at))
 }
+let RANKED = new Map() // provider → its place in the ranking, for one sort
 function sorted(order) {
+  RANKED = new Map(ranked().map((n, i) => [n, i]))
   const cmp = (a, b, { key, dir }) => {
     let x = COLS[key].get(a)
     let y = COLS[key].get(b)
@@ -1523,7 +1565,7 @@ function sorted(order) {
   }
   return order.map((t, i) => ({ t, i })).sort((a, b) => SORT.reduce((r, s) => r || cmp(a.t, b.t, s), 0) || a.i - b.i).map((x) => x.t)
 }
-const dirText = (key, dir) => (key === 'works' ? (dir === 'down' ? 'working first' : 'not working first') : COLS[key].how === 'text' ? (dir === 'up' ? 'A→Z' : 'Z→A') : COLS[key].how === 'cheap' ? (dir === 'up' ? 'cheapest first' : 'priciest first') : dir === 'down' ? 'most first' : 'least first')
+const dirText = (key, dir) => (key === 'provider' ? (dir === 'up' ? 'your ranking' : 'your ranking, reversed') : key === 'works' ? (dir === 'down' ? 'working first' : 'not working first') : COLS[key].how === 'text' ? (dir === 'up' ? 'A→Z' : 'Z→A') : COLS[key].how === 'cheap' ? (dir === 'up' ? 'cheapest first' : 'priciest first') : dir === 'down' ? 'most first' : 'least first')
 // The models ticked on the Your models page ("provider/model"), to remove several at once; the last
 // one ticked, so a Shift+click ticks the ones between
 const PICKED = new Set()
@@ -1594,6 +1636,7 @@ function drawMine(s) {
       PICKED.size ? h('button', { className: 'small danger', textContent: `Remove ${PICKED.size} selected`, onclick: removePicked }) : null,
       PICKED.size ? h('button', { className: 'small', textContent: `Test ${PICKED.size} selected`, disabled: testingAll, onclick: () => tryAll(order.filter((t) => PICKED.has(keyOf(t)))) }) : null,
       PICKED.size ? h('button', { className: 'small', textContent: 'Clear selection', onclick: () => (PICKED.clear(), drawMine(S)) }) : null,
+      order.some((t) => t.provider !== order[0].provider) ? h('button', { className: 'small', textContent: 'Provider ranking', title: 'drag your providers into order; the Provider column sorts by it', onclick: openRanking }) : null,
       SORT.length ? h('button', { className: 'small', textContent: 'Clear sort', onclick: () => setSort([]) }) : null,
       SORT.length ? h('button', { className: 'small primary', textContent: same ? 'This is your order' : 'Use this order', disabled: same, onclick: () => keep(view) }) : null,
       order.length ? h('button', { className: 'small', textContent: 'Refresh from models.dev', title: 'ask models.dev again what each model can do: context, tools, thinking, images, price', onclick: () => lookUp() }) : null,
@@ -1845,8 +1888,10 @@ for (const r of document.querySelectorAll('input[name="c-kind"]')) r.onchange = 
 }
 $('c-add').onclick = async () => {
   const r = await act('/api/mcp/add', { name: $('c-name').value, [mcpKind()]: $('c-what').value }, `added ${$('c-name').value.trim()}: it starts from the next message`)
-  if (r) $('c-name').value = $('c-what').value = ''
+  if (r) ($('c-name').value = $('c-what').value = ''), $('c-form').close()
 }
+$('c-open').onclick = () => ($('c-form').showModal(), $('c-name').focus())
+$('c-cancel').onclick = () => $('c-form').close()
 function drawMcp(s) {
   put($('c-list'), h('h2', { textContent: 'Servers' }), h('p', { className: 'sub', textContent: 'Built in, and yours. Switch one off to keep it without using it.' }),
     s.mcp.length ? s.mcp.map((m) => h('div', { className: 'opt' },
@@ -1873,7 +1918,27 @@ function parseSkill(text) {
 }
 const skillText = (k) => `---\n${k.description.trim() ? `description: ${k.description.trim().replace(/\n/g, ' ')}\n` : ''}use: ${k.use}\n${k.extra.map((l) => l + '\n').join('')}---\n\n${k.body.trim()}\n`
 const NEW = { name: '', description: '', use: 'both', extra: [], body: '' }
-$('k-new').onclick = () => ((SEL.skills = '+new'), S && drawSkills(S))
+// a new skill: the form in a dialog (what you typed is kept if you close it)
+function newSkill() {
+  const f = skillForm('+new', NEW, { isNew: true })
+  const first = !S.skills.length
+  put($('k-form'), h('h2', { id: 'k-title', textContent: first ? 'Make your first skill' : 'New skill' }),
+    first ? h('p', { className: 'sub', textContent: 'A skill is a prompt you use again and again, like "review this" or "write the release notes". Skills from Claude Code and others: /import in HeartCode.' }) : null,
+    f.el,
+    h('div', { className: 'actions' },
+      h('button', { textContent: 'Cancel', onclick: () => $('k-form').close() }),
+      h('button', { className: 'primary', textContent: 'Create skill', onclick: async () => {
+        const slug = f.d.name.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
+        if (!f.d.body.trim()) return toast('Write the prompt first', true)
+        const was = SEL.skills
+        SEL.skills = slug // the new one, chosen in the list once it's there
+        if (await saveItem('skills', '+new', '/api/skill', { name: f.d.name, text: skillText(f.d) }, `created /${slug}`)) $('k-form').close()
+        else SEL.skills = was
+      } })))
+  $('k-form').showModal()
+  $('k-form').querySelector('input')?.focus()
+}
+$('k-new').onclick = newSkill
 function skillForm(id, start, { isNew, readOnly }) {
   const d = DRAFTS.skills[id] ?? { ...start, extra: [...start.extra] } // your unsaved changes, else as saved
   const touch = () => (DRAFTS.skills[id] = d) // a change: kept (and dotted in the list) until it's saved
@@ -1891,27 +1956,11 @@ function skillForm(id, start, { isNew, readOnly }) {
   ] }
 }
 function drawSkills(s) {
-  if (!s.skills.length) SEL.skills = '+new' // none yet: the form is the page (one way in, no empty card)
-  $('k-new').hidden = SEL.skills === '+new'
   const mine = s.skills.filter((k) => k.mine)
   const theirs = s.skills.filter((k) => !k.mine)
   const item = (k) => ({ id: k.name, title: '/' + k.name, sub: k.description, k })
   masterDetail('skills', $('k-items'), $('k-detail'), [{ title: mine.length && theirs.length ? 'Yours' : '', items: mine.map(item) }, { title: 'From projects', items: theirs.map(item) }], (x) => {
-    if (x === '+new') {
-      const f = skillForm('+new', NEW, { isNew: true })
-      const first = !s.skills.length
-      return h('div', { className: 'card' }, h('h2', { textContent: first ? 'Make your first skill' : 'New skill' }),
-        first ? h('p', { className: 'sub', textContent: 'A skill is a prompt you use again and again, like "review this" or "write the release notes". Skills from Claude Code and others: /import in HeartCode.' }) : null,
-        f.el,
-        h('div', { className: 'actions' },
-          h('button', { className: 'primary', textContent: 'Create skill', onclick: async () => {
-            const slug = f.d.name.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
-            if (!f.d.body.trim()) return toast('Write the prompt first', true)
-            SEL.skills = slug // the new one, chosen in the list once it's there
-            if (!(await saveItem('skills', '+new', '/api/skill', { name: f.d.name, text: skillText(f.d) }, `created /${slug}`))) SEL.skills = '+new'
-          } }),
-          first ? null : h('button', { className: 'ghost', textContent: 'Cancel', onclick: () => (saved('skills', '+new'), (SEL.skills = null), drawSkills(S)) })))
-    }
+    if (!x) return h('div', { className: 'card' }, h('h2', { textContent: 'No skills yet' }), h('p', { className: 'sub', textContent: 'A skill is a prompt you use again and again, like "review this" or "write the release notes". Make one with + New skill, or bring them from Claude Code and others with /import in HeartCode.' }))
     const k = x.k
     const f = skillForm(k.name, parseSkill(k.text), { readOnly: !k.mine })
     return h('div', { className: 'card' },
