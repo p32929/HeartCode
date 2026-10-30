@@ -188,6 +188,9 @@
   .mwrap .forget { border: 0; background: none; color: var(--faint); padding: 0 12px; }
   .mwrap .try { flex: none; margin-right: 12px; }
   .prov-h .by-name { display: flex; gap: 6px; flex: none; }
+  .prov-h .sw { margin-top: 0; }
+  section.off .rows, section.off .prov-h .who { opacity: .45; }
+  .mtable li.off > :not(.grip, input, button) { opacity: .45; }
   .prov-h .by-name input { width: 200px; height: 28px; padding: 0 8px; font-size: 12.5px; font-family: var(--mono); }
   .prov-h .by-name button, .prov-h > button.small { height: 28px; }
   .hello-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
@@ -735,6 +738,7 @@ const DOING = {
   '/api/provider': 'Checking the address and saving the provider',
   '/api/provider/delete': 'Deleting the provider',
   '/api/provider/list': 'Saving the model list setting',
+  '/api/provider/on': 'Switching the provider',
   '/api/order': 'Saving your models',
   '/api/models-dev': null, // its own strip
 }
@@ -1360,9 +1364,15 @@ const addModel = (provider, id) => {
   const order = S.order
   return order.length ? saveOrder([...order, { provider, model: id }], `${id} added as #${order.length + 1}`) : useModel(provider, id)
 }
+// a provider switched off: its models stay in your list, but HeartCode skips them; the one in use is
+// the first of a provider that's on
+const isOff = (name) => Boolean(S?.providers.find((p) => p.name === name)?.off)
+const inUse = () => S.order.find((t) => !isOff(t.provider))
 function rowTail(provider, id) {
   const at = placeOf(provider, id)
-  return at === 0 ? h('span', { className: 'tag brand', textContent: '#1 in use' }) : at > 0 ? h('span', { className: 'tag brand', textContent: `#${at + 1} fallback` }) : h('span', { className: 'add', textContent: S.order.length ? '+ Add' : 'Use' })
+  if (at >= 0 && isOff(provider)) return h('span', { className: 'tag', textContent: `#${at + 1} · off`, title: `${provider} is switched off: skipped until it's on` })
+  const now = inUse()
+  return now?.provider === provider && now.model === id ? h('span', { className: 'tag brand', textContent: `#${at + 1} in use` }) : at >= 0 ? h('span', { className: 'tag brand', textContent: `#${at + 1} fallback` }) : h('span', { className: 'add', textContent: S.order.length ? '+ Add' : 'Use' })
 }
 // what a listed model can do: as tested or set up, else what models.dev says (one of yours: its
 // profile, also when the provider's list is off)
@@ -1545,13 +1555,17 @@ function buildCatalog(s) {
     }
     if (q && !ids.length) return null // searching: only the providers with a match
     if (freeOnly && !ids.length) return null // free only: the providers with a free one
-    return h('section', { 'data-provider': p.name },
+    return h('section', { 'data-provider': p.name, className: p.off ? 'off' : '' },
       // the header folds it (a click on it, or its arrow; not on its buttons and switch)
       h('div', { className: 'prov-h', onclick: (e) => !e.target.closest('button:not(.fold), input, label, a') && fold(p.name) },
         h('button', { className: 'fold', type: 'button', textContent: '▾', 'aria-label': `fold ${p.name}`, 'aria-expanded': 'true' }),
         ids.length ? h('input', { type: 'checkbox', className: 'pick-all', 'data-provider': p.name, 'aria-label': `select ${p.name}'s models`, title: `select all of ${p.name}'s models shown (or none)`, onchange: (e) => (ids.forEach((id) => (e.target.checked ? pickedOf(p.name).add(id) : pickedOf(p.name).delete(id))), drawPicks()) }) : null,
+        h('label', { className: 'sw', title: p.off ? `switched off: HeartCode skips ${p.name}'s models. Switch it on` : `switch ${p.name} off: HeartCode skips its models (nothing is deleted)` },
+          h('input', { type: 'checkbox', checked: !p.off, 'aria-label': `${p.name} on`, onchange: (e) => act('/api/provider/on', { name: p.name, on: e.target.checked }, e.target.checked ? `${p.name} is on` : `${p.name} is off: HeartCode skips its models`) }),
+          h('i')),
         h('div', { className: 'who' },
           h('span', { className: 'name', textContent: p.name }),
+          p.off ? h('span', { className: 'tag', textContent: 'off' }) : null,
           m.off ? h('span', { className: 'tag', textContent: 'list off', title: "its list isn't loaded: add a model by its name, in the box on the right" }) : m.loading ? h('span', { className: 'tag', textContent: 'loading…' }) : m.error ? h('span', { className: 'tag err', textContent: "can't list its models", title: m.error }) : h('span', { className: 'tag ok', textContent: `${m.list.length} model${m.list.length === 1 ? '' : 's'}` }),
           h('span', { className: 'tag inlist' }),
           h('span', { className: 'meta mono', textContent: p.baseUrl, title: `${p.baseUrl} · key ${p.key || 'none'}` })),
@@ -1759,12 +1773,12 @@ function tableRow(t, at, pick) {
   const c = can(t)
   const ctx = COLS.context.get(t)
   const picked = PICKED.has(keyOf(t))
-  return h('li', { className: 'in' + (picked ? ' picked' : ''), 'data-key': `${t.provider}/${t.model}` },
+  return h('li', { className: 'in' + (picked ? ' picked' : '') + (isOff(t.provider) ? ' off' : ''), 'data-key': `${t.provider}/${t.model}`, title: isOff(t.provider) ? `${t.provider} is switched off: HeartCode skips this model until it's on` : '' },
     h('span', { className: 'grip', textContent: '⋮⋮', 'aria-hidden': 'true' }),
     h('input', { type: 'checkbox', checked: picked, 'aria-label': `select ${t.model}`, title: 'select (Shift: and every row up to the last one selected)', onclick: (e) => (e.preventDefault(), pick(e)) }),
     h('span', { className: 'n', textContent: `#${at + 1}`, title: SORT.length ? 'its place in your order now' : '' }),
     h('span', { className: 'm', textContent: t.model, title: t.model }),
-    h('span', { className: 'p', textContent: t.provider, title: t.provider }),
+    h('span', { className: 'p', textContent: isOff(t.provider) ? `${t.provider} · off` : t.provider, title: t.provider }),
     h('span', { className: 'num', textContent: ctx ? `${t.tested?.sure === false ? '~' : ''}${kTok(ctx)}` : '–' }),
     h('span', { className: 'num', textContent: `${Object.values(c).filter(Boolean).length} of 3` }),
     yes(c.tools), yes(c.thinking), yes(c.images),
@@ -1786,15 +1800,15 @@ function markCatalog() {
     const n = S.order.filter((t) => t.provider === sec.dataset.provider).length
     const tag = sec.querySelector('.inlist')
     tag.hidden = !n
-    tag.textContent = `${n} in your list${S.order[0]?.provider === sec.dataset.provider ? ' · #1' : ''}`
+    tag.textContent = `${n} in your list${inUse()?.provider === sec.dataset.provider ? ' · in use' : ''}`
   }
   drawPicks()
 }
 
 function drawUsing(s) {
-  const o = s.order
+  const o = s.order.filter((t) => !isOff(t.provider))
   $('using').hidden = page() === 'providers' // there it's on the page itself
-  put($('using'), o.length ? [h('span', { className: 'k', textContent: 'HeartCode uses' }), h('b', { textContent: o[0].model }), h('span', { className: 'k', textContent: `${o[0].provider}${o.length > 1 ? ` · ${o.length - 1} fallback${o.length > 2 ? 's' : ''}` : ''}` })] : [h('span', { className: 'k', textContent: 'No model chosen yet' }), h('a', { href: '#providers', textContent: 'Choose one' })])
+  put($('using'), o.length ? [h('span', { className: 'k', textContent: 'HeartCode uses' }), h('b', { textContent: o[0].model }), h('span', { className: 'k', textContent: `${o[0].provider}${o.length > 1 ? ` · ${o.length - 1} fallback${o.length > 2 ? 's' : ''}` : ''}` })] : s.order.length ? [h('span', { className: 'k', textContent: 'The providers of all your models are switched off' }), h('a', { href: '#providers', textContent: 'Switch one on' })] : [h('span', { className: 'k', textContent: 'No model chosen yet' }), h('a', { href: '#providers', textContent: 'Choose one' })])
 }
 
 // --- General ---

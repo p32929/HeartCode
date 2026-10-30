@@ -83,7 +83,7 @@ export async function runHeadless(app, opts) {
   const emit = (obj) => process.stdout.write(JSON.stringify(obj) + '\n')
   const s = await app.session()
   if (!s) {
-    const error = 'no model set up: add a provider and choose a model (heart settings), or pass --base-url and --model'
+    const error = app.allOff() ? "the providers of all your models are switched off: switch one on (heart settings), or pass --model" : 'no model set up: add a provider and choose a model (heart settings), or pass --base-url and --model'
     if (out === 'text') process.stderr.write(`heartcode: ${error}\n`)
     else emit({ type: 'result', subtype: 'error_during_execution', is_error: true, result: error, num_turns: 0, session_id: app.chat.id })
     return 1

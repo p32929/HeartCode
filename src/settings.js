@@ -333,7 +333,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
   const state = () => ({
     providers: Object.entries(byName(cfg.providers))
       .filter(([n]) => n !== cfg.adhoc)
-      .map(([name, p]) => ({ name, baseUrl: p.baseUrl, key: mask(p.apiKey), list: p.list !== false, added: p.models ?? [] })),
+      .map(([name, p]) => ({ name, baseUrl: p.baseUrl, key: mask(p.apiKey), list: p.list !== false, off: p.off === true, added: p.models ?? [] })),
     provider: cfg.provider ?? null,
     model: cfg.model ?? null,
     order: [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then].map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t) })),
@@ -412,6 +412,15 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
         else p.list = false
       }
       forgetList(...(name !== undefined ? [name] : Object.keys(cfg.providers))) // switched: loaded again
+      save('provider')
+      return state()
+    },
+    // A provider switched off: kept (its key, its models in your list), but HeartCode skips its models
+    // until it's on again.
+    'POST /api/provider/on': ({ name, on }) => {
+      if (!cfg.providers[name]) throw new Error(`no provider "${name}"`)
+      if (on) delete cfg.providers[name].off
+      else cfg.providers[name].off = true
       save('provider')
       return state()
     },

@@ -84,7 +84,7 @@ export async function runAcp({ makeApp, version, permission = 'ask', input = pro
     if (chat) app.setChat(chat)
     ui.sessionId = app.chat.id
     const s = await app.session()
-    if (!s) throw Object.assign(new Error('no model set up: run heart settings to add a provider and choose a model'), { code: -32000 })
+    if (!s) throw Object.assign(new Error(app.allOff() ? 'the providers of all your models are switched off: switch one on in heart settings' : 'no model set up: run heart settings to add a provider and choose a model'), { code: -32000 })
     s.onEvent = (e) => events(ui, s, e)
     sessions.set(ui.sessionId, { app, ui, ctl: null })
     return { app, ui }
@@ -129,7 +129,7 @@ export async function runAcp({ makeApp, version, permission = 'ask', input = pro
       app.working = true // settings changed meanwhile: MCP servers and skills wait for the end of it
       try {
         const s = app.s ?? (await app.session()) // a model chosen again on the settings page
-        if (!s) throw Object.assign(new Error('no model set up: run heart settings to add a provider and choose a model'), { code: -32000 })
+        if (!s) throw Object.assign(new Error(app.allOff() ? 'the providers of all your models are switched off: switch one on in heart settings' : 'no model set up: run heart settings to add a provider and choose a model'), { code: -32000 })
         s.onEvent ??= (e) => events(it.ui, s, e)
         const k = /^\/(\S+)\s*([\s\S]*)$/.exec(text)
         const skill = k && app.skills.get(k[1])

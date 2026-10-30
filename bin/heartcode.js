@@ -139,6 +139,7 @@ const HOWTO = `${c.yellow('No model set up yet.')} Add a provider and choose its
 
 ${c.dim('Ollama, LM Studio or llama.cpp running on this machine is found on its own.')}`
 const NO_MODELS = `${c.yellow('No model chosen yet.')} Choose one on ${c.cyan('/settings')}: a provider's models, click one.`
+const ALL_OFF = `${c.yellow('The providers of all your models are switched off.')} Switch one on on ${c.cyan('/settings')}, or add a model of one that's on.`
 
 // Choices for commands that take one (also offered in the "/" menu).
 const ARGS = {
@@ -627,7 +628,13 @@ class App {
       ui.print(NO_MODELS)
       return null
     }
-    const { client, profile, strat } = await this.engine(cfg.provider, cfg.model, ui, this.signal)
+    // your list starts with its first model whose provider isn't switched off
+    const start = cfg.fixed ? cfg : this.myModels()[0]
+    if (!start) {
+      ui.print(ALL_OFF)
+      return null
+    }
+    const { client, profile, strat } = await this.engine(start.provider, start.model, ui, this.signal)
     this.s = new Session({ client, profile, strat, root: this.root, ui, chat: this.chat }) // details: the status bar
     this.s.autoCompact = cfg.autoCompact !== false
     this.s.onTurn = () => this.save()
@@ -649,7 +656,7 @@ class App {
   useRotation() {
     const { cfg } = this
     const seen = new Set()
-    const list = [{ provider: cfg.provider, model: cfg.model }, ...(cfg.fixed ? [] : (cfg.rotation?.then ?? [])), ...(cfg.fallbacks ?? [])]
+    const list = [...(cfg.fixed ? [{ provider: cfg.provider, model: cfg.model }] : this.myModels()), ...(cfg.fallbacks ?? [])]
       .filter((t) => cfg.providers[t.provider] && t.model && !seen.has(`${t.provider}/${t.model}`) && seen.add(`${t.provider}/${t.model}`))
       .map((t) => ({ ...t, baseUrl: cfg.providers[t.provider].baseUrl, apiKey: cfg.providers[t.provider].apiKey }))
     this.s?.client.setRotation(list, cfg.rotation ?? {})
@@ -693,17 +700,23 @@ class App {
 
   // Your models, in order: this one (#1), then the fallbacks (chosen on /settings, where every
   // provider's whole list is).
-  myModels() {
+  // your list has models, but the providers of all of them are switched off
+  allOff() {
+    return !this.cfg.fixed && this.myModels(true).length > 0 && !this.myModels().length
+  }
+
+  // all: also the ones of a provider switched off (on the settings page), which are skipped otherwise
+  myModels(all = false) {
     const { cfg } = this
     const seen = new Set()
-    return [{ provider: cfg.provider, model: cfg.model }, ...(cfg.rotation?.then ?? [])].filter((t) => cfg.providers[t.provider] && t.model && !seen.has(`${t.provider}/${t.model}`) && seen.add(`${t.provider}/${t.model}`))
+    return [{ provider: cfg.provider, model: cfg.model }, ...(cfg.rotation?.then ?? [])].filter((t) => cfg.providers[t.provider] && (all || !cfg.providers[t.provider].off) && t.model && !seen.has(`${t.provider}/${t.model}`) && seen.add(`${t.provider}/${t.model}`))
   }
 
   // Makes one of your models #1 (the rest keep their order); saved for next time.
   async useMine(t) {
     const { cfg } = this
     delete cfg.fixed // one of your models: your list again, with its fallbacks
-    const rest = this.myModels().filter((x) => x.provider !== t.provider || x.model !== t.model)
+    const rest = this.myModels(true).filter((x) => x.provider !== t.provider || x.model !== t.model)
     cfg.rotation = { ...cfg.rotation, then: rest }
     await this.use(t.provider, t.model)
   }
@@ -738,7 +751,7 @@ class App {
     if (!names.length) return ui.print(`No providers yet: add one with ${c.cyan('heart settings')}.`)
     for (const n of names) {
       const p = cfg.providers[n]
-      const notes = [n === cfg.provider && c.magenta('● current'), n === cfg.adhoc && c.dim('this run only')].filter(Boolean).join(' ')
+      const notes = [n === cfg.provider && c.magenta('● current'), p.off && c.yellow('off'), n === cfg.adhoc && c.dim('this run only')].filter(Boolean).join(' ')
       ui.print(`${c.bold(n.padEnd(14))} ${p.baseUrl}  ${c.dim(mask(p.apiKey))}  ${notes}`)
     }
   }
@@ -748,13 +761,13 @@ class App {
   // provider's models (fetched from each; a provider whose list is off: the ones added by name).
   // json: one JSON object on stdout, for other programs:
   //   { "models": [{ "id": "auto", "fallbacks": true }, { "id": "groq/openai/gpt-oss-120b", "provider", "model", "place": 1 }, …],
-  //     "providers": [{ "name", "baseUrl", "list": true, "models": ["provider/model", …], "error"? }] }   (--all)
+  //     "providers": [{ "name", "baseUrl", "list": true, "off"?: true, "models": ["provider/model", …], "error"? }] }   (--all)
   async listModels(filter = '', { all = false, json = false } = {}) {
     const { ui, cfg } = this
     const match = (id) => id.toLowerCase().includes(filter.toLowerCase())
     const mine = this.myModels().map((t, i) => ({ id: `${t.provider}/${t.model}`, provider: t.provider, model: t.model, place: i + 1 }))
     const providers = !all ? [] : await Promise.all(Object.entries(cfg.providers).map(async ([name, p]) => {
-      const out = { name, baseUrl: p.baseUrl, list: p.list !== false, models: [] }
+      const out = { name, baseUrl: p.baseUrl, list: p.list !== false, ...(p.off && { off: true }), models: [] }
       if (out.list) {
         try {
           out.models = await new Client({ baseUrl: p.baseUrl, apiKey: p.apiKey }).listModels()
@@ -876,6 +889,7 @@ function applySettings(apps, cfg, what) {
       app.lists = {}
       delete app.cfg.fixed // a model chosen on the page: your list again
       if (app.s && !(cfg.providers[cfg.provider] && cfg.model)) now(() => ((app.s = null), ui.print(c.dim('settings: no model chosen'))))
+      else if (app.s && !app.myModels().length) now(() => ((app.s = null), ui.print(c.dim('settings: the providers of all your models are switched off'))))
     }
     // your model list: into the running session now, its next request goes to the new #1
     if ((what === 'model' || what === 'setting:rotation') && app.s && cfg.providers[cfg.provider] && cfg.model) {

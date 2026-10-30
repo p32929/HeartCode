@@ -50,7 +50,8 @@ No model set up yet: `models` is empty (and `heart -p` fails with "no model set 
 `heart models [--all] <filter>` keeps only the ids that contain `<filter>`.
 
 `providers` (only with `--all`): every provider's models. `list: false`: the user switched that
-provider's list off, and `models` are the ones they added by name. A provider that can't be
+provider's list off, and `models` are the ones they added by name. `off: true`: the user switched
+the provider off; `auto` skips its models (they aren't in `models`), but `-m provider/model` still runs one. A provider that can't be
 reached has an `error` (in text: a line on stderr) and is skipped; the command still exits `0`.
 
 **Which model to pass:**
