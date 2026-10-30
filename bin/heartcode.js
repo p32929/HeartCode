@@ -2,7 +2,7 @@
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { Client } from '../src/client.js'
-import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, DEFAULT_MODEL, VERSION } from '../src/config.js'
+import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, AUTO_MODEL, isAuto, parseModel, VERSION } from '../src/config.js'
 import { probe, loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
 import { learnFromUsage, LIMIT_MS } from '../src/context.js'
 import { Session, transcript } from '../src/agent.js'
@@ -37,8 +37,9 @@ ${c.bold('usage')}
   heart ~/code/my-app                in that folder (a folder, not a file)
   heart "fix the failing test"       run one task and exit
   heart providers                    list added providers
-  heart models [filter]              "default" (your list), then your models: #1 (in use), then its fallbacks
-  heart models --all [filter]        every provider's models, yours marked
+  heart models [filter]              what -m takes, one per line: "auto" (your list), then your models
+                                     as provider/model, #1 first
+  heart models --all [filter]        every provider's models (provider/model)
   heart models --json                as JSON (with --all too), for other programs
   heart probe                        test the current model for real (otherwise its abilities come from models.dev)
   heart config                       show the config file
@@ -46,7 +47,9 @@ ${c.bold('usage')}
 
 ${c.bold('options')}
   -u, --base-url <url>   use this server for this run (add --save to keep it)
-  -m, --model <name>     use this model alone for this run (no fallbacks); "default": your list, with its fallbacks
+  -m, --model <name>     this model alone for this run (provider/model, or a model of #1's provider);
+                         "auto" (the default): your list, #1 then the next when one fails
+      --fallback-model <name>  after -m's model when it fails (repeatable)
       --api-key <key>    API key for --base-url
   -y, --yes              do everything without asking (the default)
       --ask              ask before every edit and command, this run
@@ -61,7 +64,7 @@ ${c.bold('options')}
                          or to continue in it); removed on exit if nothing changed
   -c, --continue         continue the last session in this folder
   -r, --resume [id]      pick an earlier session to continue (or the one with this id)
-      --provider <name>  use this provider for this run (or -m "provider model")
+      --provider <name>  use this provider for this run (or -m provider/model)
 
 ${c.bold('headless')} (for other programs; flags and output as in Claude Code's -p)
   -p, --print                        run without the screen, print the answer, exit
@@ -229,13 +232,12 @@ class App {
         if (name === 'auto_compact' && this.s) this.s.autoCompact = bool
         return save(`${name}: ${bool ? 'on' : 'off'}${name === 'director' ? ' (from the next message)' : ''}`)
       case 'model': {
-        let [p, ...m] = v.split(/\s+/)
-        if (!cfg.providers[p]) [p, m] = [cfg.provider, [v]]
-        if (!cfg.providers[p] || !m.join(' ')) return `error: give "provider model" or a model of the current provider; providers: ${Object.keys(cfg.providers).join(', ')}`
+        const { provider: p, model: m } = parseModel(v, cfg.providers, cfg.provider)
+        if (!cfg.providers[p] || !m) return `error: give provider/model or a model of the current provider; providers: ${Object.keys(cfg.providers).join(', ')}`
         // headless (-p) and editors (ACP): the program that started HeartCode chooses the model
         if (this.ui instanceof HeadlessUI) return 'error: the model can\'t be switched here: the program that started HeartCode chooses it'
-        this.later.push(() => this.use(p, m.join(' ')).catch((e) => ui.warn(e.message)))
-        return `switching to ${p} · ${m.join(' ')} after this reply`
+        this.later.push(() => this.use(p, m).catch((e) => ui.warn(e.message)))
+        return `switching to ${p} · ${m} after this reply`
       }
       default:
         return `error: no setting "${name}"; manage list kind setting shows them`
@@ -638,11 +640,11 @@ class App {
   }
 
   // The model list (settings page): this model first, then the others in order; set on the session.
-  // A model given for this run (-m, not "default") is used alone: no fallbacks (cfg.fixed).
+  // A model given for this run (-m, not "auto") is used alone (cfg.fixed), then --fallback-model's.
   useRotation() {
     const { cfg } = this
     const seen = new Set()
-    const list = [{ provider: cfg.provider, model: cfg.model }, ...(cfg.fixed ? [] : (cfg.rotation?.then ?? []))]
+    const list = [{ provider: cfg.provider, model: cfg.model }, ...(cfg.fixed ? [] : (cfg.rotation?.then ?? [])), ...(cfg.fallbacks ?? [])]
       .filter((t) => cfg.providers[t.provider] && t.model && !seen.has(`${t.provider}/${t.model}`) && seen.add(`${t.provider}/${t.model}`))
       .map((t) => ({ ...t, baseUrl: cfg.providers[t.provider].baseUrl, apiKey: cfg.providers[t.provider].apiKey }))
     this.s?.client.setRotation(list, cfg.rotation ?? {})
@@ -736,19 +738,16 @@ class App {
     }
   }
 
-  // `heart models`: your models, in order (every provider's whole list is on the settings page).
-  // all: every provider's models too (fetched from each; a provider whose list is switched off: the
-  // ones added by name), yours marked. json: one JSON object on stdout, for other programs:
-  //   { "models": [{ "place": null, "provider": null, "model": "default", "role": "default", "rotates": true, "about": "…" },
-  //                { "place": 1, "provider", "model", "role": "in use" | "fallback", "rotates": false }, …],
-  //     "providers": [{ "name", "baseUrl", "list": true, "models": ["…"], "error"? }] }   (--all)
-  // "default" is the name for your list: -m default (or no -m) uses #1 and moves on to the next when
-  // one fails; -m with one of the models is that model alone.
+  // `heart models`: what -m takes, one per line (as \`opencode models\`): "auto" (your list: #1, then
+  // the next when one fails; also no -m), then your models as provider/model, #1 first. all: every
+  // provider's models (fetched from each; a provider whose list is off: the ones added by name).
+  // json: one JSON object on stdout, for other programs:
+  //   { "models": [{ "id": "auto", "fallbacks": true }, { "id": "groq/openai/gpt-oss-120b", "provider", "model", "place": 1 }, …],
+  //     "providers": [{ "name", "baseUrl", "list": true, "models": ["provider/model", …], "error"? }] }   (--all)
   async listModels(filter = '', { all = false, json = false } = {}) {
     const { ui, cfg } = this
     const match = (id) => id.toLowerCase().includes(filter.toLowerCase())
-    const mine = this.myModels().map((t, i) => ({ place: i + 1, provider: t.provider, model: t.model, role: i === 0 ? 'in use' : 'fallback', rotates: false }))
-    const placeOf = (provider, model) => mine.find((t) => t.provider === provider && t.model === model)?.place
+    const mine = this.myModels().map((t, i) => ({ id: `${t.provider}/${t.model}`, provider: t.provider, model: t.model, place: i + 1 }))
     const providers = !all ? [] : await Promise.all(Object.entries(cfg.providers).map(async ([name, p]) => {
       const out = { name, baseUrl: p.baseUrl, list: p.list !== false, models: [] }
       if (out.list) {
@@ -759,32 +758,17 @@ class App {
         }
       }
       // and the ones added by name, and any of yours it doesn't list (as on the settings page)
-      out.models = [...new Set([...out.models, ...(p.models ?? []), ...mine.filter((t) => t.provider === name).map((t) => t.model)])].sort((a, b) => a.localeCompare(b)).filter(match)
+      out.models = [...new Set([...out.models, ...(p.models ?? []), ...mine.filter((t) => t.provider === name).map((t) => t.model)])].sort((a, b) => a.localeCompare(b)).map((id) => `${name}/${id}`).filter(match)
       return out
     }))
-    // "default" first, in the same list: your models, rotating (when there's any)
-    const about = mine.length > 1 ? `your models in order: #1, then the next when one fails (-m ${DEFAULT_MODEL}, or no -m)` : `your one model, #1 (-m ${DEFAULT_MODEL}, or no -m)`
-    const first = mine.length ? [{ place: null, provider: null, model: DEFAULT_MODEL, role: 'default', rotates: mine.length > 1, about }] : []
-    const shown = [...first, ...mine].filter((t) => match(t.model))
-    if (json) {
-      process.stdout.write(JSON.stringify({ models: shown, ...(all && { providers }) }, null, 2) + '\n')
-      return
-    }
+    const shown = [...(mine.length ? [{ id: AUTO_MODEL, fallbacks: mine.length > 1 }] : []), ...mine].filter((t) => match(t.id))
+    if (json) return void process.stdout.write(JSON.stringify({ models: shown, ...(all && { providers }) }, null, 2) + '\n')
     if (!all) {
-      if (!shown.length) return ui.print(filter ? `None of your models matches "${filter}".` : NO_MODELS)
-      for (const t of shown) ui.print(t.place === null ? `${c.magenta('●')} ${c.bold(t.model)} ${c.dim(t.about)}` : `  ${c.bold(`#${t.place}`)} ${t.model} ${c.dim(`${t.provider} · ${t.role}; alone with -m "${t.provider} ${t.model}"`)}`)
-      return
+      if (!mine.length) return ui.print(NO_MODELS)
+      return void process.stdout.write(shown.map((t) => t.id + '\n').join(''))
     }
-    if (!providers.length) return ui.print(NO_MODELS)
-    for (const p of providers) {
-      ui.print(`${c.bold(p.name)}  ${c.dim(p.baseUrl)}${p.list ? '' : c.dim('  (its list is off: the models added by name)')}`)
-      if (p.error) ui.print(`  ${c.red("can't list its models:")} ${c.dim(p.error)}`)
-      if (!p.models.length && !p.error) ui.print(c.dim(filter ? `  none matches "${filter}"` : '  no models'))
-      for (const id of p.models) {
-        const at = placeOf(p.name, id)
-        ui.print(`  ${at === 1 ? c.magenta('●') : ' '} ${id}${at ? `  ${c.bold(`#${at}`)} ${c.dim(at === 1 ? 'in use' : 'fallback')}` : ''}`)
-      }
-    }
+    for (const p of providers) if (p.error) process.stderr.write(`heartcode: can't list ${p.name}'s models: ${p.error}\n`)
+    process.stdout.write(providers.flatMap((p) => p.models).map((id) => id + '\n').join(''))
   }
 }
 
@@ -868,8 +852,9 @@ function openBrowser(url) {
   spawnSync(cmd, args, { stdio: 'ignore' })
 }
 
-// A change on the settings page (in cfg, saved), brought into every open tab: right away, or the
-// model and MCP servers after the reply in progress.
+// A change on the settings page (in cfg, saved), brought into every open tab and run (also -p and
+// ACP): right away, the model list too (the running task's next request goes to the new #1); MCP
+// servers and skills after the reply in progress.
 function applySettings(apps, cfg, what) {
   const before = themeCodes()
   if (what === 'theme' || what === 'setting:theme') setTheme(cfg.theme)
@@ -879,18 +864,20 @@ function applySettings(apps, cfg, what) {
   settingsSeen(what) // the watcher (watchSettings) mustn't take it in a second time
   for (const app of apps) {
     const { ui } = app
-    const busy = Boolean(ui.busySince)
+    const busy = Boolean(ui.busySince || app.working)
     const now = (fn) => (busy ? app.later.push(fn) : fn())
     if (app.cfg !== cfg) for (const k of ['providers', 'provider', 'model', 'effort', 'theme', 'context', 'autoCompact', 'director', 'format', 'lsp', 'voice', 'rotation']) app.cfg[k] = cfg[k]
     if (what === 'model') {
       app.lists = {}
       delete app.cfg.fixed // a model chosen on the page: your list again
-      const want = cfg.providers[cfg.provider] && app.client(cfg.provider, cfg.model)
-      if (app.s && !(want && ['model', 'baseUrl', 'apiKey'].every((k) => want[k] === app.s.client[k])))
-        now(() => {
-          app.s = null
-          ui.print(c.dim(cfg.model ? `settings: ${cfg.provider} · ${cfg.model} from the next message` : 'settings: no model chosen'))
-        })
+      if (app.s && !(cfg.providers[cfg.provider] && cfg.model)) now(() => ((app.s = null), ui.print(c.dim('settings: no model chosen'))))
+    }
+    // your model list: into the running session now, its next request goes to the new #1
+    if ((what === 'model' || what === 'setting:rotation') && app.s && cfg.providers[cfg.provider] && cfg.model) {
+      const was = `${app.s.client.provider} · ${app.s.client.model}`
+      app.useRotation()
+      const is = `${app.s.client.provider} · ${app.s.client.model}`
+      if (is !== was) ui.print(c.dim(`settings: ${is} now`))
     }
     if (what === 'provider') app.lists = {} // its list switched on or off, a model added by name
     if (what === 'setting:permissions') ui.setPermission(cfg.permissions)
@@ -898,21 +885,11 @@ function applySettings(apps, cfg, what) {
     if (what === 'setting:autoCompact' && app.s) app.s.autoCompact = cfg.autoCompact !== false
     if (what === 'setting:format' && app.s) app.s.noFormat = cfg.format === false
     if (what === 'setting:lsp' && app.s) app.s.noLsp = cfg.lsp === false
-    if (what === 'setting:context') now(() => (app.s = null))
-    if (what === 'model' || what === 'setting:rotation') now(() => app.useRotation())
+    // the window size, or a model set up or measured on the page: the model in use takes it again
+    // from its profile now (it saves its profile as it learns, so it mustn't keep the old one)
+    if ((what === 'setting:context' || what === 'profile') && app.s) app.s.client.onUse?.({ provider: app.s.client.provider, model: app.s.client.model })
     if (what === 'mcp' || what === 'skill') now(() => app.reload(what))
     if (what === 'keys') ui.keys = { ...DEFAULT_KEYS, ...loadKeys() }
-    // a model set up or measured on the page: into the session's profile now (it saves its profile
-    // as it learns, so it mustn't keep the old one); its mode from the next message
-    if (what === 'profile' && app.s?.profile) {
-      const disk = loadProfile({ baseUrl: app.s.profile.baseUrl, model: app.s.profile.model })
-      if (disk) {
-        for (const k of ['source', 'set', 'known', 'measured', 'measuredAt']) disk[k] === undefined ? delete app.s.profile[k] : (app.s.profile[k] = disk[k])
-        const st = strategy(app.s.profile, app.cfg)
-        Object.assign(app.s.strat, (({ context, contextSure, reply }) => ({ context, contextSure, reply }))(st))
-        if (st.actions !== app.s.strat.actions || st.thinking !== app.s.strat.thinking || st.vision !== app.s.strat.vision || st.stream !== app.s.strat.stream) now(() => (app.s = null))
-      }
-    }
     if (what === 'theme' || what === 'setting:theme') ui.recolor(before, themeCodes())
     else ui.render()
   }
@@ -1428,6 +1405,7 @@ async function main() {
     options: {
       'base-url': { type: 'string', short: 'u' },
       model: { type: 'string', short: 'm' },
+      'fallback-model': { type: 'string', multiple: true },
       'api-key': { type: 'string' },
       yes: { type: 'boolean', short: 'y' },
       ask: { type: 'boolean' },
@@ -1487,8 +1465,12 @@ async function main() {
     if (!cfg.providers[f.provider]) throw new Error(`no provider "${f.provider}" (heartcode providers lists them)`)
     Object.assign(cfg, { provider: f.provider, fixed: true })
   }
-  const [p0, ...rest] = String(f.model ?? '').split(/\s+/) // -m "groq openai/gpt-oss-120b"
-  if (rest.length && cfg.providers[p0]) Object.assign(cfg, { provider: p0, model: rest.join(' ') })
+  // --fallback-model: after the model given (as in Claude Code's -p), when it fails
+  cfg.fallbacks = (f['fallback-model'] ?? []).map((v) => {
+    const t = parseModel(v, cfg.providers, cfg.provider)
+    if (isAuto(v) || !cfg.providers[t.provider]) throw new Error(`--fallback-model ${v}: give provider/model, or a model of ${cfg.provider} (heart models lists yours)`)
+    return t
+  })
   if (f.effort) cfg.effort = f.effort === 'default' ? undefined : f.effort
   if (f['mcp-config'] || f['strict-mcp-config']) cfg.mcp = { extra: f['mcp-config'] ?? [], strict: Boolean(f['strict-mcp-config']) }
   extraSkillDirs.push(...(f['skills-dir'] ?? []).map((d) => path.resolve(d)))
@@ -1516,7 +1498,9 @@ async function main() {
     // each editor session gets its own App, for its folder and its MCP servers
     cfg.maxRetries ??= 10
     // each editor session its own settings (one choosing a model doesn't change the others')
-    const makeApp = (root, ui, mcp) => new App({ ...structuredClone(cfg), ...(mcp && { mcp: { extra: [mcp] } }) }, ui, root)
+    const apps = []
+    const makeApp = (root, ui, mcp) => apps[apps.push(new App({ ...structuredClone(cfg), ...(mcp && { mcp: { extra: [mcp] } }) }, ui, root)) - 1]
+    watchSettings(() => apps, cfg) // the settings page's changes, into every editor session
     process.exit(await runAcp({ makeApp, version: VERSION, permission: f['permission-mode'] ? PERMISSION_MODES[f['permission-mode']] : (cfg.permissions ?? 'ask') }))
   }
   const headless = f.print || f['output-format'] || f['input-format'] === 'stream-json'
@@ -1600,6 +1584,7 @@ async function main() {
   const chat = f['resume-id'] ? loadChat(f['resume-id']) : f.continue && headless ? listChats(app.root)[0] : f['session-id'] ? (loadChat(f['session-id']) ?? { ...newChat(app.root), id: f['session-id'] }) : null
   if (f['resume-id'] && !chat) throw new Error(`no session ${f['resume-id']}`)
   if (chat && (headless || !f['resume-id'])) app.setChat(chat) // interactive: resumed below, with its transcript
+  if (headless || positionals.length) watchSettings(() => [app], cfg) // an app's run takes the settings page's changes too
   if (headless) {
     app.allowTools = [...(f.allowedTools ?? []), ...(f['allowed-tools'] ?? [])]
     app.denyTools = [...(f.disallowedTools ?? []), ...(f['disallowed-tools'] ?? [])]
@@ -1613,7 +1598,7 @@ async function main() {
     await leaveWorktree(app)
     process.exit(ok ? 0 : 1) // MCP servers are stopped by the exit hooks
   }
-  watchSettings(() => [app], cfg)
+  if (!positionals.length) watchSettings(() => [app], cfg)
   await repl(app, f)
   await leaveWorktree(app)
   process.exit(process.exitCode ?? 0) // /exit or Ctrl+D: quit, even if a timer or an MCP server is still around

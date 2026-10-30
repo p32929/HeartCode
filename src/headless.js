@@ -150,6 +150,7 @@ export async function runHeadless(app, opts) {
     said = false
     current = { ctl: new AbortController() }
     app.signal = current.ctl.signal
+    app.working = true // settings changed meanwhile: MCP servers and skills wait for the end of it
     let answer = ''
     let error = null
     try {
@@ -162,6 +163,8 @@ export async function runHeadless(app, opts) {
       log('error', error, e.stack)
     } finally {
       app.save()
+      app.working = false
+      app.afterLine?.()
     }
     const subtype = current.maxTurns ? 'error_max_turns' : error ? 'error_during_execution' : 'success' // as Claude Code names them
     current = null

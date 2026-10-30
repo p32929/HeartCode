@@ -14,44 +14,54 @@ answer (or JSON) and exits. Its flags and output match Claude Code's `claude -p`
 ```sh
 heart --version          # installed? (else: node /path/to/heart_cli/bin/heart.js --version)
 heart providers          # the providers set up, and their URLs (keys are masked)
-heart models --json      # the models to pass to -m: "default" first (the user's list, with fallbacks), then each model
-heart models --all --json   # every provider's models too (slower: asks each provider)
+heart models             # what -m takes, one per line: "auto" first, then the user's models (provider/model), #1 first
+heart models --json      # the same, as JSON
+heart models --all       # every provider's models too (slower: asks each provider)
 ```
 
-Read `--json`, not the text: the text layout is for people and may change.
+`heart models` prints one id per line, nothing else (like `opencode models`):
+
+```
+auto
+groq/openai/gpt-oss-120b
+openrouter/qwen/qwen3-coder
+```
+
+With `--json`:
 
 ```json
 { "models": [
-    { "place": null, "provider": null, "model": "default", "role": "default", "rotates": true, "about": "your models in order: #1, then the next when one fails (-m default, or no -m)" },
-    { "place": 1, "provider": "groq", "model": "openai/gpt-oss-120b", "role": "in use", "rotates": false },
-    { "place": 2, "provider": "openrouter", "model": "qwen/qwen3-coder", "role": "fallback", "rotates": false } ],
+    { "id": "auto", "fallbacks": true },
+    { "id": "groq/openai/gpt-oss-120b", "provider": "groq", "model": "openai/gpt-oss-120b", "place": 1 },
+    { "id": "openrouter/qwen/qwen3-coder", "provider": "openrouter", "model": "qwen/qwen3-coder", "place": 2 } ],
   "providers": [
-    { "name": "groq", "baseUrl": "https://api.groq.com/openai/v1", "list": true, "models": ["…"] },
+    { "name": "groq", "baseUrl": "https://api.groq.com/openai/v1", "list": true, "models": ["groq/…"] },
     { "name": "local", "baseUrl": "http://127.0.0.1:9/v1", "list": true, "models": [], "error": "cannot reach …" } ] }
 ```
 
-Each entry in `models` is something to pass to `-m`, in order:
+`id` is exactly what to pass to `-m`:
 
-- **`default`** (always first; `place` and `provider` are `null`): the user's list. `rotates: true`
-  when they have more than one model: #1 is used, and the next one in order when it fails.
-- **the user's models** (`place` 1, 2, …): `role` is `in use` for #1 and `fallback` for the rest;
-  `rotates: false`, since a model named on its own is used alone.
+- **`auto`** (always first): the user's list. `fallbacks: true` when it has more than one model:
+  #1 is used, and the next one in order when it fails. No `-m` means `auto` too. (`default` is
+  its old name and still works.)
+- **the user's models** (`place` 1, 2, …), as `provider/model`: #1 is the one `auto` starts with.
 
 No model set up yet: `models` is empty (and `heart -p` fails with "no model set up").
-`heart models [--all] <filter>` keeps only the entries whose `model` contains `<filter>`.
+`heart models [--all] <filter>` keeps only the ids that contain `<filter>`.
 
 `providers` (only with `--all`): every provider's models. `list: false`: the user switched that
 provider's list off, and `models` are the ones they added by name. A provider that can't be
-reached has an `error` and is skipped; the command still exits `0`.
+reached has an `error` (in text: a line on stderr) and is skipped; the command still exits `0`.
 
 **Which model to pass:**
 
 | `-m` | What runs |
 |---|---|
-| `default`, or no `-m` | the user's list: #1, and the next one in order when it fails (rate limits, outages…). Use this unless you need one particular model. |
-| a model from the list: `-m "<provider> <model>"` (`-m "groq openai/gpt-oss-120b"`), or `-m <model>` alone | that model alone: never another one, also when it fails (a rate limit or an outage is tried again, up to `--max-retries`) |
+| `auto`, or no `-m` | the user's list: #1, and the next one in order when it fails. Use this unless you need one particular model. |
+| `provider/model` (`-m groq/openai/gpt-oss-120b`), or a model of #1's provider alone | that model alone: never another one, also when it fails (a rate limit or an outage is tried again, up to `--max-retries`) |
+| that, plus `--fallback-model provider/model` (repeatable) | that model, then the fallbacks in order when it fails (as `claude -p --fallback-model`) |
 
-**Failures:** with the default list, any failure (an error status of any kind, a timeout, a reply
+**Failures:** with `auto` (the list), any failure (an error status of any kind, a timeout, a reply
 that stops coming, a lost connection, an error page from a proxy, a model that keeps replying with
 nothing) makes way for the next model, from another provider first; that provider's other models
 are tried only after every provider has had a go. None of it shows: the run goes on with the model
@@ -66,6 +76,10 @@ Each request is fitted to the model it goes to: one that can't see gets a note i
 image, one that can't call tools gets the tool calls as text.
 
 `--provider <name>` and `-u <url>` (a server for this run) also mean one model, alone.
+
+A run picks up settings the user changes meanwhile (`heart settings`, or `~/.heart` by hand)
+without being restarted: a new model order from its next request, MCP servers and skills from its
+next message.
 
 `heart` is installed by `npm start` in the HeartCode folder. `heartcode` is the same command.
 Needs Node.js 20 or newer. No providers? See "Setting up a model" below.
@@ -130,8 +144,9 @@ server's tools, `mcp` all of them.
 ## Choose the model
 
 ```sh
-heart -p -m default "…"                         # the user's list, with its fallbacks (the same as no -m)
-heart -p -m "groq openai/gpt-oss-120b" "…"     # that provider and model alone, for this run
+heart -p -m auto "…"                            # the user's list, with its fallbacks (the same as no -m)
+heart -p -m groq/openai/gpt-oss-120b "…"       # that provider and model alone, for this run
+heart -p -m groq/openai/gpt-oss-120b --fallback-model openrouter/qwen/qwen3-coder "…"   # and that one when it fails
 heart -p --provider ollama -m qwen3-coder "…"   # the same, written apart
 heart -p --effort high "…"                      # how hard a thinking model thinks
 ```

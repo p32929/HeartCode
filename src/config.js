@@ -72,9 +72,22 @@ function fromFile() {
 // cfg: { providers: {name: {baseUrl, apiKey}}, provider, model, context, adhoc }
 // flags > env > ~/.heart/config.json. A URL from flags or env becomes a provider for this run
 // only (cfg.adhoc), unless saved.
-// The model name that means your list: #1, then the fallbacks when one fails (also: no model given).
-// Any other model given for a run (-m, HEART_MODEL, a URL of its own) is that model alone: fixed.
-export const DEFAULT_MODEL = 'default'
+// The model name that means your list: #1, then the next when one fails (also: no model given;
+// "default" is its old name). Any other model given for a run (-m, HEART_MODEL, a URL of its own)
+// is that model alone: fixed (--fallback-model adds others after it).
+export const AUTO_MODEL = 'auto'
+export const isAuto = (m) => m === AUTO_MODEL || m === 'default'
+
+// A model as given (-m, --fallback-model, /model): "provider/model" (as opencode writes it; split at
+// the first "/", provider names have none), the older "provider model", or a model of `current`.
+export function parseModel(v, providers, current) {
+  v = String(v).trim()
+  const spaced = /^(\S+)\s+(.+)$/.exec(v)
+  if (spaced && providers[spaced[1]]) return { provider: spaced[1], model: spaced[2] }
+  const i = v.indexOf('/')
+  if (i > 0 && providers[v.slice(0, i)]) return { provider: v.slice(0, i), model: v.slice(i + 1) }
+  return { provider: current, model: v }
+}
 
 // providers by name, A to Z: every list of them (settings page, `heart providers`, pickers) follows
 export const byName = (providers) => Object.fromEntries(Object.entries(providers ?? {}).sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' })))
@@ -98,7 +111,7 @@ export function loadConfig(flags = {}) {
     cfg.providers[cfg.provider].apiKey = apiKey
   }
   const model = flags.model || process.env.HEART_MODEL
-  if (model && model !== DEFAULT_MODEL) Object.assign(cfg, { model, fixed: true })
+  if (model && !isAuto(model)) Object.assign(cfg, parseModel(model, cfg.providers, cfg.provider), { fixed: true })
   return cfg
 }
 

@@ -164,7 +164,8 @@ export class Client {
   // 'stay' on the one that worked). onSwitch(target): a different model answered than before.
   setRotation(list, { on = 'failure', retries = 2, next = 'first' } = {}) {
     if (!list || list.length < 2) {
-      if (this.rotation) this.#use(this.rotation.list[0])
+      const t = list?.[0] ?? this.rotation?.list[0] // one model: that one (a new #1 from the settings page too)
+      if (t && (t.model !== this.model || normalizeBaseUrl(t.baseUrl) !== this.baseUrl || t.apiKey !== this.apiKey)) this.#use(t)
       this.rotation = null
       return
     }

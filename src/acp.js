@@ -126,16 +126,22 @@ export async function runAcp({ makeApp, version, permission = 'ask', input = pro
       const { text, images } = promptOf(prompt, app.root)
       it.ctl = new AbortController()
       app.signal = it.ctl.signal
+      app.working = true // settings changed meanwhile: MCP servers and skills wait for the end of it
       try {
+        const s = app.s ?? (await app.session()) // a model chosen again on the settings page
+        if (!s) throw Object.assign(new Error('no model set up: run heart settings to add a provider and choose a model'), { code: -32000 })
+        s.onEvent ??= (e) => events(it.ui, s, e)
         const k = /^\/(\S+)\s*([\s\S]*)$/.exec(text)
         const skill = k && app.skills.get(k[1])
-        await app.s.run(skill && skill.use !== 'model' ? await app.expandSkill(skill, k[2]) : text, it.ctl.signal, images)
+        await s.run(skill && skill.use !== 'model' ? await app.expandSkill(skill, k[2]) : text, it.ctl.signal, images)
         return { stopReason: 'end_turn' }
       } catch (e) {
         if (it.ctl.signal.aborted) return { stopReason: 'cancelled' }
         if (e.maxTurns) return { stopReason: 'max_turn_requests' }
         throw e
       } finally {
+        app.working = false
+        app.afterLine?.()
         it.ctl = null
         it.ui.calls = []
         app.save()
