@@ -2,6 +2,28 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.20 (2026-10-31)
+
+- The settings page's accent is green.
+- A System / Light / Dark switch at the bottom of the settings page's sidebar (System follows your
+  computer's setting).
+- Voice works like Claude Code's: /voice (or Ctrl+R), Space to talk (again to pause, again to go
+  on), Enter to finish, Esc to cancel; what you say shows in the input box as you say it.
+
+## 0.1.19 (2026-10-30)
+
+- The settings page, redone: one accent color, calmer lists (a row's buttons
+  show when you point at it), clearer type, hover, press and focus states, dialogs that animate in,
+  and a layout that works on a phone too.
+- A provider switched off is gone from everywhere it was still showing: the status bar (it showed
+  the off provider's model when only one other model was on), `heart providers`, /select_model,
+  and on the settings page Your models, its count, Test all and the provider ranking. Its models
+  keep their places in your list for when it's on again.
+- /rewind numbers your messages, newest first.
+- The settings page says "Disconnected" and can't be used once it's turned off (in HeartCode or
+  with Ctrl+C), instead of failing quietly.
+- The compaction switch on the settings page says 85%, as it is now.
+
 ## 0.1.18 (2026-10-30)
 
 - Before building anything, the model researches it first (the current, most recommended way and
