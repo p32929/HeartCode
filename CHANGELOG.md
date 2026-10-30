@@ -2,6 +2,14 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.14 (2026-10-30)
+
+- Settings page, Providers & models: one full-width list. Tick models (or a whole provider, or
+  everything shown) and add them to your list or take them off it at once; a click on one still
+  adds or removes it. Each provider is one line; its model list switch, the models added by name
+  and Delete are in its Edit dialog. Your list is a button to the Your models page, which now has
+  what to do when a model fails.
+
 ## 0.1.13 (2026-10-30)
 
 - Settings no longer go back by themselves: a save writes only what changed, so another HeartCode
