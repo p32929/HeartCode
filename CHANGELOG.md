@@ -2,6 +2,17 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.15 (2026-10-30)
+
+- Settings page, Providers & models: Test on each model sends it "Hello" and shows what was sent
+  and what came back. Tick several and Test them all at once (a provider's one after another, for
+  its rate limit); then keep ticked only the ones that answered.
+- Free only: just the models a provider's list prices at $0, marked free; sort by price puts them first.
+- Prices read right: Airforce's were 100 times too high (its list is in cents), Cloudflare's are read
+  now. Model lists saved before are read again.
+- Each provider has a box to add a model by its name; one it has already, or one in your list, is
+  said and shown instead.
+
 ## 0.1.14 (2026-10-30)
 
 - Settings page, Providers & models: one full-width list. Tick models (or a whole provider, or
