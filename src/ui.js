@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream'
 import { StringDecoder } from 'node:string_decoder'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import fs from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { log } from './log.js'
 import { HOME } from './config.js'
@@ -103,12 +104,14 @@ export function setTheme(name = 'dark') {
 setTheme()
 
 // keybindings.json: { "ctrl+o": "cycle_permissions", "ctrl+g": "/toggle_thinking", "shift+tab": "none" }.
-// Actions: stop, cycle_permissions, newline, clear_input, scroll_up, scroll_down, voice, new_tab,
+// Actions: stop, cycle_permissions, newline, clear_input, scroll_up, scroll_down (a page),
+// scroll_line_up, scroll_line_down (3 lines), voice, new_tab,
 // close_tab, next_tab, prev_tab, tab_1…tab_9, none (turns a
 // built-in key off); anything else is sent as typed (a /command or a message). Ctrl+C stays Ctrl+C.
 export const keyId = (key, s = '') => [key.ctrl && 'ctrl', key.meta && 'alt', key.shift && 'shift', key.name ?? s].filter(Boolean).join('+').toLowerCase()
-// Ctrl+R records; Ctrl+T, Ctrl+Q, Ctrl+N/P (or Ctrl+PgDn/PgUp), Alt+1…9: tabs. keybindings.json can move them.
-export const DEFAULT_KEYS = { 'ctrl+r': 'voice', 'ctrl+t': 'new_tab', 'ctrl+q': 'close_tab', 'ctrl+n': 'next_tab', 'ctrl+p': 'prev_tab', 'ctrl+pagedown': 'next_tab', 'ctrl+pageup': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
+// Ctrl+R records; Ctrl+T, Ctrl+Q, Ctrl+N/P (or Ctrl+PgDn/PgUp), Alt+1…9: tabs; Shift+↑↓ and Alt+↑↓
+// scroll the conversation (as PgUp/PgDn and the mouse wheel do). keybindings.json can move them.
+export const DEFAULT_KEYS = { 'ctrl+r': 'voice', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'ctrl+t': 'new_tab', 'ctrl+q': 'close_tab', 'ctrl+n': 'next_tab', 'ctrl+p': 'prev_tab', 'ctrl+pagedown': 'next_tab', 'ctrl+pageup': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
 export function loadKeys(file = path.join(HOME, 'keybindings.json')) {
   let raw = {}
   try {
@@ -120,7 +123,53 @@ export function loadKeys(file = path.join(HOME, 'keybindings.json')) {
   return Object.fromEntries(Object.entries(raw.bindings ?? raw).filter(([, v]) => typeof v === 'string' && v.trim()).map(([k, v]) => [k.toLowerCase().replace(/\s+/g, '').replace(/-(?=.)/g, '+').replace(/\besc\b/, 'escape').replace(/\b(option|meta|cmd)\b/, 'alt').replace(/\benter\b/, 'return'), v.trim()]))
 }
 
+// mouse reports (SGR), with moves while a button is down (for selecting text)
+const MOUSE_ON = '\x1b[?1000h\x1b[?1002h\x1b[?1006h'
+const MOUSE_OFF = '\x1b[?1006l\x1b[?1002l\x1b[?1000l'
+
+// The system clipboard (pbcopy, clip, wl-copy, xclip, xsel); else the terminal's (OSC 52, works over SSH too).
+export function copyText(text) {
+  const tools = process.platform === 'darwin' ? [['pbcopy']] : process.platform === 'win32' ? [['clip']] : [['wl-copy'], ['xclip', '-selection', 'clipboard'], ['xsel', '-b', '-i']]
+  for (const [cmd, ...args] of tools) if (spawnSync(cmd, args, { input: text, stdio: ['pipe', 'ignore', 'ignore'] }).status === 0) return 'system'
+  process.stdout.write(`\x1b]52;c;${Buffer.from(text).toString('base64')}\x07`)
+  return 'osc'
+}
+
+// The cells from…to (columns, to excluded) of a colored line, shown reversed (a selection).
+function highlight(line, from, to) {
+  let col = 0
+  let on = false
+  let out = ''
+  for (const [, esc, ch] of line.matchAll(/(\x1b\[[0-9;]*m)|([^\x1b])/gs)) {
+    if (esc) {
+      out += esc + (on && /^\x1b\[0?m$/.test(esc) ? '\x1b[7m' : '') // a reset inside keeps it reversed
+      continue
+    }
+    if (!on && col >= from && col < to) (out += '\x1b[7m'), (on = true)
+    if (on && col >= to) (out += '\x1b[27m'), (on = false)
+    out += ch
+    col += width(ch)
+  }
+  return out + (on ? '\x1b[27m' : '')
+}
+
+// The characters in columns from…to of plain text.
+function sliceCols(text, from, to) {
+  let col = 0
+  let out = ''
+  for (const ch of text) {
+    if (col >= from && col < to) out += ch
+    col += width(ch)
+  }
+  return out
+}
 const FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+
+// 75000 → "1m 15s"
+export function duration(ms) {
+  const secs = Math.floor(ms / 1000)
+  return secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`
+}
 const WIDE = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]|\p{Emoji_Presentation}/u // ♥ © etc. are 1 cell; 😀 is 2
 
 // "503 from https://…: {"error":{"message":"overloaded"}}" → "503 overloaded"
@@ -156,7 +205,8 @@ export function legacyKeys(text) {
 }
 
 // The terminal's input, passed through legacyKeys (holding back a sequence split across reads).
-function keyStream(input) {
+// Mouse reports (SGR, full screen turns them on) are taken out, to onMouse(button, x, y, released).
+function keyStream(input, onMouse) {
   const proxy = new PassThrough()
   proxy.isTTY = true
   proxy.setRawMode = (on) => input.setRawMode?.(on)
@@ -165,12 +215,13 @@ function keyStream(input) {
   const dec = new StringDecoder('utf8')
   let held = ''
   let timer
-  const send = (text) => text && proxy.write(legacyKeys(text))
+  const mouse = (m, b, x, y, end) => (onMouse?.(Number(b), Number(x), Number(y), end === 'm'), '')
+  const send = (text) => (text = text.replace(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/g, mouse)) && proxy.write(legacyKeys(text))
   // bound to where it was made: a tab's keys are logged in that tab's log (src/log.js)
   input.on('data', AsyncLocalStorage.bind((d) => {
     clearTimeout(timer)
     let text = held + dec.write(d)
-    const part = /\x1b\[[0-9;:]*$/.exec(text)
+    const part = /\x1b\[<?[0-9;:]*$/.exec(text)
     held = part ? part[0] : ''
     if (part) {
       text = text.slice(0, part.index)
@@ -296,11 +347,12 @@ export class Block {
   constructor(write, { marker = '  ', markerStyle = (x) => x, style = (x) => x, width = (process.stdout.columns || 100) - 1 } = {}) {
     Object.assign(this, { write, marker, markerStyle, style, width: Math.max(20, width) })
     this.indent = ' '.repeat(marker.length)
+    this.hang = '' // more indent for a wrapped line (a list item's text)
     this.col = 0
     this.started = false
     this.newlines = 0
   }
-  push(text) {
+  push(text, style = this.style) {
     let out = ''
     for (const ch of text) {
       if (ch === '\r') continue
@@ -318,19 +370,223 @@ export class Block {
         this.col = this.indent.length
         this.newlines = 0
       } else if (this.col >= this.width || (ch === ' ' && this.col >= this.width - 12)) {
-        out += '\n' + this.indent
-        this.col = this.indent.length
+        out += '\n' + this.indent + this.hang
+        this.col = this.indent.length + this.hang.length
         if (ch === ' ') continue
       }
       out += ch
       this.col++
     }
-    if (out) this.write(this.style(out))
+    if (out) this.write(out.split('\n').map((l) => l && style(l)).join('\n')) // styled per row, so a row's colors stand alone
   }
   end() {
     if (this.started && !this.ended) this.write('\n')
     this.ended = true
   }
+}
+
+// The model's Markdown, drawn as it streams in: headings, lists, quotes, code blocks, rules,
+// **bold**, *italic* and `code`. Into a Block (which wraps); held back only while a line's start
+// or a "*" could still be a marker. Tables and links stay as written.
+export class Markdown {
+  constructor(block, base = (x) => x) {
+    Object.assign(this, { block, base, buf: '', sol: true, fence: false, bold: false, ital: false, code: false, line: null, prev: ' ' })
+  }
+  push(t) {
+    this.buf += t
+    this.#run(false)
+  }
+  end() {
+    this.#run(true)
+    this.block.end()
+  }
+  #style() {
+    let f = this.line ?? this.base
+    if (this.code || this.fence) return c.info
+    if (this.bold) f = ((g) => (x) => c.bold(c.bright(g(x))))(f)
+    if (this.ital) f = ((g) => (x) => c.italic(g(x)))(f)
+    return f
+  }
+  #out(x, style = this.#style()) {
+    if (x) this.block.push(x, style)
+  }
+  // a line's start: what kind of line it is (false: not known yet)
+  #lineStart(s, final) {
+    const nl = s.indexOf('\n')
+    const head = nl < 0 ? s : s.slice(0, nl)
+    const whole = nl >= 0 || final
+    if (!whole && /^\s*(#{0,6}|[-*+_]|\d{1,3}[.)]?|>|`{1,2}|([-*_]\s*){1,}|```.*)$/.test(head)) return false // could still be a marker
+    const b = this.block
+    b.hang = ''
+    this.line = null
+    if (/^\s*```/.test(head)) {
+      this.fence = !this.fence
+      return nl < 0 ? s.length : nl + 1 // the fence line itself isn't shown
+    }
+    if (this.fence) return 0
+    if (whole && /^\s*([-*_])(\s*\1){2,}\s*$/.test(head)) {
+      this.#out('─'.repeat(Math.min(40, b.width - b.indent.length)), c.ghost)
+      return head.length
+    }
+    let m
+    if ((m = /^(#{1,6})\s+/.exec(head))) {
+      this.line = (x) => c.bold(c.bright(x))
+      return m[0].length
+    }
+    if ((m = /^(\s*)[-*+]\s+/.exec(head))) {
+      b.hang = m[1] + '  '
+      this.#out(m[1] + '• ', c.accent)
+      return m[0].length
+    }
+    if ((m = /^(\s*)(\d{1,3})[.)]\s+/.exec(head))) {
+      b.hang = m[1] + ' '.repeat(m[2].length + 2)
+      this.#out(`${m[1]}${m[2]}. `, c.accent)
+      return m[0].length
+    }
+    if ((m = /^\s*>\s?/.exec(head))) {
+      b.hang = '  '
+      this.line = (x) => c.faint(c.italic(x))
+      this.#out('│ ', c.ghost)
+      return m[0].length
+    }
+    return 0
+  }
+  #run(final) {
+    let s = this.buf
+    let text = ''
+    const flush = () => (this.#out(text), (text = ''))
+    let i = 0
+    while (i < s.length) {
+      if (this.sol) {
+        const n = this.#lineStart(s.slice(i), final)
+        if (n === false) break
+        this.sol = false
+        i += n
+        continue
+      }
+      const ch = s[i]
+      if (ch === '\n') {
+        text += ch
+        flush()
+        Object.assign(this, { sol: true, bold: false, ital: false, code: false, line: null, prev: ' ' })
+        i++
+        continue
+      }
+      if (this.fence) {
+        text += ch
+        i++
+        continue
+      }
+      if (ch === '\\' && /[*_`\\#>-]/.test(s[i + 1] ?? '')) {
+        text += s[i + 1]
+        this.prev = s[i + 1]
+        i += 2
+        continue
+      }
+      if (ch === '`') {
+        flush()
+        this.code = !this.code
+        this.prev = ch
+        i++
+        continue
+      }
+      if (!this.code && (ch === '*' || ch === '_')) {
+        if (i + 1 >= s.length && !final) break // "*" or "**"? wait for the next character
+        const next = s[i + 1] ?? ' '
+        if (next === ch) {
+          // ** always; __ only around words (not snake__case)
+          const after = s[i + 2] ?? ' '
+          if (ch === '*' || (this.bold ? !/\w/.test(after) : !/\w/.test(this.prev))) {
+            flush()
+            this.bold = !this.bold
+            this.prev = ch
+            i += 2
+            continue
+          }
+        } else if (ch === '*' && (this.ital ? !/\s/.test(this.prev) : /[\s(]/.test(this.prev) && !/\s/.test(next))) {
+          flush()
+          this.ital = !this.ital
+          this.prev = ch
+          i++
+          continue
+        }
+      }
+      text += ch
+      this.prev = ch
+      i++
+    }
+    flush()
+    this.buf = s.slice(i) // what's held back
+  }
+}
+
+// Screen lines saved before answers were drawn as Markdown (older sessions and tabs): the answer's
+// and the thinking's own text (not tool output, not code) gets its **bold**, `code`, # headings and
+// - bullets drawn now. Already drawn lines have none of these left in that color.
+export function markdownRows(lines) {
+  const fgOf = (f) => /^\x1b\[(38;[0-9;]*)m/.exec(f('x'))?.[1]
+  const base = new Set([fgOf(c.text), fgOf(c.think)].filter(Boolean))
+  const info = fgOf(c.info)
+  if (!base.size) return lines
+  let bold = false
+  let fence = false
+  return lines.map((line) => {
+    const plain = line.replace(/\x1b\[[0-9;]*m/g, '')
+    if (!plain.trim()) return (bold = false), line
+    if (/^[●\s]*```/.test(plain)) return (fence = !fence), line
+    if (fence) return line
+    const toks = [...line.matchAll(/(\x1b\[[0-9;]*m)|([^\x1b])/gs)]
+    const vis = toks.filter((t) => t[2]).map((t) => t[2])
+    let fg = ''
+    let start = true
+    let code = false
+    let skip = 0
+    let k = -1
+    let out = bold ? '\x1b[1m' : ''
+    for (const [, esc, ch] of toks) {
+      if (esc) {
+        const m = /^\x1b\[(38;[0-9;]*|39)m$/.exec(esc)
+        if (m) fg = m[1] === '39' ? '' : m[1]
+        out += code && m ? `\x1b[${info}m` : esc
+        continue
+      }
+      k++
+      if (!base.has(fg) || !info) {
+        out += ch
+        continue
+      }
+      if (skip) {
+        skip--
+        continue
+      }
+      if (start && ch !== ' ') {
+        start = false
+        const hashes = /^#{1,6} /.exec(vis.slice(k, k + 7).join(''))
+        if (hashes) {
+          skip = hashes[0].length - 1
+          out += '\x1b[1m'
+          continue
+        }
+        if ('-*+'.includes(ch) && vis[k + 1] === ' ') {
+          out += '•'
+          continue
+        }
+      }
+      if (ch === '`') {
+        code = !code
+        out += `\x1b[${code ? info : fg}m`
+        continue
+      }
+      if (!code && ch === '*' && vis[k + 1] === '*') {
+        bold = !bold
+        out += bold ? '\x1b[1m' : '\x1b[22m'
+        skip = 1
+        continue
+      }
+      out += ch
+    }
+    return out
+  })
 }
 
 const MENU_ROWS = 8
@@ -418,7 +674,9 @@ export class UI {
         if (!think) {
           this.gap()
           this.print(c.faint(c.italic(`✻ ${who ? `${who} is thinking` : 'Thinking'}…`)))
-          think = new Block(write, { style: (x) => c.think(c.italic(x)) })
+          const style = (x) => c.think(c.italic(x))
+          think = new Block(write, { style })
+          if (color) think = new Markdown(think, style)
         }
         think.push(t)
       },
@@ -429,6 +687,7 @@ export class UI {
           this.gap()
           summary()
           text = new Block(write, { marker: '● ', markerStyle: (x) => c.bright(c.bold(x)), style: c.text })
+          if (color) text = new Markdown(text, c.text) // plain text (piped, NO_COLOR) stays as the model wrote it
         }
         text.push(t)
       },
@@ -444,7 +703,7 @@ export class UI {
   #rl() {
     if (this.rl) return this.rl
     const terminal = Boolean(this.input.isTTY && this.out.isTTY)
-    const input = terminal ? keyStream(this.input) : this.input
+    const input = terminal ? keyStream(this.input, (...a) => this.#mouse(...a)) : this.input
     // escapeCodeTimeout: how long a lone Esc waits to be the start of a key's sequence. Readline's
     // 500ms made Esc Esc and a letter typed right after one Alt+letter: the letter was lost and the
     // input not cleared. Sequences come in one piece (and keyStream holds a split one for 50ms).
@@ -470,7 +729,8 @@ export class UI {
     if (this.full || !(this.input.isTTY && this.out.isTTY)) return
     this.full = true
     // alternate screen · kitty keyboard protocol (Shift/Cmd+Enter are told apart) · bracketed paste
-    this.out.write('\x1b[?1049h\x1b[H\x1b[2J\x1b[>1u\x1b[?2004h')
+    // · mouse reports (SGR): the wheel scrolls the conversation, not the terminal
+    this.out.write('\x1b[?1049h\x1b[H\x1b[2J\x1b[>1u\x1b[?2004h' + MOUSE_ON)
     this.out.on('resize', () => this.render())
     this.#rl()
     process.on('exit', () => this.leaveFullscreen())
@@ -479,7 +739,7 @@ export class UI {
   // Hands the terminal to another program (an editor) and takes it back afterwards.
   async outside(fn) {
     const wasFull = this.full
-    if (wasFull) this.out.write('\x1b[?2004l\x1b[<u\x1b[?1049l')
+    if (wasFull) this.out.write(MOUSE_OFF + '\x1b[?2004l\x1b[<u\x1b[?1049l')
     this.rl?.pause()
     this.input.setRawMode?.(false)
     try {
@@ -488,17 +748,72 @@ export class UI {
       this.input.setRawMode?.(true)
       this.rl?.resume()
       if (wasFull) {
-        this.out.write('\x1b[?1049h\x1b[>1u\x1b[?2004h')
+        this.out.write('\x1b[?1049h\x1b[>1u\x1b[?2004h' + MOUSE_ON)
         this.render()
       }
     }
+  }
+
+  // The mouse: the wheel scrolls the conversation; dragging selects in it, copied when let go
+  // (the terminal can't select itself while HeartCode takes the mouse). A click or a key clears it.
+  #mouse(b, x, y, up) {
+    if (!this.full) return
+    if (b & 64) return (b & 0xc3) === 64 || (b & 0xc3) === 65 ? this.scrollBy(b & 1 ? -3 : 3) : undefined // 64 up, 65 down
+    if ((b & 3) !== 0 && !up) return // the left button only (a release says 3 in some terminals)
+    const v = this.viewAt
+    if (!v) return
+    const r = Math.min(Math.max(y - 1 - v.first, 0), v.avail - 1) // a drag past the edge stops at it
+    const at = { row: v.top + Math.min(r, Math.max(0, v.count - 1)), col: x - 1 }
+    if (!(b & 32) && !up) {
+      // a press: starts a selection, inside the conversation only
+      this.sel = y - 1 >= v.first && y - 1 < v.first + v.count ? { a: at, b: at, moved: false } : null
+      return this.render()
+    }
+    if (!this.sel) return
+    if (at.row !== this.sel.b.row || at.col !== this.sel.b.col) Object.assign(this.sel, { b: at, moved: true })
+    if (up) {
+      const text = this.sel.moved && this.#selected()
+      if (!text) this.sel = null
+      else this.notice(`copied ${text.length} character${text.length === 1 ? '' : 's'}${copyText(text) === 'osc' ? ' (through the terminal)' : ''}`)
+    }
+    this.render()
+  }
+  #selRange() {
+    const { a, b } = this.sel
+    return a.row < b.row || (a.row === b.row && a.col <= b.col) ? [a, b] : [b, a]
+  }
+  #selected() {
+    const [s, e] = this.#selRange()
+    const all = this.#rows(this.out.columns || 80)
+    const lines = []
+    for (let r = s.row; r <= e.row; r++) lines.push(sliceCols((all[r] ?? '').replace(/\x1b\[[0-9;]*m/g, ''), r === s.row ? s.col : 0, r === e.row ? e.col + 1 : Infinity).trimEnd())
+    return lines.join('\n').trim()
+  }
+
+  // Sends a line at the main prompt as if typed; what was typed there comes back at the next prompt.
+  submit(line) {
+    this.kept = this.rl.line
+    this.rl.line = line
+    this.sent = line
+    this.menu.items = []
+    this.ttyWrite('\r', { name: 'return' })
+  }
+
+  // The conversation scrolls (rows up, negative: down); the tabs, the input and the status bar stay.
+  scrollBy(n) {
+    if (!this.full || this.out.hidden) return
+    this.scroll = Math.max(0, this.scroll + n)
+    this.render()
+  }
+  page() {
+    return Math.max(1, (this.out.rows || 24) - 4)
   }
 
   // Back to the normal screen, leaving the conversation in the terminal's scrollback.
   leaveFullscreen() {
     if (!this.full) return
     this.full = false
-    this.out.write('\x1b[?2004l\x1b[<u\x1b[?1049l' + this.log.join('\n').replace(/\n+$/, '') + '\n')
+    this.out.write(MOUSE_OFF + '\x1b[?2004l\x1b[<u\x1b[?1049l' + this.log.join('\n').replace(/\n+$/, '') + '\n')
   }
 
   // After a theme change: what's on screen already, in the new colors (before/after: themeCodes()).
@@ -516,7 +831,7 @@ export class UI {
 
   // Replaces the conversation on screen (resuming or rewinding a session).
   setLog(lines) {
-    this.log = lines?.length ? [...lines] : ['']
+    this.log = lines?.length ? markdownRows(lines) : ['']
     if (this.log.at(-1) !== '') this.log.push('')
     this.wrapped = []
     this.scroll = 0
@@ -565,16 +880,12 @@ export class UI {
     const below = [hiddenBelow ? note(hiddenBelow, '↓') : rule, ...(this.status ? [fit(' ' + this.status(), cols)] : [])] // under the input
     const bottom = []
     if (this.timer && !this.asking) {
-      // since the message was sent, and (while waiting on the model) since this request was sent
-      const since = (t) => {
-        const secs = Math.floor((Date.now() - t) / 1000)
-        return secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`
-      }
+      // how long it's been at this message, and (while waiting on the model) since this request was sent
       const request = this.requestSince?.()
-      const extra = this.busySince ? ` · total ${since(this.busySince)}${request ? ` · waiting for model ${since(request)}` : ''} · Esc to stop` : ''
+      const extra = this.busySince ? ` · responding ${duration(this.worked())}${request ? ` · waiting for model ${duration(Date.now() - request)}` : ''} · Esc to stop` : ''
       bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(this.#label())}${c.faint(extra)}`, cols))
     }
-    if (this.scroll) bottom.push(c.dim(`  ↓ ${this.scroll} more lines below · PgDn`))
+    if (this.scroll) bottom.push(c.dim(`  ↓ ${this.scroll} more lines below · scroll down, Shift+↓ or PgDn`))
     if (this.noticeText) bottom.push(fit(`${c.warn('!')} ${c.muted(this.noticeText)}`, cols))
     if (menu.on) bottom.push(...this.#menuLines(cols))
     bottom.push(first ? note(first, '↑') : rule)
@@ -585,6 +896,11 @@ export class UI {
     this.scroll = Math.min(this.scroll, Math.max(0, all.length - avail))
     const top = Math.max(0, all.length - avail - this.scroll)
     const view = all.slice(top, top + avail)
+    this.viewAt = { top, first: head.length, avail, count: view.length } // where the conversation is, for the mouse
+    if (this.sel) {
+      const [s, e] = this.#selRange()
+      for (let i = Math.max(0, s.row - top); i <= Math.min(view.length - 1, e.row - top); i++) view[i] = highlight(view[i], top + i === s.row ? s.col : 0, top + i === e.row ? e.col + 1 : Infinity)
+    }
     // a theme with a background: every row painted with it (a style ending its own background goes back to it)
     const row = background ? (line) => `${background}${line.replace(/\x1b\[(0|49)?m/g, (m) => m + background)}\x1b[K\x1b[0m` : (line) => `${line}\x1b[0m\x1b[K`
     let s = '\x1b[?25l'
@@ -607,8 +923,10 @@ export class UI {
     const out = rl._writeToOutput.bind(rl)
     rl._writeToOutput = (t) => (this.full ? undefined : out(t)) // in full screen, render() draws the input
     const write = rl._ttyWrite.bind(rl)
+    this.ttyWrite = write
     rl._ttyWrite = (s, key = {}) => {
       if (!this.full) return write(s, key)
+      if (this.sel) (this.sel = null), this.render() // a key ends a selection
       const bound = !(key.ctrl && key.name === 'c') && this.keys[keyId(key, s)] // ~/.heart/keybindings.json
       if (this.recording) return this.recording.key(key, bound) // voice: Space, Enter, Esc; the rest waits
       // a fixed dialog (pick(…, { fixed })): only its keys, nothing typed and no shortcuts
@@ -632,11 +950,7 @@ export class UI {
           return this.render()
         }
       }
-      if (key.name === 'pageup' || key.name === 'pagedown') {
-        const page = Math.max(1, (this.out.rows || 24) - 4)
-        this.scroll = Math.max(0, this.scroll + (key.name === 'pageup' ? page : -page))
-        return this.render()
-      }
+      if (key.name === 'pageup' || key.name === 'pagedown') return this.scrollBy(key.name === 'pageup' ? this.page() : -this.page())
       const m = this.menu
       const it = m.on && m.items[m.sel]
       if (this.noticeText && !(key.ctrl && key.name === 'c')) this.notice('') // any key dismisses a notice
@@ -729,10 +1043,7 @@ export class UI {
     const rl = this.rl
     if (key.name === 'escape') return this.onEscape?.()
     if (key.name === 'tab' && key.shift) return this.setPermission(PERMISSIONS[(PERMISSIONS.findIndex(([p]) => p === this.permission) + 1) % PERMISSIONS.length][0])
-    if (key.name === 'pageup' || key.name === 'pagedown') {
-      this.scroll = Math.max(0, this.scroll + (key.name === 'pageup' ? 1 : -1) * Math.max(1, (this.out.rows || 24) - 4))
-      return this.render()
-    }
+    if (key.name === 'pageup' || key.name === 'pagedown') return this.scrollBy(key.name === 'pageup' ? this.page() : -this.page())
     if (key.name === 'return' && !key.meta && !this.pasting) {
       const line = rl.line.trim()
       rl.line = ''
@@ -792,8 +1103,10 @@ export class UI {
         break
       case 'scroll_up':
       case 'scroll_down':
-        this.scroll = Math.max(0, this.scroll + (what === 'scroll_up' ? 1 : -1) * Math.max(1, (this.out.rows || 24) - 4))
-        return this.render()
+        return this.scrollBy(what === 'scroll_up' ? this.page() : -this.page())
+      case 'scroll_line_up':
+      case 'scroll_line_down':
+        return this.scrollBy(what === 'scroll_line_up' ? 3 : -3)
     }
     if (!this.asking) {
       this.ahead.push(what)
@@ -1047,6 +1360,7 @@ export class UI {
 
   // history: this prompt's messages go into ↑/↓ history (only the main prompt, never answers like keys).
   ask(prompt, { initial = '', suggest = false, history = false } = {}) {
+    if (history && this.kept) [initial, this.kept] = [initial || this.kept, ''] // typed before a submit()
     this.stopSpin()
     const rl = this.#rl()
     if (history) this.mainPrompt = prompt
@@ -1071,6 +1385,7 @@ export class UI {
     this.draft = ''
     if (this.full) {
       this.asking = true
+      this.askedAt = Date.now()
       this.render() // cursor to the input row
     }
     rl.setPrompt(prompt)
@@ -1089,6 +1404,7 @@ export class UI {
         if (l !== null && !rl.terminal) this.out.write(l + '\n')
         if (this.full) {
           this.asking = false
+          if (this.busySince) this.waited += Date.now() - this.askedAt // waiting on you isn't HeartCode working
           this.scroll = 0
           const pick = this.menu.pick
           const echo = prompt.replace(/^ /, '') // the input's margin isn't part of the conversation
@@ -1255,7 +1571,12 @@ export class UI {
   busy() {
     if (!this.full) return
     this.busySince = Date.now()
+    this.waited = 0
     this.spinner('working')
+  }
+  // time spent on the work so far, without the time it waited for your answers
+  worked() {
+    return Date.now() - this.busySince - this.waited - (this.asking ? Date.now() - this.askedAt : 0)
   }
   idle() {
     this.busySince = null

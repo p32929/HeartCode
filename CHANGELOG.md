@@ -2,6 +2,22 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.21 (2026-10-31)
+
+- How long HeartCode took to answer: the spinner counts "responding 45s" while it works, and when
+  it's done a line stays under the answer ("✻ took 1m 12s"). Time spent waiting for your answer
+  to its questions isn't counted, and the line doesn't keep counting after it's done.
+- The mouse wheel scrolls just the conversation: the tabs, the input and the status bar stay where
+  they are.
+- Select text in the conversation by dragging with the mouse: it's highlighted and copied when you
+  let go ("copied 42 characters"). A click or a key clears it.
+- Keys to scroll the conversation: Shift+↑/↓ (3 lines), Alt+↑/↓ or PgUp/PgDn (a page).
+- Closing a tab (Ctrl+Q, or the new /close_tab) asks first.
+- The model's answers are drawn as Markdown as they stream in: headings, **bold**, *italic*,
+  `code`, lists, quotes, code blocks and rules (/copy and /export keep the Markdown as written).
+  The thinking too, and answers in sessions and tabs from before, when they're shown again.
+- The model is told to give choices as a numbered list, and to keep to simple Markdown (no tables).
+
 ## 0.1.20 (2026-10-31)
 
 - The settings page's accent is green.

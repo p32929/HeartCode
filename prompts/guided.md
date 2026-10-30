@@ -176,6 +176,7 @@ What question do you want to ask the user? Reply with only the question.
 ## finish
 
 Now write your final reply to the user: answer their request, or briefly summarize what was changed. Be clear and concise.
+Options for the user to choose from: a numbered list (1. 2. 3.), never bullets. Simple Markdown only (**bold**, `code`, plain lists, code blocks); no tables.
 
 ## describe-image
 

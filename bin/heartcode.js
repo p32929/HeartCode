@@ -7,7 +7,7 @@ import { probe, loadProfile, strategy, describe, profilePath, profileFrom } from
 import { learnFromUsage, LIMIT_MS } from '../src/context.js'
 import { Session, transcript } from '../src/agent.js'
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
-import { UI, c, PERMISSIONS, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys } from '../src/ui.js'
+import { UI, c, PERMISSIONS, duration, copyText, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys } from '../src/ui.js'
 import { listFiles, runCommand, clip } from '../src/tools.js'
 import { log, LOG_FILE, LOG_DIR, requestLog, useRequestLog, useLogs, pruneLogs, logDays } from '../src/log.js'
 import { prompt, usePromptsFrom, reloadPrompts } from '../src/prompts.js'
@@ -126,6 +126,7 @@ const SECTIONS = [
     ['/settings', 'change providers, models, settings, MCP servers, hooks, keys and skills in your browser'],
     ['/help', 'this list'],
     ['/tab', 'a new tab (Ctrl+T): another conversation beside this one · /tab worktree [name]: in its own git worktree · /tab 2: go to tab 2 (Ctrl+N/P) · Ctrl+Q closes one', true],
+    ['/close_tab', 'close this tab (Ctrl+Q); asks first'],
     ['/exit', 'quit HeartCode (Ctrl+Q closes just this tab)'],
   ]],
 ]
@@ -1048,14 +1049,6 @@ function leaveTabWorktree(app) {
   ui.print(`${c.dim('kept worktree')} ${c.info(wt.dir)} ${c.dim('on')} ${c.info(wt.branch)} ${c.faint(`· merge: git merge ${wt.branch} (commit in the worktree first)`)}`)
 }
 
-// The system clipboard (pbcopy, clip, wl-copy, xclip, xsel); else the terminal's (OSC 52, works over SSH too).
-function copyText(text) {
-  const tools = process.platform === 'darwin' ? [['pbcopy']] : process.platform === 'win32' ? [['clip']] : [['wl-copy'], ['xclip', '-selection', 'clipboard'], ['xsel', '-b', '-i']]
-  for (const [cmd, ...args] of tools) if (spawnSync(cmd, args, { input: text, stdio: ['pipe', 'ignore', 'ignore'] }).status === 0) return 'system'
-  process.stdout.write(`\x1b]52;c;${Buffer.from(text).toString('base64')}\x07`)
-  return 'osc'
-}
-
 // A model's profile: the saved one; else what models.dev says (nothing is sent to the model to
 // find out); a model it doesn't know: plain assumptions, until you set it up on the settings page.
 // force (/test_model, heart probe): test it now instead, with real requests.
@@ -1095,6 +1088,8 @@ async function slash(app, line) {
   const [cmd, ...args] = line.slice(1).trim().split(/\s+/)
   const { ui, cfg } = app
   switch (cmd) {
+    case 'close_tab':
+      return void (await app.closeTab())
     case 'exit':
     case 'quit': {
       const n = app.tabs?.list.length ?? 1
@@ -1351,17 +1346,31 @@ async function repl(app, f = {}) {
     ui.close()
     process.exit(0)
   }
-  // Ctrl+Q: this tab (working: press it again to stop the work too); the last one quits
-  let lastClose = 0
-  ui.onCloseTab = () => {
-    if (ctl && Date.now() - lastClose > 2000) {
-      lastClose = Date.now()
-      return ui.notice('Still working: Ctrl+Q again stops it and closes this tab', 2000)
+  // Ctrl+Q, /close_tab: this tab, after asking (working: that stops too); the last one quits
+  let closing = false
+  app.closeTab = async (working = false) => {
+    if (closing) return
+    closing = true
+    try {
+      const last = (app.tabs?.list.length ?? 1) < 2
+      const go = await ui.pick(`Close this tab?${working ? ' It is still working: that stops too.' : ''}`, [
+        { label: 'Yes, close it', desc: last ? 'the last tab: HeartCode quits (it comes back next time)' : undefined, yes: true },
+        { label: 'No' },
+      ])
+      if (!go?.yes) return
+      if (last && app.tabs) app.tabs.quitting = true
+      ctl?.abort()
+      ui.cancelAsk()
+      ui.close()
+    } finally {
+      closing = false
     }
-    if (app.tabs.list.length < 2) app.tabs.quitting = true
-    ctl?.abort()
-    ui.cancelAsk()
-    ui.close()
+  }
+  ui.onCloseTab = () => {
+    if (closing) return
+    if (!ui.asking) return app.closeTab(true) // working: asked over the work
+    if (!ui.histOn || ui.menu.pick) return ui.notice('Answer this first, then Ctrl+Q', 2000)
+    ui.submit('/close_tab') // at the prompt: asked in its turn, like a typed /close_tab
   }
   const others = () => (app.tabs?.list.length ?? 1) - 1
   ui.onInterrupt = () => {
@@ -1433,6 +1442,7 @@ async function repl(app, f = {}) {
         ui.setPermission(go.mode)
         ok = await runTask(app, prompt('agent/plan-approved'), ctl)
       }
+      if (ui.busySince) ui.print(c.faint(c.italic(`✻ took ${duration(ui.worked())}`))) // fixed once the reply is in
     }
     ui.idle()
     ctl = null
