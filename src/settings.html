@@ -1241,9 +1241,9 @@ function drawProviders(s) {
       h('label', { className: 'f', for: 'r-on', textContent: 'When the one in use fails, go on to the next' }),
       h('div', { className: 'row', style: 'gap:8px' },
         h('select', { id: 'r-on', style: 'flex:1', onchange: (e) => save(order, 'saved', { on: e.target.value }) },
-          [['failure', 'at its first failure'], ['retries', 'after some tries of the same model'], ['any', 'at any error']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.on === v }))),
+          [['failure', 'at its first failure'], ['retries', 'after some tries of the same model (rate limits, outages)']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.on === v }))),
         s.rotation.on === 'retries' ? h('input', { type: 'number', 'aria-label': 'tries', title: 'tries of the same model first', style: 'width:76px', min: 1, max: 20, value: s.rotation.retries, onchange: (e) => save(order, 'saved', { retries: Number(e.target.value) }) }) : null),
-      h('div', { className: 'hint', textContent: { failure: 'A rate limit, server error, timeout or lost connection moves on at once, and so does a model it can\'t use (a wrong key, no access, "model not found"). Other errors, like a bad request, stop.', retries: 'The same model is tried again (with a short wait) that many times first.', any: 'Also errors like "model not found" or a bad request move on.' }[s.rotation.on] }),
+      h('div', { className: 'hint', textContent: { failure: 'Any error moves on at once, to another provider\'s model first. It stops only when every model fails.', retries: 'A rate limit or outage: the same model is tried again (with a short wait) that many times first. Any other error moves on at once.' }[s.rotation.on] ?? 'Any error moves on at once, to another provider\'s model first.' }),
       h('label', { className: 'f', for: 'r-next', textContent: 'A new message starts with' }),
       h('select', { id: 'r-next', onchange: (e) => save(order, 'saved', { next: e.target.value }) },
         [['first', '#1 again'], ['stay', 'the model that answered last']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.next === v })))) : null)

@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util'
 import { Client } from '../src/client.js'
 import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, DEFAULT_MODEL, VERSION } from '../src/config.js'
 import { probe, loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
-import { learnFromUsage, RATE_CAP_MS, LIMIT_MS } from '../src/context.js'
+import { learnFromUsage, LIMIT_MS } from '../src/context.js'
 import { Session, transcript } from '../src/agent.js'
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
 import { UI, c, PERMISSIONS, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys } from '../src/ui.js'
@@ -312,14 +312,6 @@ class App {
       if (change === 'cut') ui.warn(`${client.model} silently cut a request to ~${profile.inputLimit} tokens: that's its window here; keeping the conversation within it`)
       if (change) log('context', `${change}: ${used} tokens counted, ~${estimate} estimated; window now ${strategy(profile, cfg).context}`, { was, largestAccepted: profile.largestAccepted, inputLimit: profile.inputLimit, tokenRatio: profile.tokenRatio })
       if (change) learned()
-    }
-    // The server said "too large" with its limit: remembered for this model (also next time). A
-    // per-minute cap is your account's at this provider: kept apart, for a day.
-    client.onInputLimit = (n, { rate = false } = {}) => {
-      if (rate) profile.rateCap = { tokens: n, until: Date.now() + RATE_CAP_MS }
-      else Object.assign(profile, { inputLimit: Math.min(profile.inputLimit ?? Infinity, n), inputLimitAt: Date.now() })
-      learned()
-      ui.warn(rate ? `${client.provider} takes at most ~${n} tokens a minute on your account; shortening the conversation to fit (for today)` : `${client.model} takes at most ~${n} tokens per request here; shortening the conversation to fit`)
     }
     // models.dev's published size for the model (a day old at most): used when the server doesn't say
     loadPrices().then(() => {

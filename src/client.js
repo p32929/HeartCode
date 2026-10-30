@@ -228,7 +228,8 @@ export class Client {
   #rotate(e, tries, pick) {
     const r = this.rotation
     if (!r) return false
-    if (!(r.on === 'any' || (r.on === 'failure' && (outage(e) || unusable(e))) || (r.on === 'retries' && (tries >= r.retries || unusable(e))))) return false
+    // at any failure; "after retries": a failure waiting can fix (a rate limit, an outage) is tried again first
+    if (r.on === 'retries' && outage(e) && tries < r.retries) return false
     r.at = pick ? pick() : (r.at + 1) % r.list.length
     log('rotate', `${e.message.slice(0, 200)} → ${r.list[r.at].provider} · ${r.list[r.at].model}`)
     this.#use(r.list[r.at])
@@ -400,40 +401,16 @@ export class Client {
   // 60s, or the server's Retry-After) until it works or the signal aborts. onRetry(error, ms,
   // attempt) reports each wait; onRetry(null) reports the recovery.
   async chat(body, opts = {}) {
-    // "too large": never retried as is; the limit is learned and the caller sends less
-    const tooLarge = (e) => {
-      const limit = inputLimit(e, Math.round(estMessages(body.messages) * this.tokenRatio), this.knownGood)
-      if (!limit) return false
-      e.inputLimit = limit // this request is sent smaller
-      // remembered only when the server said the number (a guess isn't); a per-minute cap apart
-      const said = limitSaid(e)
-      log('limit', `request too large; ${said ? `the server says ${said.tokens}${said.rate ? ' per minute' : ''}` : `no limit given, trying ~${limit}`}`)
-      if (said) this.onInputLimit?.(said.tokens, { rate: said.rate })
-      return true
-    }
     if (!this.onRetry) {
-      try {
-        return await this.#timed(body, opts)
-      } catch (e) {
-        tooLarge(e)
-        throw e
-      }
+      return await this.#timed(body, opts)
     }
     let tries = 0 // of the model being tried now
     let round = 0 // models tried since the last wait (a whole round of them failing: a short pause)
     let hard = true // every failure in this round was one that waiting can't fix (see outage)
-    let refusedBy = 0 // models that refused this request (a bad request), tried in turn
+    let rounds = 0 // whole rounds of the list that failed
     const tried = new Set() // places in the model list tried for this request
     const down = new Set() // providers that answered it with an error (400 or above): their other models are skipped
-    const first = this.target
     for (let attempt = 0; ; attempt++) {
-      // moved on to a model with a smaller window than the conversation was fitted to: handed back
-      // (as "too large", at that window) so the caller summarizes it first, instead of a refusal
-      const sent = this.target !== first && body.messages && this.can?.context && Math.round(estMessages(body.messages) * this.tokenRatio)
-      if (sent > this.can.context * 0.9) {
-        log('limit', `${this.model}: ~${sent} tokens don't fit its window (${this.can.context}); handed back to be made smaller`)
-        throw Object.assign(new Error(`the conversation (~${sent} tokens) is too large for ${this.model} (${this.can.context})`), { inputLimit: this.can.context, fitted: true })
-      }
       try {
         const r = await this.#timed(body, { ...opts, once: true })
         if (attempt) this.onRetry(null)
@@ -442,22 +419,11 @@ export class Client {
         return r
       } catch (e) {
         if (e.name === 'AbortError' || opts.signal?.aborted) throw e
-        if (tooLarge(e)) throw e // the caller shrinks the conversation and sends again
         this.onFail?.(e, { provider: this.provider, model: this.model }) // counted for orchestration
-        if (this.retryIf && !this.retryIf(e, attempt)) throw e
-        // A bad request (400…) with a list of models: the next one may take it (it's often what the
-        // conversation holds from another model). Two more at most, then it stops.
-        if (!outage(e) && !unusable(e) && this.rotation && this.rotation.on !== 'any' && refusedBy < Math.min(2, this.rotation.list.length - 1)) {
-          refusedBy++
-          this.#next(`refused (${e.status})`, () => this.#pick(e, tried, down))
-          this.onRetry(e, 0, attempt + 1, this.target)
-          continue
-        }
-        // A bad request (400…): the same request fails the same way every time, so it isn't sent
-        // again. It stops here, unless the model list moves on at any error (the settings page). A
-        // model that can't be used (a wrong key or name: 401, 403, 404) makes way for the next one
-        // in the list; a whole round of those stops too, rather than going round.
-        if (!outage(e) && !(unusable(e) && this.rotation) && this.rotation?.on !== 'any') throw e
+        // With a list of models, any failure makes way for the next one (another provider's first).
+        // Without one, only what waiting can fix is tried again.
+        if (!(this.rotation?.list.length > 1) && !outage(e)) throw e
+        if (this.retryIf && !this.retryIf(e, tries)) throw e // headless: --max-retries for one model
         hard &&= !outage(e)
         tries++
         if (this.#rotate(e, tries, () => this.#pick(e, tried, down))) {
@@ -466,6 +432,7 @@ export class Client {
           // requests a minute); the user chose "round again at once"
           if (++round >= this.rotation.list.length) {
             if (hard) throw e // every model refused it outright: going round again won't change that
+            if (this.retryIf && !this.retryIf(e, ++rounds)) throw e // headless: --max-retries whole rounds
             hard = true
             round = 0
             this.onRetry(e, 1000, attempt + 1, this.target)

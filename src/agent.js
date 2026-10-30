@@ -104,7 +104,7 @@ export class Session {
     const body = native ? chat.messages.slice(head.length) : []
     const conversation = native ? transcript(body) : chat.history.map((h) => `User: ${h.task}\nAssistant: ${h.answer}`).join('\n\n')
     if (!conversation.trim()) return null
-    let room = Math.floor((strat.context * 0.6 * 3.5) / (strat.ratio ?? 1)) // characters of conversation the summary request can carry
+    const room = Math.floor((strat.context * 0.6 * 3.5) / (strat.ratio ?? 1)) // characters of conversation the summary request can carry
     const cut = () => (conversation.length > room ? `[… the earliest part is cut]\n${conversation.slice(-room)}` : conversation)
     const before = native ? size(body) : est(conversation)
     ui.spinner(midTask ? 'context almost full: compacting the conversation' : 'compacting the conversation')
@@ -114,17 +114,7 @@ export class Session {
     const request = (extra) => prompt('compact/summarize', { conversation: cut(), focus }) + extra
     const send = (extra) =>
       client.chat({ messages: strat.mergeSystem ? [{ role: 'user', content: `${prompt('compact/summarizer')}\n\n${request(extra)}` }] : [{ role: 'system', content: prompt('compact/summarizer') }, { role: 'user', content: request(extra) }] }, { signal })
-    // too large even for the summary request: send less of it (the newest part) until it fits
-    const ask = async (extra = '') => {
-      for (;;) {
-        try {
-          return await send(extra)
-        } catch (e) {
-          if (!e.inputLimit || room < 2000) throw e
-          room = Math.floor(Math.min(room, (e.inputLimit * 3.5) / (strat.ratio ?? 1)) * 0.7)
-        }
-      }
-    }
+    const ask = (extra = '') => send(extra)
     let summary = notSummary((await ask()).content)
     if (!summary) {
       log('compact', 'the reply was not a summary; asking again')
@@ -603,18 +593,12 @@ async function runNative(s, task, images, signal) {
     s.messages.push({ role: 'user', content: s.chat.branchNote }, { role: 'assistant', content: prompt('compact/acknowledged') })
     delete s.chat.branchNote
   }
-  let shrink = 1 // drops when the server says a request is too large
   s.compactedAt = -1
-  // What may be sent: the window less a tenth (estimates are estimates) and less room for the
-  // reply (the longest the model gives, from models.dev, at most a quarter of the window; 8k when
-  // unknown) and the tools; trimming keeps to it. Auto-compact starts at 90% of it, so it comes
-  // before any trimming.
-  // s.sizeCap: "too large" without the server saying its limit: a guess for this conversation only
-  const windowSize = () => Math.min(strat.context, s.sizeCap ?? Infinity)
-  const reply = () => Math.min(strat.reply || 8192, Math.floor(windowSize() * 0.25))
-  const budget = () => Math.floor(((windowSize() * 0.9 - reply()) * shrink) / (strat.ratio ?? 1)) - 800 // in estimated tokens
-  const nearlyFull = () => s.autoCompact && s.messages.length > 3 && size(s.messages) > budget() * 0.9
-  // Already near full from earlier messages: compact first, so the new message stays word for word.
+  // Auto-compact: every 100 messages, the conversation is summarized (what fits each model is
+  // models.dev's business and the model list's: one that fails, the next takes over)
+  const COMPACT_AT = 100
+  const nearlyFull = () => s.autoCompact && s.messages.length >= COMPACT_AT + (s.compactFailedAt ?? 0)
+  // Already that long from earlier messages: compact first, so the new message stays word for word.
   if (nearlyFull()) {
     await s.compact({ signal }).catch((e) => (e.name === 'AbortError' ? Promise.reject(e) : ui.warn(`could not compact: ${e.message}`)))
   }
@@ -657,17 +641,17 @@ async function runNative(s, task, images, signal) {
       ui.warn(`stopped after ${s.maxTurns} steps (--max-turns); say "continue" to go on`)
       throw Object.assign(new Error(`stopped after ${s.maxTurns} steps (--max-turns)`), { maxTurns: true })
     }
-    // after a failed compaction, the next try waits until the conversation grew by a fifth
-    if (nearlyFull() && s.messages.length > 4 && step !== s.compactedAt && size(s.messages) > (s.compactFailedAt ?? 0) * 1.2) {
+    // after a failed compaction, the next try waits for 20 more messages
+    if (nearlyFull() && step !== s.compactedAt) {
       s.compactedAt = step
-      await s.compact({ signal, midTask: true, task }).catch((e) => {
-        if (e.name === 'AbortError') throw e
-        // no summary: free the space anyway, by shortening older tool output and dropping the oldest turns
-        fitMessages(s.messages, Math.floor(budget() * 0.5))
-        s.compactFailedAt = size(s.messages)
-        ui.warn(`could not compact (${e.message}); shortened older tool output and messages instead`)
-        log('compact', `failed (${e.message}); trimmed to ~${s.compactFailedAt} tokens`)
-      })
+      await s.compact({ signal, midTask: true, task }).then(
+        () => (s.compactFailedAt = 0),
+        (e) => {
+          if (e.name === 'AbortError') throw e
+          s.compactFailedAt = (s.compactFailedAt ?? 0) + 20
+          log('compact', `failed (${e.message}); trying again 20 messages later`)
+        },
+      )
     }
     // what the user typed while it worked goes in before the next step (steering)
     const added = step && !s.isSub ? (ui.takeAhead?.() ?? []) : []
@@ -679,31 +663,13 @@ async function runNative(s, task, images, signal) {
     // the model answering can change mid-message (your model list): the system prompt follows it
     const now = SYSTEM(s)
     if (s.messages[0]?.content !== now && (s.messages[0]?.role === 'system' || strat.mergeSystem)) s.messages[0] = { ...s.messages[0], content: now }
-    fitMessages(s.messages, budget())
     pairTools(s.messages)
     ui.spinner('thinking')
     const out = ui.response(client.model) // named: helpers think too (theirs are named in helperUI)
     const stream = strat.toolsStream
-    let res
-    try {
-      // A long tool call (a whole file) streams in silently: say what's being written.
-      const onToolDelta = (name, args) => ui.spinner(`${name === 'run_command' ? 'preparing a command' : `writing ${/"path"\s*:\s*"([^"]+)"/.exec(args)?.[1] ?? name}`} · ${args.length >= 1000 ? `${(args.length / 1000).toFixed(1)}k` : args.length} chars`)
-      res = await client.chat({ messages: s.messages, tools, stream }, { signal, onToken: out.text, onReasoning: out.think, onToolDelta })
-    } catch (e) {
-      if (!e.inputLimit || shrink < 0.3) throw e
-      // what every request carries (the system prompt and the tools) is over the limit already: no
-      // shorter conversation fits (a per-minute cap smaller than that), so not tried again
-      const fixed = Math.round((est(JSON.stringify(tools)) + sizeOf(s.messages[0])) * (strat.ratio ?? 1))
-      if (fixed >= e.inputLimit) throw Object.assign(e, { message: `${e.message} (the system prompt and tools alone are ~${fixed} tokens: this can't fit)` })
-      out.end()
-      // e.fitted: the next model's window is smaller (strat already follows it): compacted at once
-      if (!e.fitted) {
-        s.sizeCap = Math.min(s.sizeCap ?? Infinity, e.inputLimit)
-        shrink *= 0.8 // strat.context already dropped to the limit; leave more headroom each time
-      }
-      step--
-      continue
-    }
+    // A long tool call (a whole file) streams in silently: say what's being written.
+    const onToolDelta = (name, args) => ui.spinner(`${name === 'run_command' ? 'preparing a command' : `writing ${/"path"\s*:\s*"([^"]+)"/.exec(args)?.[1] ?? name}`} · ${args.length >= 1000 ? `${(args.length / 1000).toFixed(1)}k` : args.length} chars`)
+    const res = await client.chat({ messages: s.messages, tools, stream }, { signal, onToken: out.text, onReasoning: out.think, onToolDelta })
     ui.stopSpin()
     if (!stream) {
       out.think(res.reasoning)

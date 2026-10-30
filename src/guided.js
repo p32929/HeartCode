@@ -225,14 +225,8 @@ class Guided {
 
   // `answer: true` streams the reply to the user as the answer; otherwise only thinking is shown.
   // room: tokens of context to keep free for the reply (only for fitting the context; never sent).
-  async query(question, opts = {}, tries = 0) {
-    try {
-      return await this.ask1(question, opts, tries)
-    } catch (e) {
-      // too large for the model: strat.context has dropped to its limit, so the context shrinks
-      if (!e.inputLimit || tries >= 3) throw e
-      return this.query(question, opts, tries + 1)
-    }
+  query(question, opts = {}) {
+    return this.ask1(question, opts)
   }
 
   async ask1(question, { room = 32, schema, oneLine, onToken, answer, skipKey } = {}, tries = 0) {

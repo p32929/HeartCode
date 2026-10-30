@@ -51,21 +51,17 @@ reached has an `error` and is skipped; the command still exits `0`.
 | `default`, or no `-m` | the user's list: #1, and the next one in order when it fails (rate limits, outages…). Use this unless you need one particular model. |
 | a model from the list: `-m "<provider> <model>"` (`-m "groq openai/gpt-oss-120b"`), or `-m <model>` alone | that model alone: never another one, also when it fails (a rate limit or an outage is tried again, up to `--max-retries`) |
 
-**Failures:** a rate limit, a server error, a timeout, a reply that stops coming (nothing for 150s),
-a lost connection, or an error page from a proxy in front of the provider is waited out and tried
-again (or handed to the next model in the list), up to `--max-retries` (10). With the default
-list, a model that can't be used (a wrong key, no access to it, a name the server doesn't know:
-401, 403, 404) also makes way for the next one, and so does one that keeps replying with nothing. When a
-provider answers with an error (status 400 or above), the next model tried is from another
-provider; that provider's other models are tried only after every provider has had a go.
-A model that takes over with a smaller context window gets the conversation summarized first, if it
-wouldn't fit.
-The run stops with that error and exit code `1` when every model in the list fails that way, or
-when a single model (`-m <model>`) does. A request a server refuses (400) is sent as it is to two
-more models of the list at most, then the run stops (unless the user set the fallback rule to "at
-any error"). A provider that refuses a part
-of the request HeartCode can do without (the model's thinking sent back, keys in the tools'
-schemas, images) gets it again without that part, and that is remembered for the model for a day.
+**Failures:** with the default list, any failure (an error status of any kind, a timeout, a reply
+that stops coming, a lost connection, an error page from a proxy, a model that keeps replying with
+nothing) makes way for the next model, from another provider first; that provider's other models
+are tried only after every provider has had a go. None of it shows: the run goes on with the model
+that answers. It stops with exit code `1` only when every model in the list fails: at once if they
+all refused the request outright, else after `--max-retries` (10) whole rounds of them. A single
+model (`-m <model>`) waits out rate limits and outages, up to `--max-retries` tries, and stops at
+any other error. A provider that refuses a part of the request HeartCode can do without (the
+model's thinking sent back, keys in the tools' schemas, images) gets it again without that part,
+and that is remembered for the model for a day. A long conversation is summarized every 100
+messages.
 Each request is fitted to the model it goes to: one that can't see gets a note in place of each
 image, one that can't call tools gets the tool calls as text.
 
