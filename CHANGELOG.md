@@ -2,6 +2,17 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.13 (2026-10-30)
+
+- Settings no longer go back by themselves: a save writes only what changed, so another HeartCode
+  or settings page with an older copy doesn't undo your change (and keys HeartCode doesn't know stay).
+- A settings change reaches every HeartCode running on the same settings at once, mid-task too: the
+  model order, prompts and HEARTCODE.md, hooks, skills, MCP servers. Open settings pages update by themselves.
+- `--temp` runs going on at once share one throwaway folder: a change in one reaches the others,
+  never your real settings. Ctrl+C now cleans it up too.
+- Settings page: nothing is kept in the browser (the provider ranking, sorts and folds are in
+  ~/.heart); Save order is always there; Invert selection on Your models.
+
 ## 0.1.12 (2026-10-30)
 
 - `auto` is the name for your model list (#1, then the next when one fails); `default` still works.
