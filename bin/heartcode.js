@@ -101,7 +101,7 @@ const SECTIONS = [
   ]],
   ['settings', [
     ['/toggle_thinking', "show or collapse the model's thinking"],
-    ['/voice', 'say your message (or press Ctrl+R in the input): it goes in the input box'],
+    ['/voice', 'say your message (or Ctrl+R): Space to talk, Enter to finish; it shows in the input box as you speak'],
   ]],
   ['session', [
     ['/resume', 'continue an earlier session in this folder'],
@@ -207,7 +207,7 @@ class App {
       `effort: ${cfg.effort ?? 'default'}`,
       `auto_compact: ${cfg.autoCompact === false ? 'off' : 'on'}`,
       `director: ${cfg.director === false ? 'off' : 'on'}`,
-      `model: ${cfg.provider ?? '(none)'} ${cfg.model ?? ''}`,
+      `model: ${this.inUse() ? `${this.inUse().provider} ${this.inUse().model}` : '(none)'}`,
       `providers: ${Object.keys(cfg.providers).join(', ') || '(none)'}`,
     ].join('\n')
   }
@@ -408,7 +408,8 @@ class App {
       'Go back to before which message?',
       turns.map(({ t, i }) => {
         const n = Object.keys(chat.turns.slice(i).reduce((all, x) => Object.assign(all, x.files), {})).length
-        return { label: t.task.split('\n')[0].slice(0, 70), desc: `${ago(t.at)}${n ? ` · ${n} file${n > 1 ? 's' : ''} changed since` : ''}`, i }
+        const num = `${i + 1}.`.padStart(String(chat.turns.length).length + 1) // its number in the conversation, newest first
+        return { label: `${num} ${t.task.split('\n')[0].slice(0, 70)}`, desc: `${ago(t.at)}${n ? ` · ${n} file${n > 1 ? 's' : ''} changed since` : ''}`, i }
       }),
     )
     if (!pickTurn) return
@@ -583,10 +584,11 @@ class App {
     const sep = c.ghost(' │ ')
     if (!cfg.providers[cfg.provider] || !cfg.model) return c.dim('no model · /settings to choose one')
     const rot = this.s?.client.rotation
-    const now = rot?.list[rot.at] ?? { provider: cfg.provider, model: cfg.model } // the model list: the one in use
+    const now = this.inUse() // the model list's one in use; never one of a provider that's off
+    if (!now) return c.dim('the providers of all your models are off · /settings to switch one on')
     const parts = [`${c.brand('●')} ${c.muted(now.provider)} ${c.ghost('·')} ${c.info(now.model)}${rot ? c.faint(` ↻ ${rot.at + 1}/${rot.list.length}`) : ''}`]
-    const key = `${cfg.provider}/${cfg.model}`
-    if (this.profileKey !== key) [this.profileKey, this.profile] = [key, this.s?.profile ?? loadProfile(this.client(cfg.provider, cfg.model))]
+    const key = `${now.provider}/${now.model}`
+    if (this.profileKey !== key) [this.profileKey, this.profile] = [key, this.s?.profile ?? loadProfile(this.client(now.provider, now.model))]
     const profile = this.s?.profile ?? this.profile
     if (profile) {
       const strat = this.s?.strat ?? strategy(profile, cfg)
@@ -721,6 +723,17 @@ class App {
 
   // Your models, in order: this one (#1), then the fallbacks (chosen on /settings, where every
   // provider's whole list is).
+  // The model answering now: the model list's current one, the session's, or (none yet) the one it
+  // will start with: the first of yours whose provider is on (a model given for this run: that one).
+  // What the screen shows as "the model": never one of a provider that's switched off.
+  inUse() {
+    const { cfg } = this
+    const rot = this.s?.client.rotation
+    if (rot) return rot.list[rot.at]
+    if (this.s) return { provider: this.s.client.provider, model: this.s.client.model }
+    return cfg.fixed ? (cfg.providers[cfg.provider] && cfg.model ? { provider: cfg.provider, model: cfg.model } : null) : (this.myModels()[0] ?? null)
+  }
+
   // your list has models, but the providers of all of them are switched off
   allOff() {
     return !this.cfg.fixed && this.myModels(true).length > 0 && !this.myModels().length
@@ -761,7 +774,7 @@ class App {
     if (!args.length) return this.chooseModel()
     const [name, model] = args.length > 1 ? [args[0], args.slice(1).join(' ')] : [null, args[0]]
     const found = this.myModels().filter((t) => t.model === model && (!name || t.provider === name))
-    if (found.length === 1) return found[0].provider === this.cfg.provider && found[0].model === this.cfg.model ? this.ui.print(c.dim(`${model} is in use already`)) : this.useMine(found[0])
+    if (found.length === 1) return found[0].provider === this.inUse()?.provider && found[0].model === this.inUse()?.model ? this.ui.print(c.dim(`${model} is in use already`)) : this.useMine(found[0])
     if (!found.length) this.ui.print(c.dim(`${model} isn't one of your models: add it on /settings`))
     return this.chooseModel(found.length ? model : '')
   }
@@ -772,7 +785,7 @@ class App {
     if (!names.length) return ui.print(`No providers yet: add one with ${c.cyan('heart settings')}.`)
     for (const n of names) {
       const p = cfg.providers[n]
-      const notes = [n === cfg.provider && c.magenta('● current'), p.off && c.yellow('off'), n === cfg.adhoc && c.dim('this run only')].filter(Boolean).join(' ')
+      const notes = [n === this.inUse()?.provider && c.magenta('● current'), p.off && c.yellow('off'), n === cfg.adhoc && c.dim('this run only')].filter(Boolean).join(' ')
       ui.print(`${c.bold(n.padEnd(14))} ${p.baseUrl}  ${c.dim(mask(p.apiKey))}  ${notes}`)
     }
   }
@@ -877,7 +890,8 @@ async function continueTabs(app, saved) {
 // A continued tab's own model, as it was (unless its provider is gone: then the current one).
 function useModel(app, { provider, model }) {
   if (!provider || !model || (provider === app.cfg.provider && model === app.cfg.model)) return
-  if (!app.cfg.providers[provider]) return app.ui.warn(`this tab used ${provider} · ${model}, but there's no provider "${provider}" now: using ${app.cfg.provider} · ${app.cfg.model}`)
+  if (!app.cfg.providers[provider]) return app.ui.warn(`this tab used ${provider} · ${model}, but there's no provider "${provider}" now: using your list`)
+  if (app.cfg.providers[provider].off) return app.ui.warn(`this tab used ${provider} · ${model}, but ${provider} is switched off: using your list`)
   Object.assign(app.cfg, { provider, model })
   app.s = null
 }
@@ -1166,7 +1180,7 @@ async function slash(app, line) {
       const format = /\.html?$/i.test(file) ? 'html' : /\.json$/i.test(file) ? 'json' : 'md'
       const abs = path.resolve(app.root, file)
       fs.mkdirSync(path.dirname(abs), { recursive: true })
-      fs.writeFileSync(abs, exportChat(app.chat, format, cfg.model ? `${cfg.provider} · ${cfg.model}` : ''))
+      fs.writeFileSync(abs, exportChat(app.chat, format, app.inUse() ? `${app.inUse().provider} · ${app.inUse().model}` : ''))
       return ui.print(`${c.green('saved')} ${path.relative(app.root, abs) || abs}`)
     }
     case 'diff': {
@@ -1207,8 +1221,8 @@ async function slash(app, line) {
       ui.print(`${c.bold('tokens')}  ${kTokens(u.input)} in${u.cached ? ` (${kTokens(u.cached)} from the cache)` : ''} · ${kTokens(u.output)} out · ${u.requests} request${u.requests > 1 ? 's' : ''}`)
       return ui.print(
         u.priced
-          ? `${c.bold('cost')}    ${money(u.cost)}${price ? c.faint(`  (${cfg.model}: $${price.input ?? 0} in / $${price.output ?? 0} out per million tokens, from models.dev)`) : ''}`
-          : c.faint(`cost: not known for ${cfg.model ?? 'this model'} (models.dev doesn't list it; local and subscription models have none)`),
+          ? `${c.bold('cost')}    ${money(u.cost)}${price ? c.faint(`  (${app.inUse()?.model}: $${price.input ?? 0} in / $${price.output ?? 0} out per million tokens, from models.dev)`) : ''}`
+          : c.faint(`cost: not known for ${app.inUse()?.model ?? 'this model'} (models.dev doesn't list it; local and subscription models have none)`),
       )
     }
     case 'clear_chat': // a new session; the old one stays in /resume

@@ -21,7 +21,7 @@ import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLog
 
 const PAGE = new URL('./settings.html', import.meta.url)
 const EFFORTS = ['default', 'low', 'medium', 'high']
-const TOGGLES = { autoCompact: 'compact the conversation when the context is 70% full', director: 'let the model add skills, MCP servers and change settings when asked', format: "run the project's formatter on every file HeartCode writes", lsp: "show the model a language server's errors after each edit" }
+const TOGGLES = { autoCompact: 'compact the conversation when it fills 85% of the model\'s context window', director: 'let the model add skills, MCP servers and change settings when asked', format: "run the project's formatter on every file HeartCode writes", lsp: "show the model a language server's errors after each edit" }
 // The Logging page's: both off unless switched on; how much of each request ("full" or "summary")
 const LOG_SWITCHES = ['log', 'logRequests']
 const DETAILS = ['full', 'summary']

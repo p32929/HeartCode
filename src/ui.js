@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { log } from './log.js'
 import { HOME } from './config.js'
-import { record, transcribe, voiceProblem } from './voice.js'
+import { listen, transcribePcm, voiceProblem } from './voice.js'
 
 const color = (process.stdout.isTTY || Boolean(process.env.FORCE_COLOR)) && !process.env.NO_COLOR
 // 24-bit where the terminal says so, else the nearest of 256 (Terminal.app, xterm-256color), else 16.
@@ -610,11 +610,7 @@ export class UI {
     rl._ttyWrite = (s, key = {}) => {
       if (!this.full) return write(s, key)
       const bound = !(key.ctrl && key.name === 'c') && this.keys[keyId(key, s)] // ~/.heart/keybindings.json
-      if (this.recording) { // Enter or the voice key: done; Esc: never mind; the rest waits
-        if (key.name === 'escape') this.recording.end(false)
-        else if (key.name === 'return' || bound === 'voice') this.recording.end(true)
-        return
-      }
+      if (this.recording) return this.recording.key(key, bound) // voice: Space, Enter, Esc; the rest waits
       // a fixed dialog (pick(…, { fixed })): only its keys, nothing typed and no shortcuts
       if (this.menu.pick?.fixed && !['up', 'down', 'return', 'escape'].includes(key.name) && !(key.ctrl && key.name === 'c')) return
       if (bound) return this.#action(bound, write)
@@ -810,41 +806,98 @@ export class UI {
     write('\r', { name: 'return' })
   }
 
-  // Records until Enter (or the voice key) and returns the words, or null (Esc, or it failed: said
-  // in a notice). voiceConfig() → { voice, providers }: set by the app.
+  // Voice mode (/voice, Ctrl+R): Space to talk, Space again to pause (and again to go on), Enter
+  // (or the voice key) to finish, Esc to cancel. While you speak, what's been heard so far shows in
+  // the input box (where the cursor was), redone about every second with the quickest model; a
+  // stretch you pause or finish is done again with the best one. Returns the words, or null (Esc,
+  // or it failed: said in a notice); the box is as it was, for the caller to put them in.
+  // voiceConfig() → { voice, providers }: set by the app.
   async dictate() {
     if (this.recording) return null
     const { voice = {}, providers = {} } = this.voiceConfig?.() ?? {}
     const problem = voiceProblem(voice, providers)
     if (problem) return this.notice(problem, 8000), null
-    const rec = record()
-    const t0 = Date.now()
+    const rl = this.rl
+    const base = { line: rl?.line ?? '', cursor: rl?.cursor ?? 0 }
     const keep = !this.asking // working: the spinner line stays the task's
-    const show = () => this.notice(`● recording ${Math.floor((Date.now() - t0) / 1000)}s · Enter or Ctrl+R to stop · Esc to cancel`, 60 * 60_000)
-    show()
-    const tick = setInterval(show, 1000)
-    const go = await new Promise((resolve) => (this.recording = { end: resolve }))
+    const every = voice.provider ? 3000 : 900 // a provider's API is asked less often than whisper here
+    let said = '' // the stretches finished (paused), as the best model heard them
+    let live = '' // the stretch going on, as heard so far
+    let mic = null
+    let busy = Promise.resolve() // a stretch being transcribed (one at a time, in order)
+    let failed = null
+    let finishing = false
+    const words = () => [said, live].filter(Boolean).join(' ')
+    const showBox = () => {
+      if (!rl) return
+      const before = base.line.slice(0, base.cursor)
+      const t = words()
+      const pad = t && before && !/\s$/.test(before) ? ' ' : ''
+      rl.line = before + pad + t + base.line.slice(base.cursor)
+      rl.cursor = before.length + pad.length + t.length
+    }
+    const draw = () => {
+      showBox()
+      const keys = 'Enter to finish · Esc to cancel'
+      if (finishing) return this.notice('transcribing…', 60 * 60_000)
+      this.notice(mic ? `● listening ${Math.floor(mic.seconds())}s · Space to pause · ${keys}` : `voice · Space to ${said ? 'go on' : 'talk'} · ${keys}`, 60 * 60_000)
+    }
+    const heard = (pcm, fast) =>
+      transcribePcm(pcm, voice, providers, { fast }).catch((e) => {
+        log('voice', e.message)
+        failed = e.message
+        return null
+      })
+    // while a stretch goes on: what's been said of it so far, again and again
+    const follow = async (m) => {
+      while (mic === m) {
+        await new Promise((r) => setTimeout(r, every))
+        if (mic !== m || m.seconds() < 0.6) continue
+        const t = await heard(m.pcm(), true)
+        if (mic === m && t !== null) (live = t), draw()
+      }
+    }
+    const start = () => {
+      failed = null
+      mic = listen()
+      follow(mic)
+      draw()
+    }
+    // a pause: that stretch, done again with the best model, kept
+    const pause = () => {
+      const m = mic
+      mic = null
+      draw()
+      busy = busy.then(async () => {
+        const pcm = await m.stop().catch((e) => ((failed = e.message), null))
+        const t = pcm && (await heard(pcm, false))
+        said = [said, t ?? live].filter(Boolean).join(' ')
+        live = ''
+        draw()
+      })
+    }
+    draw()
+    const tick = setInterval(() => mic && draw(), 1000)
+    const go = await new Promise((resolve) => {
+      this.recording = {
+        key: (key, bound) => {
+          if (key.name === 'escape') resolve(false)
+          else if (key.name === 'return' || bound === 'voice') resolve(true)
+          else if (key.name === 'space') mic ? pause() : start()
+        },
+      }
+    })
     clearInterval(tick)
     this.recording = null
-    if (!go) {
-      rec.cancel()
-      this.notice('')
-      return null
-    }
-    try {
-      const file = await rec.stop()
-      this.notice('transcribing…', 60 * 60_000)
-      const text = await transcribe(file, voice, providers)
-      log('voice', text)
-      this.notice(text ? '' : 'heard nothing', 3000)
-      return text || null
-    } catch (e) {
-      log('voice', e.message)
-      this.notice(e.message, 8000)
-      return null
-    } finally {
-      if (keep) this.render()
-    }
+    if (!go) mic?.cancel(), (mic = null)
+    else if (mic) (finishing = true), pause()
+    await busy
+    if (rl) [rl.line, rl.cursor] = [base.line, base.cursor] // the caller puts the words in
+    const text = go ? words().trim() : ''
+    log('voice', go ? text : '(cancelled)')
+    this.notice(go && !text ? failed ?? 'heard nothing' : '', failed ? 8000 : 3000)
+    if (keep) this.render()
+    return text || null
   }
 
   // Messages typed while working that can go to the running task now (not commands); taken.
