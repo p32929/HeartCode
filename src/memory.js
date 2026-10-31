@@ -26,7 +26,11 @@ export const fullSlug = (s) =>
     .replace(/\.md$/, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-export const slug = (s) => fullSlug(s).slice(0, 60) || 'note'
+// cut at a word's end, not in the middle of one ("…-and-use-an-abso")
+export const slug = (s) => {
+  const f = fullSlug(s)
+  return (f.length <= 60 ? f : f.slice(0, 61).replace(/-[^-]*$/, '').slice(0, 60)) || 'note'
+}
 
 // One folder of notes.
 class Notes {
@@ -215,7 +219,7 @@ const tagList = (v) => (Array.isArray(v) ? v : String(v ?? '').split(/[,\s#]+/))
 
 // Words worth matching on: lowercased, without short or very common words, plural/-ing cut off.
 const STOP = new Set('the and for with this that from have what when where which into your you our are was were can will should could would about there their them then than just also only some more most very please make like want need does doing done how why who its it\'s use using'.split(' '))
-function keywords(text) {
+export function keywords(text) {
   return String(text)
     .toLowerCase()
     .split(/[^a-z0-9]+/)

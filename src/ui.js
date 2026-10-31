@@ -9,7 +9,7 @@ import { log } from './log.js'
 import { HOME } from './config.js'
 import { listen, transcribePcm, voiceProblem } from './voice.js'
 
-const color = (process.stdout.isTTY || Boolean(process.env.FORCE_COLOR)) && !process.env.NO_COLOR
+export const color = (process.stdout.isTTY || Boolean(process.env.FORCE_COLOR)) && !process.env.NO_COLOR
 // 24-bit where the terminal says so, else the nearest of 256 (Terminal.app, xterm-256color), else 16.
 const depth = !color ? 0 : /truecolor|24bit/i.test(process.env.COLORTERM ?? '') ? 3 : /256/.test(process.env.TERM ?? '') || process.env.TERM_PROGRAM === 'Apple_Terminal' ? 2 : 1
 const to256 = ([r, g, b]) => {

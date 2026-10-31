@@ -289,8 +289,13 @@ class Guided {
       repeats = sig === last ? repeats + 1 : 0
       last = sig
       if (repeats >= 2) {
-        this.ui.warn(`stopped: ${this.s.client.model} did the same thing three times in a row`)
-        break
+        // the next of your models carries on; with none, it goes on being told (only Esc stops it)
+        const was = this.s.client.model
+        if (this.s.client.moveOn?.(`${was} did the same thing three times in a row`)) this.ui.warn(`${was} did the same thing three times in a row; handing over to ${this.s.client.model}`)
+        else this.ui.warn(`${was} did the same thing three times in a row — it carries on, told so; Esc stops it`)
+        this.note(null, 'warning', prompt('guided/note-repeated'))
+        repeats = 0
+        continue
       }
       if (repeats === 1) this.note(null, 'warning', prompt('guided/note-repeated'))
     }

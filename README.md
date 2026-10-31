@@ -21,6 +21,14 @@ tried did what I needed. In short, HeartCode:
 - **Works with models that can't call tools.** It guides them step by step instead.
 - **Knows each model from [models.dev](https://models.dev)**: its context window, whether it calls
   tools, thinks or reads images. Nothing is sent to the model to find out.
+- **Learns as it works, per project.** Every web page it reads is kept whole in
+  `.heartcode/research/`, and when a task ends it saves what's worth knowing as notes
+  (`.heartcode/memory/`), drops the junk and removes throwaway files. The next task starts from
+  what's known instead of searching again.
+- **Sends only what's needed.** MCP tools go as names until one is used, old tool output becomes a
+  pointer to its saved file, guides arrive when the task needs them.
+- **Checks its work before calling it done**: a plan first, a run after every change, and a second
+  model reviewing the result against what you asked.
 - **Is set up in a web page** on your own machine (`/settings`), not by editing config files.
 - **Never sends `max_tokens`**, so no provider cuts the reply short by a limit you didn't choose.
 - **Can be used by other tools and AI agents**: `heart -p` runs one task headless, like

@@ -2,16 +2,17 @@ import fs from 'node:fs'
 import { createHash } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { log } from './log.js'
-import { slug, fullSlug } from './memory.js'
+import { slug, fullSlug, keywords } from './memory.js'
 import { fillArgs } from './skills.js'
 import { prompt } from './prompts.js'
 import path from 'node:path'
 import os from 'node:os'
 import { spawn, execFileSync } from 'node:child_process'
 import { applyEdit, closest, trimBlank } from './edit.js'
-import { readJson } from './config.js'
+import { readJson, HOME } from './config.js'
 import { c, diffLines, renderDiff } from './ui.js'
-import { webFetch, webSearch } from './web.js'
+import { webFetch, webSearch, fetchPage, pageView } from './web.js'
+import { savePage, saveSearch, findResearch } from './research.js'
 import { runHooks } from './hooks.js'
 import { parsePatch, applyChunks } from './patch.js'
 import { formatFile } from './format.js'
@@ -24,13 +25,16 @@ export const tail = (s, n) => (s.length > n ? '…' + s.slice(-n) : s)
 
 // Tool output too long for the conversation is saved here (one folder per chat), where read_file
 // and search can read it although it's outside the project.
-export const OUTPUTS = path.join(os.tmpdir(), 'heartcode-outputs')
+export const OUTPUTS = path.join(HOME, 'outputs') // kept with the chat: a resumed one's pointers still open
+const LEGACY_OUTPUTS = path.join(os.tmpdir(), 'heartcode-outputs') // where older HeartCode kept them
+export const isSavedOutput = (abs) => [OUTPUTS, LEGACY_OUTPUTS].some((d) => String(abs).startsWith(d + path.sep))
 // data: text, or an image's bytes (ext: png…)
+let saved = 0
 export function saveOutput(chatId, name, data, ext = 'txt') {
   try {
     const dir = path.join(OUTPUTS, String(chatId ?? 'chat'))
     fs.mkdirSync(dir, { recursive: true })
-    const file = path.join(dir, `${Date.now().toString(36)}-${String(name).replace(/[^\w-]/g, '_').slice(0, 60)}.${ext}`)
+    const file = path.join(dir, `${Date.now().toString(36)}-${(++saved).toString(36)}-${String(name).replace(/[^\w-]/g, '_').slice(0, 60)}.${ext}`) // several in one millisecond: each its own file
     fs.writeFileSync(file, data)
     return file
   } catch (e) {
@@ -44,7 +48,7 @@ export function resolveIn(root, p) {
   if (!clean) throw new Error('no path given')
   const bare = root.replace(/^[\\/]+/, '') // the project's own path, its leading "/" left out by a sloppy copy
   let abs = clean === bare || clean.startsWith(bare + '/') ? path.join(root, clean.slice(bare.length)) : path.resolve(root, clean)
-  if (abs.startsWith(OUTPUTS + path.sep)) return abs // a saved tool output
+  if (isSavedOutput(abs)) return abs // a saved tool output
   // "num.js:" or "num.js," from a sloppy model: the file without the stray mark, if that one exists
   const trimmed = path.resolve(root, clean.replace(/[:;,.]+$/, ''))
   if (trimmed !== abs && !fs.existsSync(abs) && fs.existsSync(trimmed)) abs = trimmed
@@ -204,7 +208,11 @@ export function searchFiles(root, query, sub = '', limit = 50) {
     re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), ci ? 'i' : '')
   }
   const abs = sub ? resolveIn(root, sub) : ''
-  const saved = abs.startsWith(OUTPUTS + path.sep) // a tool output saved outside the project
+  let single = false // one file named: searched whatever lists leave out (a saved page, a .gitignored file)
+  try {
+    single = Boolean(abs) && fs.statSync(abs).isFile()
+  } catch {}
+  const saved = isSavedOutput(abs) || single
   const prefix = sub && !saved ? path.relative(root, abs) : ''
   const hits = []
   for (const f of saved ? [abs] : listFiles(root)) {
@@ -449,6 +457,7 @@ function changesSince(s, before) {
   const notes = []
   for (const rel of new Set([...before.keys(), ...after.keys()])) {
     if (before.get(rel) === after.get(rel)) continue
+    if (/^\.heartcode[\\/]/.test(rel)) continue // HeartCode's own (research, memory, models) written meanwhile — a page fetched while the command ran — not the command's
     if (!(before.complete && after.complete) && (!before.has(rel) || !after.has(rel))) continue // a list cut at its limit: in one, not the other, says nothing
     const old = was.get(rel)
     const next = after.has(rel) ? s.fileCache.get(rel)?.text : undefined
@@ -490,8 +499,8 @@ export const TOOL_DEFS = [
   { name: 'write_file', description: prompt('agent/tool-write_file'), parameters: obj({ path: str, content: str, append: { type: 'boolean' } }, ['path', 'content']) },
   { name: 'run_command', description: prompt('agent/tool-run_command'), parameters: obj({ command: str }, ['command']) },
   { name: 'todo', description: prompt('agent/tool-todo'), parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] } }, ['content', 'status']) } }, ['todos']) },
-  { name: 'web_search', description: prompt('agent/tool-web_search'), parameters: obj({ query: str }, ['query']) },
-  { name: 'web_fetch', description: prompt('agent/tool-web_fetch'), parameters: obj({ url: str, start: int }, ['url']) },
+  { name: 'web_search', description: prompt('agent/tool-web_search'), parameters: obj({ query: str, fresh: { type: 'boolean' } }, ['query']) },
+  { name: 'web_fetch', description: prompt('agent/tool-web_fetch'), parameters: obj({ url: str, look_for: str, start: int }, ['url']) },
   { name: 'ask_user', description: prompt('agent/tool-ask_user'), parameters: obj({ question: str, options: { type: 'array', items: str }, multiple: { type: 'boolean' } }, ['question']) },
 ]
 
@@ -513,21 +522,20 @@ export function readOnlyCommand(cmd) {
   return c.split(/\s*(?:&&|\|\||;|\|)\s*/).every((part) => READ_ONLY.test(part))
 }
 
-// MCP servers' tools as the model sees them: each its own tool, mcp__server__tool (Claude Code's
-// names), with its description and arguments, the way the model would see them in Claude Code.
-// Servers whose tools aren't known yet (still starting, failed), or too many tools at once, go
-// through the one mcp tool instead. Sets s.mcpDirect (name → { server, tool, def }), s.mcpMeta
-// (servers behind the mcp tool) and s.mcpInstructions (what the servers say about using them).
-export const MAX_MCP_TOOLS = 100
+// MCP servers' tools as the model sees them: one tool, mcp, whose description lists every server's
+// tools by name with one line on what each does — not each tool's whole schema in every request
+// (two browser servers' schemas alone were ~14k tokens a request). A tool's arguments come when
+// they're needed: "describe" shows them, and a call whose arguments don't fit its schema gets the
+// schema back with what's wrong (nothing is sent to the server). Sets s.mcpDirect
+// (mcp__server__tool → { server, tool, def }: only to understand a call by that name — an older
+// conversation's, or a model used to Claude Code's names), s.mcpCatalog and s.mcpInstructions (what
+// the servers say about using them).
 export async function loadMcpTools(s, signal) {
-  if (!s.mcp?.names.length) return Object.assign(s, { mcpDirect: new Map(), mcpMeta: [], mcpInstructions: '' })
+  if (!s.mcp?.names.length) return Object.assign(s, { mcpDirect: new Map(), mcpInstructions: '' })
   const catalog = await s.mcp.catalog(signal)
-  // the servers with the fewest tools first, while they fit
-  const known = [...catalog].sort((a, b) => a[1].tools.length - b[1].tools.length)
   const direct = new Map()
   const notes = []
-  for (const [server, { tools, instructions }] of known) {
-    if (direct.size + tools.length > MAX_MCP_TOOLS) continue
+  for (const [server, { tools, instructions }] of catalog) {
     for (const t of tools) {
       let n = mcpName(server, t.name)
       if (direct.has(n)) n = `${n.slice(0, 57)}_${createHash('sha256').update(`${server}/${t.name}`).digest('hex').slice(0, 6)}` // cut to the same 64 characters as another
@@ -535,33 +543,26 @@ export async function loadMcpTools(s, signal) {
     }
     if (instructions) notes.push(`### ${server}\n${instructions}`)
   }
-  const shown = new Set([...direct.values()].map((d) => d.server))
-  return Object.assign(s, { mcpDirect: direct, mcpMeta: s.mcp.names.filter((n) => !shown.has(n)), mcpInstructions: notes.join('\n\n'), mcpCatalog: catalog })
+  return Object.assign(s, { mcpDirect: direct, mcpInstructions: notes.join('\n\n'), mcpCatalog: catalog })
 }
 // Tool names may only have letters, digits, _ and - (64 at most).
 export const mcpName = (server, tool) => `mcp__${server}__${tool}`.replace(/[^\w-]/g, '_').slice(0, 64)
-// A schema as providers take it: an object, without the keys some refuse ($schema).
-function cleanSchema(x) {
-  if (Array.isArray(x)) return x.map(cleanSchema)
-  if (!x || typeof x !== 'object') return x
-  return Object.fromEntries(Object.entries(x).filter(([k]) => k !== '$schema').map(([k, v]) => [k, cleanSchema(v)]))
-}
-function mcpDefs(s) {
-  return [...(s.mcpDirect?.entries() ?? [])].map(([name, { server, tool, def }]) => {
-    const schema = cleanSchema(def.inputSchema ?? {})
-    return { name, description: clip(String(def.description ?? `${tool} (${server})`).trim(), 2000), parameters: { ...schema, type: 'object', properties: schema.properties ?? {} } }
-  })
-}
+// A tool's description cut to its first sentence (what it does), for the list.
+const firstLine = (d) => String(d ?? '').trim().split(/\n|(?<=\.)\s/)[0].slice(0, 140)
 
-// The MCP servers' tools, the one tool for the rest, and the skill loader; each only when there's
-// something to offer.
+// The MCP servers (one tool for all of their tools), the memory and the skill loader; each only when
+// there's something to offer.
 export function extraTools(s) {
-  const out = mcpDefs(s)
-  const meta = s.mcpMeta ?? s.mcp?.names ?? []
-  if (meta.length) {
-    // no description: the names of its tools, when known, say what it's for
-    const about = (n) => s.mcp.get(n).cfg.description || (s.mcpCatalog?.get(n) ? `tools: ${clip(s.mcpCatalog.get(n).tools.map((t) => t.name).join(', '), 300)}` : 'no description')
-    out.push({ name: 'mcp', description: prompt('agent/tool-mcp', { servers: meta.map((n) => `${n}: ${about(n)}`).join('\n') }), parameters: obj({ server: str, tool: str, arguments: { type: 'object' } }, ['server', 'tool']) })
+  const out = []
+  const servers = s.mcp?.names ?? []
+  if (servers.length) {
+    const list = (n) => {
+      const cfg = s.mcp.get(n)?.cfg ?? {}
+      const tools = s.mcpCatalog?.get(n)?.tools
+      const head = `${n}${cfg.description ? ` — ${cfg.description}` : ''}`
+      return tools ? `${head}\n${tools.map((t) => `  - ${t.name}: ${firstLine(t.description)}`).join('\n')}` : `${head} (its tools aren't known yet: tool "list" shows them)`
+    }
+    out.push({ name: 'mcp', description: prompt('agent/tool-mcp', { servers: servers.map(list).join('\n') }), parameters: obj({ server: str, tool: str, arguments: { type: 'object' } }, ['server', 'tool']) })
   }
   if (s.memory) {
     out.push({
@@ -640,9 +641,40 @@ async function webTool(s, name, args, signal) {
   if (!what.trim()) return `error: ${name} needs ${name === 'web_search' ? '"query"' : '"url"'}`
   const ok = await s.ui.confirm(name === 'web_search' ? `Search the web for ${c.bold(what)}?` : `Fetch ${c.bold(what)}?`, 'read')
   if (ok !== true) return `The user declined this.${typeof ok === 'string' ? ' User feedback: ' + ok : ''}`
-  s.ui.spinner(name === 'web_search' ? `searching: ${clip(what, 60)}` : `fetching ${clip(what, 60)}`)
-  return name === 'web_search' ? await webSearch(what, { signal }) : await webFetch(what, { start: args.start, signal })
+  // what this message's research is for: the page's look_for, else the last search, else the task
+  const purpose = String(args.look_for ?? '').trim() || s.lastQuery || String(s.task ?? '').split('\n')[0].slice(0, 160)
+  if (name === 'web_search') {
+    s.lastQuery = what
+    // already read for this project: offered first (the model decides: use it, or search fresh)
+    const saved = !args.fresh && s.root ? findResearch(s.root, what, 5).filter((r) => r.kind !== 'search') : []
+    if (saved.length) {
+      log('research', `"${what}": ${saved.length} saved page(s) offered first`)
+      return prompt('agent/research-saved', { query: what, pages: saved.map((r) => `- ${r.title} — ${r.url} (read ${r.fetched}${r.used_for ? `; used for: ${r.used_for}` : ''}) → ${r.file}`).join('\n') })
+    }
+    s.ui.spinner(`searching: ${clip(what, 60)}`)
+    const out = await webSearch(what, { signal })
+    if (s.root && !/^(error:|no results)/.test(out)) {
+      const { file } = saveSearch(s.root, what, out)
+      s.research?.push({ kind: 'search', file, title: `Search: ${what}` })
+    }
+    return out
+  }
+  s.ui.spinner(`fetching ${clip(what, 60)}`)
+  if (!s.root) return await webFetch(what, { start: args.start, signal })
+  const page = await fetchPage(what, { signal })
+  if (page.error) return `error: ${page.error}`
+  const head = `${page.ok ? '' : `error: HTTP ${page.status}\n`}${page.url !== page.asked ? `(redirected to ${page.url})\n` : ''}`
+  if (!page.ok || !page.text.trim()) return `${head}${page.text.slice(0, MAX_PAGE) || '(empty page)'}` // an error page isn't worth keeping
+  const { file, bodyLine } = savePage(s.root, { url: page.url, title: page.title, text: page.text, query: purpose })
+  s.research?.push({ kind: 'page', file, url: page.url, title: page.title || page.url })
+  const id = runningCall.getStore()
+  if (id && s.chat) (s.chat.outputs ??= {})[id] = file // its result, cut from the conversation later, points here
+  log('research', `saved ${page.url} → ${file}`)
+  // "start": the part from there on, as before (an older conversation's way of reading on)
+  if (Number(args.start) > 0) return `${head}${await webFetch(page.url, { start: args.start, signal })}\n\n(All of this page is saved in ${file}.)`
+  return `${head}${page.title ? `# ${page.title}\n` : ''}${page.url}\n\n${pageView(page.text, { lookFor: args.look_for, file, bodyLine })}`
 }
+const MAX_PAGE = 10_000
 
 function memoryTool(s, args) {
   const m = s.memory
@@ -653,8 +685,16 @@ function memoryTool(s, args) {
       if (!args.content && !args.description) return 'error: write needs at least content or a description'
       if (!String(args.name ?? '').trim() && !String(args.description ?? '').trim()) return 'error: write needs a "name" (or a description to name it by). Nothing was saved.'
       if (String(args.name ?? '').trim() && fullSlug(args.name).length > 60) return 'error: the name is too long (60 characters at most, as a file name). Nothing was saved.'
+      const isNew = !m.read(args.name || args.description)
       const n = m.write(args)
-      return `Saved [[${n}]]${m.read(n)?.scope === 'global' ? ' (global)' : ''}.`
+      // a new note that says much the same as one there already: said, so they're merged, not piled up
+      const words = new Set(keywords(`${n} ${args.description ?? ''}`))
+      const overlap = (x) => {
+        const theirs = new Set(keywords(`${x.name} ${x.description}`))
+        return [...theirs].filter((w) => words.has(w)).length / Math.max(1, Math.min(theirs.size, words.size))
+      }
+      const similar = isNew && words.size >= 3 ? m.list().filter((x) => x.name !== n && overlap(x) >= 0.6).slice(0, 3) : []
+      return `Saved [[${n}]]${m.read(n)?.scope === 'global' ? ' (global)' : ''}.${similar.length ? ` Similar notes exist: ${similar.map((x) => `[[${x.name}]] — ${x.description}`).join('; ')}. If one says the same thing, merge them: write the merged note under one name and delete the other.` : ''}`
     }
     case 'read': {
       if (!name.trim()) return 'error: read needs the note\'s "name" (search finds notes by words).'
@@ -704,16 +744,61 @@ async function mcpTool(s, args, signal) {
     s.ui.spinner(`starting ${server.name}`)
     const tools = await server.listTools(signal)
     if (tool === 'list') return tools.map((t) => `${t.name}: ${String(t.description ?? '').split(/(?<=\.)\s/)[0].slice(0, 160)}`).join('\n')
-    const t = tools.find((x) => x.name === a.name)
-    return t ? `${t.name}: ${t.description ?? ''}\nArguments (JSON schema): ${JSON.stringify(t.inputSchema ?? {})}` : `error: ${server.name} has no tool "${a.name}"; tool "list" shows its tools`
+    const t = tools.find((x) => x.name === (a.name ?? a.tool))
+    return t ? describeTool(t) : `error: ${server.name} has no tool "${a.name ?? a.tool}"; tool "list" shows its tools`
   }
   return callMcp(s, server, tool, a, signal)
 }
 
+// What's wrong with a call's arguments for a tool's JSON schema (the common part of it: required,
+// unknown names, types, enums), or [] when they fit. Unknown names get the closest real one.
+export function argProblems(schema, a) {
+  const props = schema?.properties ?? {}
+  const out = []
+  if (!a || typeof a !== 'object' || Array.isArray(a)) return ['"arguments" must be an object']
+  for (const k of schema?.required ?? []) if (a[k] === undefined) out.push(`"${k}" is required`)
+  const near = (k) => {
+    const d = (x, y) => {
+      const m = Array.from({ length: x.length + 1 }, (_, i) => [i, ...Array(y.length).fill(0)])
+      for (let j = 1; j <= y.length; j++) m[0][j] = j
+      for (let i = 1; i <= x.length; i++) for (let j = 1; j <= y.length; j++) m[i][j] = Math.min(m[i - 1][j] + 1, m[i][j - 1] + 1, m[i - 1][j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1))
+      return m[x.length][y.length]
+    }
+    const best = Object.keys(props).map((p) => [p, d(k.toLowerCase(), p.toLowerCase())]).sort((x, y) => x[1] - y[1])[0]
+    return best && best[1] <= Math.max(2, Math.floor(best[0].length / 3)) ? ` (did you mean "${best[0]}"?)` : ''
+  }
+  const typeOk = (t, v) => ({ string: typeof v === 'string', number: typeof v === 'number', integer: Number.isInteger(v), boolean: typeof v === 'boolean', array: Array.isArray(v), object: v !== null && typeof v === 'object' && !Array.isArray(v), null: v === null })[t] ?? true
+  for (const [k, v] of Object.entries(a)) {
+    const p = props[k]
+    if (!p) {
+      if (schema?.properties && schema.additionalProperties !== true) out.push(`"${k}" is not one of its arguments${near(k)}`)
+      continue
+    }
+    const types = [p.type ?? []].flat()
+    if (types.length && !types.some((t) => typeOk(t, v))) out.push(`"${k}" must be ${types.join(' or ')}, not ${Array.isArray(v) ? 'an array' : v === null ? 'null' : typeof v}`)
+    if (p.enum && !p.enum.includes(v)) out.push(`"${k}" must be one of ${p.enum.map((x) => JSON.stringify(x)).join(', ')}`)
+  }
+  return out
+}
+
+// One tool's description and arguments, for the model (describe, or a call that didn't fit).
+const describeTool = (t) => `${t.name}: ${t.description ?? ''}\nArguments (JSON schema): ${JSON.stringify(t.inputSchema ?? {})}`
+
 // One MCP tool call. Asked about like a command, unless the server marks the tool read-only.
 async function callMcp(s, server, tool, a, signal) {
   if (!allowed(s, mcpName(server.name, tool))) return `error: the tool ${mcpName(server.name, tool)} is not allowed here`
-  const def = (server.tools ?? s.mcpCatalog?.get(server.name)?.tools)?.find((t) => t.name === tool)
+  let def = (server.tools ?? s.mcpCatalog?.get(server.name)?.tools)?.find((t) => t.name === tool)
+  if (!def) {
+    const tools = await server.listTools(signal).catch(() => null)
+    def = tools?.find((t) => t.name === tool)
+    if (tools && !def) {
+      const close = tools.filter((t) => t.name.includes(tool) || tool.includes(t.name)).map((t) => t.name)
+      return `error: ${server.name} has no tool "${tool}".${close.length ? ` Did you mean ${close.join(' or ')}?` : ''} Its tools: ${tools.map((t) => t.name).join(', ')}`
+    }
+  }
+  // arguments that don't fit: the schema comes back with what's wrong, and nothing is sent
+  const problems = def?.inputSchema ? argProblems(def.inputSchema, a) : []
+  if (problems.length) return `error: ${server.name} · ${tool} wasn't called — ${problems.join('; ')}.\n${describeTool(def)}\nCall it again with arguments that fit.`
   // a tool its server marks read-only isn't asked about (reading isn't, in any mode; headless
   // declines what it would ask, so a browser's snapshot must not be); any other like a command
   if (!def?.annotations?.readOnlyHint) {

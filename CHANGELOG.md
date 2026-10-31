@@ -2,6 +2,55 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.28 (2026-11-01)
+
+- When a conversation outgrows the current model's context window and you have other models selected,
+  HeartCode now moves to a model with room instead of compacting — nothing is summarized away when a
+  roomier model is available. It scans your model list in order, so it picks your highest-priority
+  model that can hold the whole conversation; if none of your models has more room, it compacts as
+  before (uses what's available). With a single pinned model, nothing changes.
+- Learning that actually keeps what it learns, per project:
+  - Every web page HeartCode reads is saved whole as Markdown in `.heartcode/research/` (one file
+    per page, its address as the name, a header with the URL, title, date and what it was looking
+    for; real Markdown tables; the folder ignores itself in git). Helpers' pages are saved too.
+  - `web_fetch` takes `look_for`: a long page comes as its outline plus the parts that match, with
+    line numbers into the saved file — not just the first 10,000 characters.
+  - `web_search` offers matching pages this project already has first (with the date each was read);
+    `fresh: true` searches the web anyway. Matching notes and saved pages come with each message.
+  - When a task that read the web, ran commands or made files ends, a wrap-up step saves what's
+    worth knowing as notes (project or global), keeps each page it read (with what it was used for)
+    or deletes it as junk, and removes throwaway files and empty folders the task made.
+  - Lessons learned from fixes now go to the project when they only hold there (they all went
+    global before); note names are cut at a word's end; saving a note that repeats one says so.
+- Less in every request:
+  - MCP tools are listed by name with one line each (one `mcp` tool), not each tool's whole schema:
+    ~13,400 → ~1,800 tokens for two browser servers. A call whose arguments don't fit gets the
+    tool's arguments back with what's wrong (and "did you mean"), and isn't run. The 100-tool cap is gone.
+  - Every sizable tool result is saved to a file when it comes (`~/.heart/outputs/`, kept with the
+    chat, deleted with it); past 8 long results, all but the newest 4 become a pointer to their file.
+  - The UI guide left the system prompt: it comes with a message about a UI, or with the first UI
+    file written.
+  - Older conversations' MCP calls (made by their own `mcp__server__tool` names) are rewritten as
+    `mcp` calls when resumed.
+- Done means done:
+  - The first file change of a message waits for a plan (the todo list, each step with how it'll be checked).
+  - Saying it's done after changing files without running anything since: sent back to check it.
+    Naming files as made that don't exist: sent back.
+  - Before a task with changes ends, another of your models (or the same one, fresh) reviews it
+    against your request, plan, changes and what was run: YES, or NO with what's wrong, which goes
+    back to be fixed.
+  - Nothing stops a task but Esc: going round in circles (the same call five times, ten repeated
+    calls, eight failing commands, replies that loop) hands over to the next model in your list, or
+    warns and goes on; a server that keeps failing is waited out, not given up on. Reminders about
+    unfinished work repeat as long as the model makes progress (no count). The page check clicks
+    every control and looks again whenever pages changed (no 30-button, 2-page or 3-look caps).
+- Fixed: tool outputs saved in the same millisecond overwrote each other; HeartCode's own research
+  files showed up as a command's file changes (and in /rewind).
+- Helpers' replies are shown in full under their name (only the title showed before), printed whole
+  when each finishes so helpers working side by side don't interleave.
+- Helpers (the agent tool) no longer stop at 25 steps — like the main session, they run until the job
+  is done (Esc stops them; --max-turns still applies if you set it).
+
 ## 0.1.27 (2026-10-31)
 
 - A built-in computer-use MCP server (@zavora-ai/computer-use-mcp), off by default: switch it on in

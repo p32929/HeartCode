@@ -7,11 +7,12 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { est, Client, writtenBy, tokensOf, COMPACT_SHARE } from './client.js'
 import { runGuided } from './guided.js'
-import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, OUTPUTS, imageUrl, MAX_IMAGE, failed } from './tools.js'
+import { markUsed, removeResearch, findResearch } from './research.js'
+import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed } from './tools.js'
 import { serversNote } from './lsp.js'
 import { loadHooks, runHooks } from './hooks.js'
 import { takeConfigErrors } from './config.js'
-import { c, duration } from './ui.js'
+import { c, duration, Block, Markdown, color, diffLines, renderDiff } from './ui.js'
 
 // Images for a helper (the agent tool's "images"), as data: URLs: image URLs (fetched), data: URLs,
 // or files: in the project, saved screenshots (OUTPUTS), or a path the user gave in a message.
@@ -38,7 +39,7 @@ async function loadImages(list, s, signal) {
     } else {
       const abs = path.resolve(s.root, x.replace(/^~(?=\/)/, os.homedir()))
       const inside = (dir) => abs.startsWith(dir + path.sep)
-      if (fs.existsSync(abs) && !inside(s.root) && !inside(OUTPUTS) && !s.toolImages?.has(abs) && !s.chat.turns.some((t) => t.task.includes(x) || t.task.includes(abs))) throw new Error(`${x} is outside the project; only images in it, saved screenshots and ones the user named can be sent`)
+      if (fs.existsSync(abs) && !inside(s.root) && !isSavedOutput(abs) && !s.toolImages?.has(abs) && !s.chat.turns.some((t) => t.task.includes(x) || t.task.includes(abs))) throw new Error(`${x} is outside the project; only images in it, saved screenshots and ones the user named can be sent`)
       out.push(imageUrl(abs, x))
     }
   }
@@ -247,7 +248,7 @@ export class Session {
     }
     const label = clip(`${client.model}: ${String(description ?? '').trim() || task.split('\n')[0]}`, 60)
     const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
-    Object.assign(helper, { isSub: true, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
+    Object.assign(helper, { isSub: true, research: this.research, ran: this.ran, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
     helper.track = (rel, before) => this.track(rel, before)
     helper.mcpGate = async () => (await this.#gate(helper), () => {})
     if (this.onEvent) helper.onEvent = (e) => this.onEvent({ ...e, parent: id, helper: label })
@@ -357,11 +358,14 @@ export class Session {
     return prompt('agent/memory-extract', { tags: this.memory.tagSummary() || '(none yet)', notes })
   }
 
-  // A small tool loop with only the memory tool (saving and tidying notes).
-  async memoryTask(system, user, signal, steps = 12) {
-    const tools = extraTools({ memory: this.memory }).map((f) => ({ type: 'function', function: f }))
+  // A small tool loop with the memory tool (saving and tidying notes), and any `extra` tools ({ defs,
+  // run(name, args) → result or undefined for the memory tool }). It ends when the model answers, or
+  // makes exactly the calls it just made (going round, not getting anywhere).
+  async memoryTask(system, user, signal, extra = null) {
+    const tools = [...extraTools({ memory: this.memory }), ...(extra?.defs ?? [])].map((f) => ({ type: 'function', function: f }))
     const messages = [{ role: 'system', content: system }, { role: 'user', content: user }]
-    for (let step = 0; step < steps; step++) {
+    let last = ''
+    for (;;) {
       const was = this.client.purpose
       this.client.purpose = 'memory' // in the requests log
       let res
@@ -372,17 +376,90 @@ export class Session {
       }
       messages.push({ role: 'assistant', content: res.content || '', ...(res.toolCalls.length && { tool_calls: res.toolCalls }) })
       if (!res.toolCalls.length) return res.content.trim()
+      const these = res.toolCalls.map((t) => `${t.function.name} ${t.function.arguments}`).join('\n')
+      if (these === last) return res.content.trim()
+      last = these
       for (const call of res.toolCalls) {
         let args = {}
         try {
           args = JSON.parse(call.function.arguments || '{}')
         } catch {}
-        const out = await runTool(call.function.name, args, this, signal)
-        if (args.action === 'write' || args.action === 'delete') this.ui.step('memory', `${args.action === 'write' ? 'saved' : 'deleted'} ${out.match(/\[\[[^\]]+\]\]/)?.[0] ?? ''}`)
+        const out = (await extra?.run(call.function.name, args)) ?? (call.function.name === 'memory' ? await runTool('memory', args, this, signal) : `error: there is no tool named ${call.function.name}`)
+        if (call.function.name === 'memory' && (args.action === 'write' || args.action === 'delete') && !failed(out)) this.ui.step('memory', `${args.action === 'write' ? 'saved' : 'deleted'} ${out.match(/\[\[[^\]]+\]\]/)?.[0] ?? ''}${args.scope === 'global' ? ' (global)' : ''}`)
         messages.push({ role: 'tool', tool_call_id: call.id, content: out })
       }
     }
-    return ''
+  }
+
+  // After a task that read the web, ran commands or made files: what's worth knowing next time is
+  // saved as notes (project or global), each page it read is kept (marked with what it was used for)
+  // or deleted as junk, and throwaway files it made are removed. Done by code after every such task,
+  // not left to the model to remember: a fresh, small request (the task, its answer, the lists), on
+  // the model that did the task. Helpers' pages are in the same list (they share it).
+  async wrapUp(task, answer, signal) {
+    if (this.isSub || !this.memory || this.ui.permission === 'plan') return
+    const pages = this.research ?? []
+    const turn = this.chat.turns.at(-1)
+    const made = Object.entries(turn?.files ?? {}).filter(([rel, before]) => before === null && fs.existsSync(path.join(this.root, rel))).map(([rel]) => rel)
+    // folders the task made that are still empty (a test folder): offered for cleanup too
+    if (this.dirsBefore) for (const d of foldersOf(this.root)) if (!this.dirsBefore.has(d) && isEmptyDir(path.join(this.root, d))) made.push(`${d}/`)
+    const ran = this.ran ?? []
+    if (!pages.length && !made.length && !ran.length) return
+    const commands = ran.map((r) => `- ${clip(r.command.replace(/\s+/g, ' '), 200)} → ${r.result}`).join('\n')
+    const known = this.memory.relevant(`${task}\n${answer}\n${pages.map((p) => p.title).join('\n')}`, 12)
+    const request = prompt('agent/wrapup-task', {
+      task: clip(task, 4000),
+      answer: clip(String(answer ?? ''), 4000) + (commands ? `\n\nCommands it ran (newest last):\n${commands.length > 6000 ? `…\n${commands.slice(-6000)}` : commands}` : ''),
+      pages: pages.map((p) => `- [${p.kind}] ${p.title}${p.url ? ` — ${p.url}` : ''} → file: ${p.file}`).join('\n') || '(none)',
+      files: made.map((f) => `- ${f}`).join('\n') || '(none)',
+      notes: known.map((n) => `- [[${n.name}]] (${n.scope}) — ${n.description}`).join('\n') || '(none)',
+    })
+    const files = new Set(pages.map((p) => p.file))
+    const scratch = new Set(made)
+    const kept = []
+    const dropped = []
+    const removed = []
+    const defs = [
+      { name: 'research', description: 'Keep (verdict "used", with used_for) or delete (verdict "junk") one page or search the task read.', parameters: { type: 'object', properties: { file: { type: 'string' }, verdict: { type: 'string', enum: ['used', 'junk'] }, used_for: { type: 'string' } }, required: ['file', 'verdict'] } },
+      { name: 'scratch', description: 'Keep or delete one new file the task made.', parameters: { type: 'object', properties: { path: { type: 'string' }, verdict: { type: 'string', enum: ['keep', 'delete'] } }, required: ['path', 'verdict'] } },
+    ]
+    const run = (name, a) => {
+      if (name === 'research') {
+        const f = [...files].find((x) => x === a.file || path.basename(x) === path.basename(String(a.file ?? '')))
+        if (!f) return `error: "${a.file}" isn't one of the pages this task read: ${[...files].join(', ')}`
+        if (a.verdict === 'junk') return removeResearch(this.root, f) ? (dropped.push(f), `Deleted ${f}.`) : `error: ${f} is gone already`
+        return markUsed(this.root, f, String(a.used_for ?? '').trim()) ? (kept.push(f), `Kept ${f}.`) : `error: ${f} is gone`
+      }
+      if (name === 'scratch') {
+        let rel = String(a.path ?? '').trim().replace(/^\.\//, '')
+        if (!scratch.has(rel) && scratch.has(`${rel}/`)) rel = `${rel}/` // a folder named without its slash
+        if (!scratch.has(rel)) return `error: "${rel}" isn't one of the new files this task made: ${[...scratch].join(', ')}`
+        if (a.verdict !== 'delete') return `Kept ${rel}.`
+        if (rel.endsWith('/')) {
+          if (!isEmptyDir(path.join(this.root, rel))) return `error: ${rel} isn't empty: delete the files in it first, or keep it`
+          fs.rmSync(path.join(this.root, rel, '.DS_Store'), { force: true })
+          fs.rmdirSync(path.join(this.root, rel))
+        } else fs.rmSync(path.join(this.root, rel), { force: true })
+        scratch.delete(rel)
+        removed.push(rel)
+        this.ui.step('cleanup', `removed ${rel}`)
+        return `Deleted ${rel}.`
+      }
+    }
+    this.ui.spinner('keeping what this task learned')
+    const was = this.client.purpose
+    try {
+      this.client.purpose = 'wrapup'
+      const said = await this.memoryTask(prompt('agent/wrapup'), request, signal, { defs, run })
+      log('wrapup', `${said} | pages kept ${kept.length}, deleted ${dropped.length}; files removed ${removed.length}`)
+      if (kept.length || dropped.length) this.ui.step('research', `kept ${kept.length} page${kept.length === 1 ? '' : 's'}${dropped.length ? `, deleted ${dropped.length} as junk` : ''}`)
+    } catch (e) {
+      if (e.name === 'AbortError' || signal?.aborted) throw e
+      log('wrapup', `failed: ${e.message}`)
+    } finally {
+      this.client.purpose = was
+      this.ui.stopSpin()
+    }
   }
 
   // /tidy_memory: merge duplicates, drop what's outdated, link related notes.
@@ -393,7 +470,7 @@ export class Session {
     const room = Math.floor(this.strat.context * 0.5 * 3.5)
     const text = notes.map((n) => `## [[${n.name}]] (${n.scope}, ${n.type}; tags: ${n.tags.join(', ') || 'none'}) — ${n.description}\n${n.body}`).join('\n\n').slice(0, room)
     const broken = this.memory.brokenLinks().map((b) => `[[${b.to}]] in [[${b.from}]]`).join(', ')
-    const summary = await this.memoryTask(this.#extractPrompt(''), prompt('agent/memory-tidy', { notes: text, broken }), signal, 30 + notes.length * 3)
+    const summary = await this.memoryTask(this.#extractPrompt(''), prompt('agent/memory-tidy', { notes: text, broken }), signal)
     this.ui.stopSpin()
     this.ui.print(`${c.faint('✻')} ${c.muted(`Tidied the memory${summary && summary !== 'NONE' ? `: ${clip(summary.split('\n')[0], 140)}` : ''}`)}`)
     return summary
@@ -455,9 +532,6 @@ const sizeOf = (m) =>
   (m.reasoning_content ? est(m.reasoning_content) : 0)
 export const size = (messages) => messages.reduce((n, m) => n + sizeOf(m), 0)
 const kTokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
-
-// How many steps a helper (the agent tool) takes at most before it answers with what it has.
-const HELPER_STEPS = 25
 
 // A chat template's tool-call markup in a reply's text (a tool call the model wrote out): outside
 // code blocks, and the reply ends in it (an answer that only mentions such tags isn't one).
@@ -570,6 +644,28 @@ async function finalAnswer(s, signal, why = 'empty replies in a row') {
   return text
 }
 
+// An older conversation called MCP tools by their own names (mcp__server__tool: each was offered as
+// a tool then). Now they're all behind the one mcp tool, so those calls are rewritten as mcp calls:
+// a request then names only tools it offers (some providers refuse one that doesn't). In place.
+export function legacyMcpCalls(messages, direct) {
+  for (const m of messages ?? []) {
+    for (const t of m.tool_calls ?? []) {
+      const name = t.function?.name ?? ''
+      if (!name.startsWith('mcp__')) continue
+      const d = direct?.get(name)
+      const parts = /^mcp__(.+?)__(.+)$/.exec(name)
+      const server = d?.server ?? parts?.[1]
+      const tool = d?.tool ?? parts?.[2]
+      if (!server || !tool) continue
+      let args = {}
+      try {
+        args = JSON.parse(t.function.arguments || '{}')
+      } catch {}
+      t.function = { name: 'mcp', arguments: JSON.stringify({ server, tool, arguments: args }) }
+    }
+  }
+}
+
 // Every tool call needs its result right after it, and every result its call, or the API rejects
 // the request (and it would be retried forever). Esc during a tool leaves a call without a result;
 // trimming can leave a result without its call. Mends both, in place.
@@ -599,6 +695,7 @@ async function runNative(s, task, images, signal) {
   // The model's thinking goes back with its steps while it works on a message (it keeps its plan
   // from one tool call to the next), not into later messages.
   for (const m of s.messages ?? []) delete m.reasoning_content
+  legacyMcpCalls(s.messages, s.mcpDirect)
   // The system prompt is rebuilt for every message: files come and go, and a resumed chat's is
   // from back then (it once told the model the project was empty after it had made files).
   // Unchanged, it stays the same text, so a provider's prompt cache still holds.
@@ -632,8 +729,28 @@ async function runNative(s, task, images, signal) {
   // schemas, takes most of the window): compacting again won't free anything, so not until it has
   // grown by another 5% (not a summary request at every step).
   const afterCompact = () => (s.compactFailedAt = used() >= strat.context * COMPACT_SHARE ? used() + Math.round(strat.context * 0.05) : 0)
-  // Already that long from earlier messages: compact first, so the new message stays word for word.
-  if (nearlyFull()) {
+  // Over the current model's window and your list holds a model that can take the whole conversation:
+  // move to it instead of compacting — losing nothing beats summarizing when you have a roomier model.
+  // Scanned in your list order, so it picks your highest-priority model that fits; false when none of
+  // your other models has more room (then the caller compacts: use what's available).
+  const roomier = () => {
+    const r = client.rotation
+    if (!r || r.list.length < 2 || !s.windowOf) return false
+    const need = used()
+    for (let k = 0; k < r.list.length; k++) {
+      if (k === r.at) continue
+      const win = s.windowOf(r.list[k])
+      if (win > 0 && need <= win * COMPACT_SHARE) {
+        ui.print(c.dim(`↻ this chat (~${kTokens(need)}) is past ${client.model}'s window — moving to ${r.list[k].model} (holds ~${kTokens(win)})`))
+        client.switchTo(r.list[k], `context ~${kTokens(need)} > ${client.model} window`)
+        return true
+      }
+    }
+    return false
+  }
+  // Already that long from earlier messages: switch to a roomier model, or else compact first, so the
+  // new message stays word for word.
+  if (nearlyFull() && !roomier()) {
     await s.compact({ signal, why: fullness() }).then(afterCompact, (e) => (e.name === 'AbortError' ? Promise.reject(e) : ui.warn(`could not compact: ${e.message}`)))
   }
   // only the memory notes this message matches go with it (the system prompt has just the tags)
@@ -641,8 +758,20 @@ async function runNative(s, task, images, signal) {
   const sent = new Set(s.chat.sentNotes ?? [])
   const key = (n) => `${n.scope}:${n.name}:${n.description}`
   const notes = (s.memory?.relevant(task) ?? []).filter((n) => !sent.has(key(n)))
-  s.chat.sentNotes = [...sent, ...notes.map(key)]
-  const text = notes.length ? `${task}\n\n${prompt('agent/memory-relevant', { notes: notes.map((n) => `[[${n.name}]] — ${n.description}`).join('\n') })}` : task
+  // pages already read for this project that match: titles only (the model opens one when needed)
+  const pages = s.isSub || !s.memory ? [] : findResearch(s.root, task, 6).filter((r) => r.kind !== 'search' && !sent.has(`research:${r.name}:${r.fetched}`))
+  s.chat.sentNotes = [...sent, ...notes.map(key), ...pages.map((r) => `research:${r.name}:${r.fetched}`)]
+  const guideSent = () => (s.chat.sentNotes ?? []).includes('guide:ui')
+  // the UI guide: once per conversation, with a message about a UI (else with the first UI file written)
+  const uiGuide = !sent.has('guide:ui') && UI_TASK.test(task)
+  if (uiGuide) s.chat.sentNotes = [...(s.chat.sentNotes ?? []), 'guide:ui']
+  const known = [
+    uiGuide && prompt('agent/ui-guide'),
+    notes.length && prompt('agent/memory-relevant', { notes: notes.map((n) => `[[${n.name}]] — ${n.description}`).join('\n') }),
+    pages.length && prompt('agent/research-known', { pages: pages.map((r) => `- ${r.title} — ${r.url} (read ${r.fetched}) → ${r.file}`).join('\n') }),
+  ].filter(Boolean)
+  const text = known.length ? `${task}\n\n${known.join('\n\n')}` : task
+  if (!s.isSub) Object.assign(s, { research: [], ran: [], lastQuery: '', dirsBefore: foldersOf(s.root) }) // this message's pages and commands (helpers add theirs), and the folders there were, for the wrap-up
   const planning = ui.permission === 'plan'
   // the research-first reminder: small models follow the user's message far more than the system
   // prompt (not a helper's job, nor a program's own task with its own instructions)
@@ -668,28 +797,33 @@ async function runNative(s, task, images, signal) {
   s.edits = 0 // successful file edits so far this message (to tell a real fix from a lucky rerun)
   s.acted = false // used a tool this message (so a reply that only promises more is a premature stop)
   let nudged = 0 // reminders sent this message about open todo items, a premature stop, or a Stop hook
+  let sinceNudge = true // a tool call made since the last reminder: one that changed nothing isn't sent again (no count: it goes on while the model gets on)
+  s.planAsked = false // asked for a plan before its first change, this message
+  // what changed and when it was last checked, this message: a change not run/tested since isn't done
+  Object.assign(s, { changed: new Set(), seq: 0, lastChangeAt: -1, lastCheckAt: -1, reviewedAt: -1 })
 
   let empty = 0 // replies in a row with neither text nor tool calls
   let looping = 0 // replies cut for going into a loop, this message
-  let stuck = null // why it's stopped: going round in circles this message
+  let stuck = null // why it's going round in circles (then the next model takes over; nothing stops but Esc)
+  // Going round in circles: the next of your models carries on (a different model often gets out of
+  // it); with no other model, a warning, and it goes on being told what it repeats — only Esc stops it.
+  const handOver = (why) => {
+    const was = client.model
+    if (client.moveOn?.(`${was} ${why}`)) ui.warn(`${was} ${why}; handing over to ${client.model}`)
+    else ui.warn(`${was} ${why} — it carries on, told so; Esc stops it`)
+  }
   let garbled = 0 // replies with a tool call written as text (template markup), this message
   let movedOn = 0 // models given up on for that, in this message
   let refitted = false // this step's conversation was just compacted for a smaller model the list moved on to
-  // No step limit: a long fix takes many steps, and Esc stops it. A caller can set one (--max-turns).
+  // No step limit (helpers too): a long fix takes many steps, and Esc stops it. A caller can set one (--max-turns).
   for (let step = 0; ; step++) {
     const tools = toolList()
-    // a helper has a budget: then it answers with what it has (one once searched the web for 40
-    // steps to answer which of two numbers is bigger)
-    if (s.isSub && step >= HELPER_STEPS) {
-      ui.warn(`${client.model} took ${HELPER_STEPS} steps; asking it for its answer`)
-      return finalAnswer(s, signal, `helper: ${HELPER_STEPS} steps`)
-    }
     if (s.maxTurns && step >= s.maxTurns) {
       ui.warn(`stopped after ${s.maxTurns} steps (--max-turns); say "continue" to go on`)
       throw Object.assign(new Error(`stopped after ${s.maxTurns} steps (--max-turns)`), { maxTurns: true })
     }
     // after a failed compaction, the next try waits until the conversation has grown by 5% of the window
-    if (nearlyFull() && step !== s.compactedAt) {
+    if (nearlyFull() && step !== s.compactedAt && !roomier()) {
       s.compactedAt = step
       await s.compact({ signal, midTask: true, task, why: fullness() }).then(
         afterCompact,
@@ -741,10 +875,9 @@ async function runNative(s, task, images, signal) {
     // the reply went round and round (client.js cut it): told so, and asked again
     if (res.looped) {
       if (++looping > 3) {
-        ui.warn(`stopped: ${client.model} keeps going into a loop`)
-        return finalAnswer(s, signal, 'its replies kept going into a loop')
-      }
-      ui.warn(`${client.model} went into a loop; cut, and asked again`)
+        handOver(`keeps going into a loop`)
+        looping = 0
+      } else ui.warn(`${client.model} went into a loop; cut, and asked again`)
       if (res.content.trim()) s.messages.push({ role: 'assistant', content: res.content })
       s.messages.push({ role: 'user', content: prompt('agent/looped', { sample: res.looped }) })
       continue
@@ -774,7 +907,7 @@ async function runNative(s, task, images, signal) {
       res.content = res.content.slice(0, markup.index).trim()
       s.messages[s.messages.length - 1] = { ...s.messages.at(-1), content: res.content }
     }
-    if (res.toolCalls.length) s.acted = true // did real work this message, for the premature-stop check
+    if (res.toolCalls.length) s.acted = sinceNudge = true // did real work this message, for the premature-stop check
     s.onEvent?.({ type: 'assistant', model: `${client.provider}/${client.model}`, content: res.content, reasoning: res.reasoning, toolCalls: res.toolCalls }) // headless output
     if (!res.toolCalls.length && !res.content?.trim()) {
       // Nothing at all (seen after a failed tool call): not an answer. The same request again
@@ -803,9 +936,13 @@ async function runNative(s, task, images, signal) {
         s.messages.push({ role: 'user', content: look })
         continue
       }
-      const more = nudged < 3 && !s.isSub && (await notDone(s, signal, nudged > 0, res.content))
-      if (!more) return res.content
+      const more = sinceNudge && !s.isSub && ((await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal)))
+      if (!more) {
+        await s.wrapUp?.(task, res.content, signal)
+        return res.content
+      }
       nudged++
+      sinceNudge = false
       s.messages.push({ role: 'user', content: more })
       continue
     }
@@ -856,10 +993,22 @@ async function runNative(s, task, images, signal) {
                   : (args.path ?? args.url ?? args.query ?? args.filter ?? args.name ?? '')
       if (name !== 'run_command' && !together.has(call.id)) ui.step(name, clip(detail, 80))
       const pre = early.get(call.id)
-      const refused = pre ? (pre.refused ?? null) : !together.has(call.id) && args && allowed(s, name) ? guard.before(name, args) : null
+      // the first change to the files with no plan yet (this message, or still open from an earlier one):
+      // not made — the plan first, then the change again. Once a message; not a helper's (its job is its plan)
+      const planFirst = !s.isSub && !s.planAsked && EDITS.has(name) && args && allowed(s, name) && ui.permission !== 'plan' && !s.todoTouched && !(s.chat.todos ?? []).some((t) => t.status !== 'completed')
+      if (planFirst) s.planAsked = true
+      const refused = planFirst ? prompt('agent/plan-first') : pre ? (pre.refused ?? null) : !together.has(call.id) && args && allowed(s, name) ? guard.before(name, args) : null
       let out = refused ?? (pre ? await pre.running : together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal, call.id) : 'error: the tool arguments were not valid JSON')
       if (!refused && args) out += guard.after(name, args, out)
       if (guard.stuck) stuck ??= guard.stuck
+      if (args && !refused) {
+        s.seq++
+        if (EDITS.has(name) && !failed(out)) {
+          s.lastChangeAt = s.seq
+          if (args.path) s.changed.add(String(args.path))
+        } else if (CHECKS.has(name)) s.lastCheckAt = s.seq // ran something: a check of what changed (the model judges its result)
+      }
+      if (name === 'run_command' && args && !refused) s.ran?.push({ command: String(args.command ?? ''), result: clip(String(out).split('\n').filter((l) => l.trim()).slice(0, 2).join(' · '), 160) })
       if (!s.isSub && s.memory && !refused && args) await noteRun(s, name, args, out, signal).catch((e) => log('learn', `run note: ${e.message}`)) // learn from any run that failed then passed
       // the same call again and again in a row (a weak model going round): told at the third, stopped at the fifth
       const sig = `${name} ${call.function.arguments}`
@@ -871,15 +1020,28 @@ async function runNative(s, task, images, signal) {
       else if (name === 'agent' && !failed(out)) ui.result(`${s.ui.permission === 'plan' ? 'planned' : 'done'}: ${clip(out.split('\n').find((l) => l.trim()) ?? '', 100)}`)
       else if (failed(out)) ui.result(clip(out, 120))
       client.refresh?.() // a setting changed while the tool ran (the window): its result is cut by the new one
-      const msg = { role: 'tool', tool_call_id: call.id, content: fitResult(s, name, out) }
+      // the first UI file written in a conversation that hasn't had the UI guide: it comes with the result
+      if (EDITS.has(name) && args && UI_FILE.test(String(args.path ?? '')) && !failed(out) && !guideSent()) {
+        s.chat.sentNotes = [...(s.chat.sentNotes ?? []), 'guide:ui']
+        out += `\n\n${prompt('agent/ui-guide')}`
+      }
+      // every sizable result is saved as it comes (a web page already is, in research): later it can
+      // become a pointer to its file in the conversation without anything being lost
+      if (out.length > SAVE_AT && name !== 'read_file' && !s.chat.outputs?.[call.id]) {
+        const file = saveOutput(s.chat?.id, name, out)
+        if (file) (s.chat.outputs ??= {})[call.id] = file
+      }
+      const msg = { role: 'tool', tool_call_id: call.id, content: fitResult(s, name, out, s.chat.outputs?.[call.id]) }
       if (name === 'read_file' && args && !args.start_line && !args.end_line && !failed(out)) replaceCopy(s, args.path, msg)
       s.messages.push(msg)
       s.onEvent?.({ type: 'tool', id: call.id, name, output: out })
     }
     trimOldResults(s)
     if (stuck) {
-      ui.warn(`stopped: ${client.model} ${stuck}`)
-      return finalAnswer(s, signal, stuck)
+      handOver(stuck)
+      stuck = null
+      inRow = 0
+      guard.calm()
     }
     // screenshots from MCP tools: tool results are text only, so images follow as a message
     if (s.pendingImages?.length) {
@@ -896,6 +1058,13 @@ async function runNative(s, task, images, signal) {
 // (ten calls already made) stops it.
 // before: what to send back instead of running it (the earlier result), or null; after: a note for its result.
 const EDITS = new Set(['edit_file', 'write_file', 'append_file', 'apply_patch'])
+// Tools that run or look at what was made (a command, a test, a browser, a helper): a check after a change.
+const CHECKS = new Set(['run_command', 'mcp', 'agent', 'lsp'])
+// Files only read by people (a change there needs no run to check it).
+const DOC_FILE = /\.(md|mdx|txt|rst|adoc)$/i
+// A message about something people look at (gets the UI guide), and a file that is one.
+const UI_TASK = /\b(ui|ux|web ?page|page|website|web ?site|landing|dashboard|screen|component|front-?end|layout|redesign|design|css|html|styles?|styling|theme|tailwind|navbar|modal|button)s?\b/i
+const UI_FILE = /\.(html?|css|scss|sass|less|jsx|tsx|vue|svelte|astro)$/i
 // Tools that only look (nothing changes): several in one reply run at the same time.
 const LOOKUPS = new Set(['web_search', 'web_fetch', 'read_file', 'search', 'list_files', 'find_command', 'lsp'])
 export function newGuard() {
@@ -904,10 +1073,15 @@ export function newGuard() {
   let failing = 0
   let repeats = 0
   const g = { stuck: null }
+  g.calm = () => { // after a handover or a warning: counted again from nothing
+    g.stuck = null
+    repeats = 0
+    failing = 0
+  }
   const words = (q) => [...new Set(String(q ?? '').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])].sort().join(' ')
   const keyOf = (name, a) => {
-    if (name === 'web_search') return `search: ${words(a.query)}`
-    if (name === 'web_fetch') return `page: ${String(a.url ?? '').toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/+$/, '')} @${a.start ?? 0}`
+    if (name === 'web_search') return `search: ${words(a.query)}${a.fresh ? ' (fresh)' : ''}`
+    if (name === 'web_fetch') return `page: ${String(a.url ?? '').toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/+$/, '')} @${a.start ?? 0} ${words(a.look_for)}`
     if (['run_command', 'read_file', 'search', 'list_files', 'find_command', 'lsp'].includes(name)) return `${name} ${JSON.stringify(a)} @${epoch}`
     return null
   }
@@ -939,9 +1113,9 @@ export function newGuard() {
 
 // The pages this message wrote or restyled (an .html written, or one using a .css written),
 // opened in the built-in browser (chrome-devtools): a screenshot at desktop width (the whole page)
-// and at phone width, given to the model to check against its brief and fix. Twice per message at
-// most; nothing when there's no browser. A model that can't see gets them described by one of
-// yours that can.
+// and at phone width, given to the model to check against its brief and fix. Again whenever pages
+// changed since the last look; nothing when there's no browser. A model that can't see gets them
+// described by one of yours that can.
 // Problems found in a built page without a browser: JavaScript that doesn't parse, and the Tailwind
 // CDN used with @apply/@layer (it throws "Cannot apply unknown utility class" at runtime and the
 // styling breaks). These are caught even when the browser can't be opened.
@@ -1037,13 +1211,26 @@ async function learnFromFixes(s, fixed, signal) {
     const near = s.memory.search(`tag:lesson ${tags.join(' ')}`).find((n) => n.body.toLowerCase().includes(error.replace(/^[^:]*:\s*/, '').toLowerCase().slice(0, 30)))
     if (near) continue // already learned
     let rule = ''
+    let scope = 'global'
     try {
-      rule = (await s.client.chat({ messages: [{ role: 'user', content: prompt('agent/lesson', { error }) }] }, { signal })).content.trim().split('\n')[0].replace(/^["'\s-]+|["']+$/g, '').slice(0, 200)
-    } catch {}
+      const was = s.client.purpose
+      s.client.purpose = 'lesson'
+      let reply
+      try {
+        reply = await s.client.chat({ messages: [{ role: 'user', content: prompt('agent/lesson', { error }) }] }, { signal })
+      } finally {
+        s.client.purpose = was
+      }
+      const said = reply.content.trim().split('\n').filter((l) => l.trim())
+      rule = (said.find((l) => !/^\s*\W*scope\s*:/i.test(l)) ?? '').replace(/^\s*(?:\d+[.)]|[-*])\s*/, '').replace(/^["'\s-]+|["']+$/g, '').slice(0, 200)
+      if (/scope\s*:\W*project/i.test(said.join('\n'))) scope = 'project'
+    } catch (e) {
+      if (e.name === 'AbortError') throw e
+    }
     if (!rule || rule.length < 10) rule = error.replace(/^[^:]*:\s*/, '') // the model couldn't phrase it: keep the error's own wording
-    const name = s.memory.write({ description: rule, type: 'reference', tags: ['lesson', ...tags], content: `${rule}\n\nLearned after this was caught and fixed while building: ${error}`, scope: 'global' })
-    s.ui.step('learned', rule.slice(0, 90))
-    log('learn', `saved lesson [[${name}]] (#${tags.join(' #')}): ${rule}`)
+    const name = s.memory.write({ description: rule, type: 'reference', tags: ['lesson', ...tags], content: `${rule}\n\nLearned on ${new Date().toISOString().slice(0, 10)} after this was caught and fixed while building: ${error}`, scope })
+    s.ui.step('learned', `${rule.slice(0, 90)}${scope === 'project' ? ' (this project)' : ''}`)
+    log('learn', `saved lesson [[${name}]] (${scope}, #${tags.join(' #')}): ${rule}`)
   }
 }
 
@@ -1062,14 +1249,14 @@ const SMOKE_TEST = `async () => {
   }
   const btns = [...document.querySelectorAll('button, [role=button], input[type=button], input[type=submit], a[href^="#"], a:not([href]), [onclick]')]
   let controls = btns.length
-  for (const el of btns.slice(0, 30)) { try { el.click() } catch (e) { push('click "' + ((el.textContent || el.getAttribute('aria-label') || el.value || '').trim().slice(0, 30)) + '": ' + e.message) } ; await new Promise((r) => setTimeout(r, 10)) }
+  for (const el of btns) { try { el.click() } catch (e) { push('click "' + ((el.textContent || el.getAttribute('aria-label') || el.value || '').trim().slice(0, 30)) + '": ' + e.message) } ; await new Promise((r) => setTimeout(r, 10)) }
   for (const cb of document.querySelectorAll('input[type=checkbox], input[type=radio]')) { controls++; try { cb.click() } catch (e) { push('toggle: ' + e.message) } }
   await new Promise((r) => setTimeout(r, 200))
   return JSON.stringify({ errors: errs, controls })
 }`
 
 async function lookAtUi(s, signal) {
-  if (!s.uiTouched?.size || s.uiLooks >= 3 || s.ui.permission === 'plan') return null
+  if (!s.uiTouched?.size || s.ui.permission === 'plan') return null // again whenever pages changed since the last look
   const touched = [...s.uiTouched]
   s.uiTouched.clear()
   const styles = touched.filter((f) => /\.css$/i.test(f)).map((f) => path.basename(f))
@@ -1081,7 +1268,7 @@ async function lookAtUi(s, signal) {
       } catch {}
     }
   }
-  const shown = [...new Set(pages)].filter((f) => fs.existsSync(path.join(s.root, f))).slice(0, 2)
+  const shown = [...new Set(pages)].filter((f) => fs.existsSync(path.join(s.root, f)))
   if (!shown.length) return null
   s.uiLooks++
   const browser = s.mcp?.get?.('chrome-devtools')
@@ -1112,7 +1299,7 @@ async function lookAtUi(s, signal) {
       if (blob) {
         try {
           const r = JSON.parse(blob[0])
-          for (const err of r.errors.slice(0, 8)) errors.push(`${rel}: a control is broken — ${err}`)
+          for (const err of r.errors) errors.push(`${rel}: a control is broken — ${err}`)
           log('look', `${rel}: exercised ${r.controls} control(s), ${r.errors.length} broke`)
         } catch (e) {
           log('look', `smoke parse: ${e.message}`)
@@ -1133,6 +1320,7 @@ async function lookAtUi(s, signal) {
     done?.()
     s.ui.stopSpin()
   }
+  if (opened) s.lastCheckAt = s.seq ?? 0 // it ran in a browser: what changed was checked
   if (errors.length) log('look', `problems found: ${errors.join(' | ')}`)
   // Learn: a hard error that was there last look and is gone now was fixed — save the lesson so it
   // isn't made again (recalled on later tasks about the same tech). Only in the main agent.
@@ -1161,7 +1349,13 @@ async function lookAtUi(s, signal) {
       s.ui.spinner(`${t.model} is reviewing ${shown.join(', ')}`)
       try {
         const { client } = t === self ? { client: s.client } : await s.engineFor(t)
-        found = (await client.chat({ messages: [{ role: 'user', content: [{ type: 'text', text: ask }, ...shots.map((x) => ({ type: 'image_url', image_url: { url: x.url } }))] }] }, { signal })).content.trim()
+        const was = client.purpose
+        client.purpose = 'ui-review'
+        try {
+          found = (await client.chat({ messages: [{ role: 'user', content: [{ type: 'text', text: ask }, ...shots.map((x) => ({ type: 'image_url', image_url: { url: x.url } }))] }] }, { signal })).content.trim()
+        } finally {
+          client.purpose = was
+        }
         if (found) break
       } catch (e) {
         if (signal?.aborted) throw e
@@ -1190,11 +1384,23 @@ const PROMISED_MORE =
 
 // Is the task really done, or did the model stop early? Open todo items, or (after it did real work)
 // a reply that only promises more, get one nudge to keep going. Then any Stop hook. null = truly done.
-async function notDone(s, signal, again, reply = '') {
+export async function notDone(s, signal, again, reply = '') {
   const open = s.todoTouched && s.ui.permission !== 'plan' ? (s.chat.todos ?? []).filter((t) => t.status !== 'completed') : [] // plan mode: they wait for the approval
   if (open.length) {
     log('task', `stopped with ${open.length} open todo item(s); reminding`)
     return prompt('agent/todo-unfinished', { items: open.map((t) => `- ${t.content}`).join('\n') })
+  }
+  // changed files and hasn't run anything since: not proven to work
+  const changed = [...(s.changed ?? [])]
+  if (changed.length && s.lastCheckAt < s.lastChangeAt && !changed.every((f) => DOC_FILE.test(f)) && s.ui.permission !== 'plan') {
+    log('task', `finished with changes not checked since (${changed.join(', ')}); asking for a check`)
+    return prompt('agent/unchecked', { files: changed.join(', ') })
+  }
+  // says it made files that aren't there
+  const missing = missingFiles(s.root, reply)
+  if (missing.length) {
+    log('task', `the answer names files that don't exist: ${missing.join(', ')}`)
+    return prompt('agent/missing-files', { files: missing.join(', ') })
   }
   if (s.acted && reply && PROMISED_MORE.test(reply)) {
     log('task', 'reply names a next step but no tool call followed; nudging to finish')
@@ -1204,21 +1410,149 @@ async function notDone(s, signal, again, reply = '') {
   return hook.block ? prompt('agent/hook-stop', { reason: hook.block }) : null
 }
 
+// Files the final answer says were made, that aren't in the project: a path in backticks, or one
+// with a folder, with a source/config/doc extension, while the answer says it created or wrote
+// something. A name that's anywhere in the project (by its file name) counts as there.
+const FILE_EXT = 'html?|css|scss|m?js|cjs|tsx?|jsx|json|md|py|go|rs|java|kts?|swift|rb|php|c|h|cpp|cs|sh|ya?ml|toml|xml|gradle|vue|svelte|sql|txt|env'
+export function missingFiles(root, reply) {
+  const text = String(reply ?? '')
+  if (!/\b(created?|wrote|written|added|saved|generated|made|new file)\b/i.test(text)) return []
+  const named = new Set()
+  for (const m of text.matchAll(new RegExp(`\`([^\`\\s]+\\.(?:${FILE_EXT}))\``, 'gi'))) named.add(m[1])
+  for (const m of text.matchAll(new RegExp(`(?:^|[\\s(])((?:[\\w.-]+/)+[\\w.-]+\\.(?:${FILE_EXT}))(?=[\\s),.:;]|$)`, 'gim'))) named.add(m[1])
+  const out = []
+  let names = null
+  for (const f of named) {
+    if (/^(https?:|\/\/|~|\$)/.test(f) || path.isAbsolute(f)) continue
+    if (fs.existsSync(path.join(root, f))) continue
+    names ??= new Set(listFiles(root).map((x) => path.basename(x)))
+    if (names.has(path.basename(f))) continue
+    out.push(f)
+  }
+  return out
+}
+
+// Every folder in the project (relative paths), the ignored ones (.git, node_modules…) and
+// HeartCode's own left out: to tell the folders a task made.
+function foldersOf(root) {
+  const out = new Set()
+  const walk = (rel, depth) => {
+    if (out.size > 20_000 || depth > 12) return
+    let entries = []
+    try {
+      entries = fs.readdirSync(path.join(root, rel), { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      if (!e.isDirectory() || IGNORED_DIRS.has(e.name) || e.name === '.heartcode') continue
+      const r = rel ? `${rel}/${e.name}` : e.name
+      out.add(r)
+      walk(r, depth + 1)
+    }
+  }
+  walk('', 0)
+  return out
+}
+const IGNORED_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage', '.venv', 'venv', '__pycache__', 'target', '.cache', '.gradle', '.idea'])
+const isEmptyDir = (abs) => {
+  try {
+    return fs.readdirSync(abs).filter((f) => f !== '.DS_Store').length === 0
+  } catch {
+    return false
+  }
+}
+
+// A second look before it's called done, in a request of its own: another of your models when
+// there is one (fresh eyes), else this one, with nothing but the user's request, the plan, the
+// answer, the changes and what was run since. It answers YES (done right) or NO with what's wrong;
+// a NO goes back to the model to fix. Asked again only once files changed since its last look.
+// Returns what to tell the model, or null.
+export async function review(s, task, answer, signal) {
+  if (s.isSub || !s.changed?.size || s.lastChangeAt <= s.reviewedAt || s.ui.permission === 'plan') return null
+  s.reviewedAt = s.lastChangeAt
+  const turn = s.chat.turns.at(-1)
+  const diffs = []
+  let room = 16_000
+  for (const [rel, before] of Object.entries(turn?.files ?? {})) {
+    let now = null
+    try {
+      now = fs.readFileSync(path.join(s.root, rel), 'utf8')
+    } catch {}
+    if (now === before) continue
+    const text = before === null ? `${rel} (new file):\n${now ?? ''}` : now === null ? `${rel}: deleted` : renderDiff(diffLines(before, now), rel, false, 3, 400)
+    const piece = clip(text, Math.min(5000, room))
+    room -= piece.length
+    diffs.push(piece)
+    if (room <= 500) {
+      diffs.push('(more changes not shown)')
+      break
+    }
+  }
+  if (!diffs.length) return null
+  const plan = (s.chat.todos ?? []).map((t) => `- [${t.status === 'completed' ? 'x' : ' '}] ${t.content}`).join('\n')
+  const ran = (s.ran ?? []).slice(-15).map((r) => `- ${clip(r.command.replace(/\s+/g, ' '), 160)} → ${r.result}`).join('\n')
+  const ask = prompt('agent/review', { request: requestsOf(s.chat, 1200), plan: plan || '(none)', answer: clip(String(answer ?? ''), 3000), changes: diffs.join('\n\n'), ran: ran || '(nothing)' })
+  const self = { provider: s.client.provider, model: s.client.model, self: true }
+  const fails = (t) => s.failures?.[`${t.provider} ${t.model}`] ?? 0
+  const others = (s.team?.() ?? []).filter((t) => t.tools !== false && !(t.provider === self.provider && t.model === self.model)).sort((a, b) => fails(a) - fails(b))
+  for (const t of [...others.slice(0, 2), self]) {
+    s.ui.spinner(`${t.model} is reviewing the work`)
+    try {
+      const { client } = t.self ? { client: s.client } : await s.engineFor(t)
+      if (!t.self) client.retryIf = (e, attempt) => attempt < 2
+      const was = client.purpose
+      client.purpose = 'review'
+      let said
+      try {
+        said = (await client.chat({ messages: [{ role: 'user', content: ask }] }, { signal })).content.trim()
+      } finally {
+        client.purpose = was
+      }
+      s.ui.stopSpin()
+      log('review', `${t.model}: ${said}`)
+      if (/^\W*yes\b/i.test(said)) {
+        s.ui.step('review', `${t.model}: looks right`)
+        return null
+      }
+      if (/^\W*no\b/i.test(said)) {
+        const issues = said.replace(/^\W*no\b[\s.:—-]*/i, '').trim()
+        s.ui.step('review', `${t.model}: ${clip(issues.split('\n').find((l) => l.trim()) ?? 'problems found', 90)}`)
+        return prompt('agent/review-failed', { model: t.model, issues: issues || '(no details given)' })
+      }
+      log('review', `${t.model} didn't answer YES or NO; trying another`)
+    } catch (e) {
+      if (e.name === 'AbortError' || signal?.aborted) throw e
+      log('review', `${t.model} couldn't review: ${e.message}`)
+    }
+  }
+  s.ui.stopSpin()
+  return null
+}
+
 // A helper agent's view of the screen: its steps are labelled, and its replies (which go to the
 // main agent) aren't shown as answers. Everything else is the main UI's.
 // Its thinking is shown whole when its reply is in (helpers working at once don't mix), named.
 // Questions to the user (confirm, pick, ask) wait their turn: helpers working at once ask one by one.
 const asking = new WeakMap() // ui → the question being asked
 function helperUI(ui, label) {
+  // What the helper says is shown in full under its name. Held until its reply ends, then printed at
+  // once: helpers run side by side, and streamed text from two would interleave.
   const response = () => {
     const t0 = Date.now()
     let thought = ''
+    let said = ''
     return {
       think: (t) => (thought += t ?? ''),
-      text() {},
+      text: (t) => (said += t ?? ''),
       end() {
-        if (!thought.trim()) return
-        ui.print(c.faint(c.italic(`  ✻ ${label} thought for ${duration(Date.now() - t0)}`)) + (ui.showThinking ? `\n${c.think(c.italic(thought.trim().replace(/^/gm, '    ')))}` : ''))
+        if (thought.trim()) ui.print(c.faint(c.italic(`  ✻ ${label} thought for ${duration(Date.now() - t0)}`)) + (ui.showThinking ? `\n${c.think(c.italic(thought.trim().replace(/^/gm, '    ')))}` : ''))
+        if (!said.trim()) return
+        ui.print(`  ${c.bright(c.bold('●'))} ${c.bold(label)}`)
+        let block = new Block((x) => ui.write(x), { marker: '    ', style: c.text })
+        if (color) block = new Markdown(block, c.text)
+        block.push(said.trim())
+        block.end()
       },
     }
   }
@@ -1244,26 +1578,48 @@ export { allowed }
 const shortened = new WeakSet() // kept outside the messages: providers reject unknown message fields
 
 // How long a tool result may be in the conversation: a tenth of the window, 4k to 100k characters
-// (Claude Code allows about 25k tokens). A longer one: its start, and the whole of it saved to a
-// file the model can read in parts (read_file, search), as Claude Code does.
-export function fitResult(s, name, out) {
+// (Claude Code allows about 25k tokens). A longer one: its start, and the whole of it in a file the
+// model can read in parts (read_file, search), as Claude Code does. file: where it's saved already.
+export function fitResult(s, name, out, file) {
   const max = Math.max(4000, Math.min(100_000, Math.floor((s.strat.context * 3.5 * 0.1) / (s.strat.ratio ?? 1))))
   if (out.length <= max) return out
-  const file = saveOutput(s.chat?.id, name, out)
+  file ??= saveOutput(s.chat?.id, name, out)
   log('tool', `${name}: ${out.length} characters, ${max} shown${file ? `; all of it in ${file}` : ''}`)
   return `${out.slice(0, max)}\n…\n${prompt('agent/output-cut', { shown: max, total: out.length, file })}`
 }
 
-// A long task's conversation fills up with old tool output (a browser's page snapshots, each out of
-// date by the next). Past 12 long results, all but the newest 4 are cut to their start, each saved
-// to a file first. All at once, so a provider's prompt cache (the conversation's unchanged start)
-// is broken rarely, not at every step.
-export function trimOldResults(s, keep = 4, most = 12) {
-  const long = s.messages.filter((m) => m.role === 'tool' && typeof m.content === 'string' && m.content.length > 2000 && !shortened.has(m) && !/^\[older output/.test(m.content))
+// Results longer than this are saved to a file when they come (so they can leave the conversation later).
+const SAVE_AT = 1500
+// What a tool call was, in a few words: "web_fetch https://…", "run_command npm test".
+function callOf(messages, id) {
+  for (const m of messages) {
+    const t = m.tool_calls?.find((x) => x.id === id)
+    if (!t) continue
+    let a = {}
+    try {
+      a = JSON.parse(t.function.arguments || '{}')
+    } catch {}
+    const what = a.server ? `${a.server} · ${a.tool ?? ''}` : (a.path ?? a.url ?? a.command ?? a.query ?? a.description ?? '')
+    return `${t.function.name}${what ? ` ${clip(String(what).replace(/\s+/g, ' '), 120)}` : ''}`
+  }
+  return 'a tool'
+}
+
+// The conversation carries only the newest results whole: the model decides what else it needs and
+// reads it from the files (every sizable result is saved when it comes; web pages are in the
+// project's research). Once there are more than `most` long ones, all but the newest `keep` become a
+// pointer: what the call was, how long, where it's saved, and its first lines. All at once, so a
+// provider's prompt cache (the conversation's unchanged start) is broken rarely, not every step.
+// An older conversation's results (no file yet) are saved now, before they're cut.
+export function trimOldResults(s, keep = 4, most = 8) {
+  const long = s.messages.filter((m) => m.role === 'tool' && typeof m.content === 'string' && m.content.length > SAVE_AT && !shortened.has(m) && !/^\[older output/.test(m.content))
   if (long.length <= most) return
   for (const m of long.slice(0, -keep)) {
-    const file = saveOutput(s.chat?.id, 'older', m.content)
-    m.content = `${prompt('agent/output-old', { total: m.content.length, file })}\n${m.content.slice(0, 600)}\n…`
+    const call = callOf(s.messages, m.tool_call_id)
+    const read = /^read_file /.test(call) ? call.slice('read_file '.length) : '' // a project file: read it again
+    const file = read || s.chat.outputs?.[m.tool_call_id] || saveOutput(s.chat?.id, 'older', m.content)
+    if (file && !read) (s.chat.outputs ??= {})[m.tool_call_id] = file
+    m.content = `${prompt('agent/output-old', { call, total: m.content.length, file })}\n${m.content.slice(0, 300)}\n…`
     shortened.add(m)
   }
   log('tool', `older tool output cut: ${long.length - keep} results`)

@@ -198,6 +198,17 @@ export class Client {
     log('rotate', `${why} → ${r.list[r.at].provider} · ${r.list[r.at].model}`)
     this.#use(r.list[r.at])
   }
+  // Jump straight to a particular model in the list — the caller found it has room the current one
+  // doesn't (the conversation outgrew this model's window), so move there instead of compacting.
+  // No-op (false) without a list, or if it's not in the list or already the one in use.
+  switchTo(target, why) {
+    const r = this.rotation
+    if (!r) return false
+    const i = r.list.indexOf(target)
+    if (i < 0 || i === r.at) return false
+    this.#next(why, () => i)
+    return true
+  }
   // Which model of the list to go on to after this one failed, for one request (tried: the places
   // tried, down: the providers that answered with an error, 400 or above). A provider that answered
   // with an error isn't asked again through its next model: the next one is from another provider.
@@ -455,8 +466,8 @@ export class Client {
           } else this.onRetry(e, 0, attempt + 1, this.target)
           continue
         }
-        // a server error or no connection, again and again (not a rate limit, which is waited out)
-        if (e.status !== 429 && tries >= 8) throw e
+        // a server error or no connection, again and again: waited out like a rate limit (the wait
+        // grows to a minute), until it comes back or Esc — never given up on
         const wait = Math.min(Number(e.retryAfter) * 1000 || this.retryBase * 2 ** (tries - 1), 60_000)
         log('retry', `attempt ${attempt + 1} failed, waiting ${wait}ms: ${e.message}`)
         this.onRetry(e, wait, attempt + 1)
@@ -567,7 +578,7 @@ export class Client {
     // Speed counts from the first streamed token (or the request, if not streaming) to the end.
     const count = (r) => {
       if (r.usage?.prompt_tokens) this.onUsage?.(r.usage.prompt_tokens, estMessages(req.messages) + est(JSON.stringify(req.tools ?? '')))
-      this.lastTokens = r.usage?.total_tokens || estMessages(req.messages) + est(r.content + r.reasoning)
+      if ((this.purpose ?? 'chat') === 'chat') this.lastTokens = r.usage?.total_tokens || estMessages(req.messages) + est(r.content + r.reasoning) // the conversation's size: not a side request's (a review, the wrap-up, a lesson)
       const out = r.usage?.completion_tokens || est(r.content + r.reasoning + r.toolCalls.map((t) => t.function.arguments).join(''))
       this.onSpend?.(r.usage?.prompt_tokens || r.usage?.completion_tokens ? r.usage : { prompt_tokens: estMessages(req.messages), completion_tokens: out, estimated: true }) // usage and cost (usage.js)
       const ms = Date.now() - (firstAt ?? sent)

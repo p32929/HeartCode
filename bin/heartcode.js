@@ -757,6 +757,17 @@ class App {
     Object.assign(this.s, { mcp: this.mcp, memory: this.memory, skills: this.skills, director: this.director })
     this.s.team = () => this.team() // your other models: a job this one can't do goes to one of them
     this.s.engineFor = (t) => this.engine(t.provider, t.model, ui, undefined, { quiet: true })
+    // A model's context window, read from its saved profile (no probe, no network): so the agent can
+    // see, before compacting, whether another model in the list has room for the whole conversation.
+    this.s.windowOf = (t) => {
+      try {
+        const cl = this.client(t.provider, t.model)
+        const profile = loadProfile(cl) || profileFrom(cl, limitsOf(t.provider, cl.baseUrl, t.model))
+        return strategy(profile, cfg).context || 0
+      } catch {
+        return 0
+      }
+    }
     this.s.failures = this.failures
     if (this.allowTools?.length) this.s.allowTools = toolNames(this.allowTools) // headless --allowedTools
     if (this.denyTools?.length) this.s.denyTools = toolNames(this.denyTools)

@@ -6,6 +6,7 @@
 // model is told "search is unreachable", so it stops searching instead of trying other words.
 import path from 'node:path'
 import { HOME, readJson, writeJson } from './config.js'
+import { keywords } from './memory.js'
 // ponytail: scraping, no API; add a keyed backend (Brave, Tavily) if DuckDuckGo blocks for good.
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'
@@ -42,6 +43,7 @@ export function htmlToText(html, base) {
       } catch {}
       return /^https?:/.test(url) && text !== url ? `[${text}](${url})` : text
     })
+    .replace(/<table\b[^>]*>([\s\S]*?)<\/table>/gi, (m, inner) => tableToMarkdown(inner) ?? m)
     .replace(/<li\b[^>]*>/gi, '\n- ')
     .replace(/<(br|hr)\b[^>]*>/gi, '\n')
     .replace(/<\/(p|div|section|tr|table|ul|ol|blockquote|dd|dt)>/gi, '\n')
@@ -58,26 +60,95 @@ export function htmlToText(html, base) {
   return title && !text.startsWith(`# ${title}`) ? `# ${title}\n\n${text}` : text
 }
 
-const MAX = 10_000 // a part and its note fit in a tool result (agent.js keeps 12,000 characters of one)
+// An HTML table's rows as a Markdown table (header row first); null when it isn't a real one (a
+// layout table of one column), which is then left to the plain conversion.
+function tableToMarkdown(inner) {
+  const cell = (h) => decode(h.replace(/<br\b[^>]*>/gi, ' ').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim()
+  const rows = [...inner.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map((r) => [...r[1].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)].map((c) => cell(c[1]))).filter((r) => r.length)
+  const cols = Math.max(0, ...rows.map((r) => r.length))
+  if (cols < 2 || rows.length < 2) return null
+  const line = (r) => `| ${[...r, ...Array(cols - r.length).fill('')].join(' | ')} |`
+  return `\n\n${line(rows[0])}\n|${' --- |'.repeat(cols)}\n${rows.slice(1).map(line).join('\n')}\n\n`
+}
 
-// A page's text, from `start` (characters), for the model.
-export async function webFetch(url, { start = 0, signal } = {}) {
+const MAX = 10_000 // what one web_fetch result shows (agent.js keeps about that much of one)
+
+// A page, fetched and turned into Markdown: { url (after redirects), title, text, status, ok } or { error }.
+export async function fetchPage(url, { signal } = {}) {
   let u
   try {
     u = new URL(/^\w+:\/\//.test(url) ? url : `https://${url}`)
   } catch {
-    return `error: "${url}" is not a URL`
+    return { error: `"${url}" is not a URL` }
   }
-  if (!/^https?:$/.test(u.protocol)) return 'error: only http and https URLs can be fetched'
+  if (!/^https?:$/.test(u.protocol)) return { error: 'only http and https URLs can be fetched' }
   const res = await fetch(u, { headers: HEADERS, redirect: 'follow', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000) })
   const type = res.headers.get('content-type') ?? ''
-  if (!/text|json|xml|javascript|markdown/.test(type) && type) return `error: ${u.href} is ${type.split(';')[0]}, not text (${res.status})`
+  if (!/text|json|xml|javascript|markdown/.test(type) && type) return { error: `${u.href} is ${type.split(';')[0]}, not text (${res.status})` }
   const body = await res.text()
-  const text = /html/.test(type) || /^\s*<(!doctype|html)/i.test(body) ? htmlToText(body, res.url) : body
+  const html = /html/.test(type) || /^\s*<(!doctype|html)/i.test(body)
+  const text = html ? htmlToText(body, res.url) : body
+  const title = html ? decode(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(body)?.[1]?.trim() ?? '') : ''
+  return { url: res.url || u.href, asked: u.href, title, text, status: res.status, ok: res.ok }
+}
+
+// A page's text, from `start` (characters), for the model (no file to point at).
+export async function webFetch(url, { start = 0, signal } = {}) {
+  const p = await fetchPage(url, { signal })
+  if (p.error) return `error: ${p.error}`
   const from = Math.max(0, Number(start) || 0)
-  const part = text.slice(from, from + MAX)
-  const more = from + MAX < text.length ? `\n\n… (${text.length} characters in all; call web_fetch with start: ${from + MAX} for more)` : ''
-  return `${res.ok ? '' : `error: HTTP ${res.status}\n`}${res.url !== u.href ? `(redirected to ${res.url})\n` : ''}${part || '(empty page)'}${more}`
+  const part = p.text.slice(from, from + MAX)
+  const more = from + MAX < p.text.length ? `\n\n… (${p.text.length} characters in all; call web_fetch with start: ${from + MAX} for more)` : ''
+  return `${p.ok ? '' : `error: HTTP ${p.status}\n`}${p.url !== p.asked ? `(redirected to ${p.url})\n` : ''}${part || '(empty page)'}${more}`
+}
+
+// What the model is shown of a page that is saved whole in `file` (its text starting at line
+// `bodyLine` there). A short page: all of it. A long one: its outline (each heading with its line in
+// the file) and the sections that match what the model is looking for (else the page's start), as
+// much as fits — the rest is a read_file of those lines away, not lost.
+export function pageView(text, { lookFor = '', file = '', bodyLine = 1, max = MAX } = {}) {
+  const lines = String(text).split('\n')
+  if (text.length <= max) return `${text || '(empty page)'}${file ? `\n\n(This page is saved in ${file}.)` : ''}`
+  // sections: from one heading to the next (the part before the first heading is one too)
+  const sections = []
+  let fence = false
+  for (const [i, l] of lines.entries()) {
+    if (/^\s*```/.test(l)) fence = !fence
+    if ((!fence && /^#{1,6}\s/.test(l)) || i === 0) sections.push({ start: i, heading: /^#{1,6}\s/.test(l) ? l.trim() : '' })
+  }
+  for (const [k, sec] of sections.entries()) sec.end = (sections[k + 1]?.start ?? lines.length) - 1
+  const at = (i) => i + bodyLine // a line of the text → its line in the saved file
+  let outline = sections.filter((x) => x.heading).map((x) => `${'  '.repeat(Math.max(0, x.heading.match(/^#+/)[0].length - 1))}- ${x.heading.replace(/^#+\s*/, '')} (line ${at(x.start)})`).join('\n')
+  if (outline.length > 3000) outline = `${outline.slice(0, 3000).replace(/\n[^\n]*$/, '')}\n- … (more headings: search the file for them)`
+  const words = new Set(keywords(lookFor))
+  const scored = sections.map((x, k) => {
+    const body = lines.slice(x.start, x.end + 1).join('\n')
+    const hw = new Set(keywords(x.heading))
+    let score = 0
+    for (const w of new Set(keywords(body))) if (words.has(w)) score += hw.has(w) ? 3 : 1
+    return { ...x, k, body, score }
+  })
+  const room = max - outline.length - 400
+  const pick = []
+  let used = 0
+  const order = words.size && scored.some((x) => x.score > 0) ? [...scored].filter((x) => x.score > 0).sort((a, b) => b.score - a.score) : scored
+  for (const x of order) {
+    const piece = x.body.length > room - used ? x.body.slice(0, Math.max(0, room - used)) : x.body
+    if (piece.length < 200 && pick.length) break
+    pick.push({ ...x, piece })
+    used += piece.length
+    if (used >= room) break
+  }
+  pick.sort((a, b) => a.k - b.k)
+  const shown = pick.map((x) => `[lines ${at(x.start)}–${at(x.start + x.piece.split('\n').length - 1)}]\n${x.piece}`).join('\n\n…\n\n')
+  const what = words.size && order !== scored ? `The parts that match "${lookFor}"` : 'The start of the page'
+  return [
+    `This page is long (${lines.length} lines, ${text.length} characters).${file ? ` All of it is saved in ${file}: read_file it with start_line/end_line for any part (the line numbers below are that file's), or search in it.` : ''}`,
+    outline && `Outline:\n${outline}`,
+    `${what}:\n\n${shown}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 const strip = (s) => decode(String(s).replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim()

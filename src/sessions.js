@@ -18,7 +18,10 @@ export function newChat(root) {
 export function saveChat(chat) {
   const file = path.join(DIR, `${chat.id}.json`)
   const first = chat.turns[0] ?? chat.branches?.[0]?.state.turns[0] // gone back to the start: its branches remain
-  if (!first) return fs.rmSync(file, { force: true }) // nothing (left) worth keeping
+  if (!first) {
+    fs.rmSync(path.join(HOME, 'outputs', chat.id), { recursive: true, force: true }) // its saved tool output goes with it
+    return fs.rmSync(file, { force: true }) // nothing (left) worth keeping
+  }
   chat.updated = new Date().toISOString()
   chat.title = chat.name || first.task.split('\n')[0].slice(0, 80) // its name (/rename), else the first message, even after a rewind
   writeJson(file, chat)
