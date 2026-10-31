@@ -552,6 +552,10 @@
   .imp-row { display: flex; align-items: baseline; gap: 10px; padding: 7px 8px; border-radius: var(--radius-s); cursor: pointer; }
   .imp-row:hover { background: var(--hover); }
   .imp-row input { margin: 0; flex: none; align-self: center; }
+  .tg-steps { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 14px; line-height: 1.55; }
+  .tg-steps li::marker { color: var(--muted); }
+  .tg-conn { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 12px; }
+  .opt.tg-off { opacity: .5; }
   .imp-row .imp-label { font-weight: 500; font-family: var(--mono); font-size: 12.5px; flex: none; }
   .imp-row .imp-desc { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
@@ -565,6 +569,7 @@
       <a href="#models" data-page="models"><span class="ic">☰</span> Your models <span class="count" id="n-mine"></span></a>
       <a href="#general" data-page="general"><span class="ic">⚙</span> General</a>
       <a href="#statusbar" data-page="statusbar"><span class="ic">▭</span> Status bar</a>
+      <a href="#notify" data-page="notify"><span class="ic">✉</span> Notifications</a>
       <a href="#logging" data-page="logging"><span class="ic">▤</span> Logging <span class="count" id="n-failed"></span></a>
       <a href="#prompts" data-page="prompts"><span class="ic">✎</span> System prompt</a>
       <a href="#mcp" data-page="mcp"><span class="ic">⧉</span> MCP servers <span class="count" id="n-mcp"></span></a>
@@ -607,6 +612,27 @@
     <section class="page" id="page-models">
       <div class="head"><div><h1>Your models</h1><p class="lead">Every model HeartCode can use, and what each can do. Drag a row to reorder, or sort by columns (click more to break ties) and save the order you see.</p></div></div>
       <div class="card mt-card" id="mt"></div>
+    </section>
+
+    <!-- Notifications -->
+    <section class="page" id="page-notify">
+      <div class="head"><div><h1>Notifications</h1><p class="lead">A message on your phone when HeartCode finishes a task, fails, or needs you, so you can step away while it works.</p></div></div>
+      <div class="cols">
+        <div class="stack">
+          <div class="card">
+            <h2>Telegram</h2>
+            <p class="sub">Through a bot of your own: only you get its messages.</p>
+            <div id="tg-setup"></div>
+          </div>
+        </div>
+        <div class="stack">
+          <div class="card">
+            <h2>When to send one</h2>
+            <p class="sub">Each on its own. A running HeartCode follows changes right away.</p>
+            <div id="tg-events"></div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Logging -->
@@ -953,6 +979,8 @@ const DOING = {
   '/api/provider/on': 'Switching the provider',
   '/api/order': 'Saving your models',
   '/api/mcp/login': 'Signing in — your browser will open',
+  '/api/telegram/connect': 'Checking the token with Telegram',
+  '/api/telegram/test': 'Sending a test message',
   '/api/models-dev': null, // its own strip
 }
 let acting = 0
@@ -1010,7 +1038,7 @@ addEventListener('scroll', drawVirtual, { capture: true, passive: true }) // the
 addEventListener('resize', drawVirtual)
 
 // pages: one at a time, from the address (#providers…)
-const PAGES = ['providers', 'models', 'general', 'statusbar', 'logging', 'prompts', 'mcp', 'skills', 'files']
+const PAGES = ['providers', 'models', 'general', 'statusbar', 'notify', 'logging', 'prompts', 'mcp', 'skills', 'files']
 const page = () => (PAGES.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'providers')
 function showPage() {
   for (const p of PAGES) $('page-' + p).classList.toggle('on', p === page())
@@ -2062,6 +2090,48 @@ $('g-effort').onchange = (e) => act('/api/setting', { name: 'effort', value: e.t
 $('g-context').onchange = (e) => act('/api/setting', { name: 'context', value: e.target.value.trim() ? Number(e.target.value) : null }, 'context window saved')
 $('v-save').onclick = () => act('/api/voice', { text: $('v-text').value }, 'voice saved')
 
+// --- Notifications: Telegram set up in three steps (a bot from @BotFather, its token, Start in the
+// bot), then on/off, a test, and which events send one ---
+function drawNotify(s) {
+  const t = s.telegram ?? { events: {}, names: {} }
+  const tokenRow = (label) => h('div', { className: 'row', style: 'align-items:flex-end;gap:10px' },
+    h('div', { className: 'grow' }, h('label', { className: 'f', for: 'tg-token', textContent: label }),
+      h('input', { type: 'password', id: 'tg-token', autocomplete: 'off', spellcheck: false, placeholder: t.hint ? `saved: ${t.hint}` : '123456789:AAH…' })),
+    h('button', { className: 'primary', type: 'button', textContent: 'Connect', onclick: tgConnect }))
+  const typed = $('tg-token')?.value ?? '' // a redraw keeps what's being typed
+  const focused = document.activeElement === $('tg-token')
+  if (!t.connected) {
+    put($('tg-setup'), h('ol', { className: 'tg-steps' },
+      h('li', {}, 'In Telegram, open ', h('a', { href: 'https://t.me/BotFather', target: '_blank', rel: 'noopener', textContent: '@BotFather' }), ', send ', h('span', { className: 'mono', textContent: '/newbot' }), ', pick a name, and copy the token it gives you.'),
+      h('li', {}, tokenRow('Paste the token here')),
+      h('li', { className: t.bot ? '' : 'muted' }, t.bot ? ['Open ', h('a', { href: `https://t.me/${t.bot}`, target: '_blank', rel: 'noopener', textContent: `@${t.bot}` }), ' and press ', h('b', { textContent: 'Start' }), ' (or send it any message), then ', h('button', { className: 'small', type: 'button', textContent: 'Find my chat', onclick: () => tgConnect(true) })] : 'Then press Start in your bot, so HeartCode knows where to send.')))
+    $('tg-token').value = typed
+    if (focused) $('tg-token').focus()
+  } else {
+    put($('tg-setup'),
+      h('div', { className: 'tg-conn' }, h('span', { className: 'tag ok', textContent: 'connected' }), h('span', {}, 'Sending to ', h('b', { textContent: t.chatName }), ' through ', h('a', { href: `https://t.me/${t.bot}`, target: '_blank', rel: 'noopener', textContent: `@${t.bot}` })), h('span', { className: 'mono muted', textContent: t.hint })),
+      h('label', { className: 'opt' }, h('div', { className: 't' }, h('b', { textContent: 'Send notifications' }), h('span', { textContent: 'Off: nothing is sent, the setup stays.' })),
+        sw({ checked: t.on, 'aria-label': 'Send notifications', onchange: (e) => act('/api/telegram/set', { on: e.target.checked }, `Telegram notifications: ${e.target.checked ? 'on' : 'off'}`) })),
+      h('div', { className: 'actions' },
+        h('button', { type: 'button', textContent: 'Send a test', onclick: () => act('/api/telegram/test', {}, 'Test sent: check Telegram') }),
+        h('button', { className: 'ghost', type: 'button', textContent: 'Disconnect', onclick: () => confirm('Stop sending notifications to Telegram and forget the bot token?') && act('/api/telegram/remove', {}, 'Telegram disconnected') })))
+  }
+  put($('tg-events'), Object.entries(t.names ?? {}).map(([k, label]) => h('label', { className: 'opt' + (t.connected ? '' : ' tg-off') },
+    h('div', { className: 't' }, h('b', { textContent: label }), h('span', { textContent: TG_EVENT_INFO[k] ?? '' })),
+    sw({ checked: t.events?.[k] !== false, disabled: !t.connected, 'aria-label': label, onchange: (e) => act('/api/telegram/set', { event: k, value: e.target.checked }, `${label}: ${e.target.checked ? 'on' : 'off'}`) }))))
+}
+const TG_EVENT_INFO = {
+  done: 'The task, how long it took, and the answer.',
+  failed: 'The task and the error.',
+  waiting: 'The question or permission it stopped at, so you can come back and answer.',
+}
+async function tgConnect(again = false) {
+  const token = again === true ? '' : $('tg-token')?.value.trim()
+  const r = await act('/api/telegram/connect', { token })
+  if (!r) return
+  toast(r.found ? `Connected: sending to ${r.found}` : r.telegram?.bot ? `Token works. Now press Start in @${r.telegram.bot}, then Find my chat` : 'Saved')
+}
+
 // --- Logging: the two switches, how much of each request; the requests logged (live) ---
 const logSwitch = (s, k, title, about) => h('label', { className: 'opt' },
   h('div', { className: 't' }, h('b', { textContent: title }), h('span', { textContent: about })),
@@ -2511,6 +2581,7 @@ function render(s) {
   drawUsing(s)
   drawGeneral(s)
   drawStatusBar(s)
+  drawNotify(s)
   drawLogging(s)
   if (REQS) drawReqs()
   drawPrompts(s)

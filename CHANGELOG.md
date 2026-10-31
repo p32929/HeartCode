@@ -2,6 +2,17 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.29 (2026-11-01)
+
+- Telegram notifications: a message on your phone when a task finishes (the task, how long it took,
+  the answer), fails (the error), or HeartCode waits for you (a question or a permission). Set up on
+  the settings page's new Notifications page: make a bot with @BotFather, paste its token, press
+  Start in the bot, and HeartCode finds your chat and says hello. Each kind can be switched off; a
+  test button; Disconnect forgets the token. The token is never shown whole or logged; a message
+  that can't be sent never holds up the work.
+  A token saved before Start was pressed in the bot no longer leaves notifications silently off:
+  the chat is found (and saved) the first time one is sent.
+
 ## 0.1.28 (2026-11-01)
 
 - When a conversation outgrows the current model's context window and you have other models selected,

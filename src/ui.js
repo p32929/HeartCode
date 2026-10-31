@@ -1457,6 +1457,7 @@ export class UI {
       return Promise.resolve(l)
     }
     if (this.closed) return Promise.resolve(null)
+    if (this.busySince && !history) this.onWaiting?.(prompt) // asked mid-task: you may be away (Telegram)
     this.menu.on = Boolean(suggest && (this.suggest || this.menu.pick) && this.full)
     this.histOn = history
     this.histAt = -1

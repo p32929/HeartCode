@@ -19,6 +19,7 @@ import { THEMES, PERMISSIONS } from './ui.js'
 import { loadSkills, frontMatter } from './skills.js'
 import { installSkill, findImports } from './importer.js'
 import { capabilities } from './capabilities.js'
+import { connect, sendTelegram, tokenHint, tgReady, EVENTS } from './telegram.js'
 import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays, logSize, clearLogs } from './log.js'
 
 const PAGE = new URL('./settings.html', import.meta.url)
@@ -361,6 +362,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     logs: { runs: tilde(path.join(LOGS, 'runs')), requests: tilde(REQUESTS) },
     voice: cfg.voice ? JSON.stringify(cfg.voice, null, 2) : '',
     statusBar: cfg.statusBar === undefined ? null : cfg.statusBar, // false (off), a list of lines, or null (default)
+    // Telegram notifications: never the token itself, only a hint of it
+    telegram: (({ token, bot, chatName, chatId, on, events } = {}) => ({ hint: tokenHint(token), bot: bot ?? null, chatName: chatName ?? null, connected: Boolean(token && chatId), on: on !== false, events: Object.fromEntries(Object.keys(EVENTS).map((k) => [k, events?.[k] !== false])), names: EVENTS }))(cfg.telegram),
     capabilities: capabilities(cfg), // features that need outside tools, and whether they're here
     choices: { permissions: PERMISSIONS, effort: EFFORTS, theme: Object.keys(THEMES), toggles: TOGGLES, statusItems: STATUS_ITEMS },
     files: FILES.map(([name, about, json, example]) => ({ name, about, json, example, text: fs.existsSync(path.join(HOME, name)) ? fs.readFileSync(path.join(HOME, name), 'utf8') : '' })),
@@ -651,6 +654,41 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     },
     // The status bar's layout from the visual editor: false (off), null (back to default), or a list
     // of lines ({ left:[item ids], right:[item ids] }). Unknown item ids are dropped; empty = off.
+    // Telegram: a bot token checked (or the saved one, to look again for the chat once you pressed
+    // Start in the bot); the newest chat that wrote to the bot is the one notifications go to, and
+    // it gets a first message saying so.
+    'POST /api/telegram/connect': async ({ token }) => {
+      const tk = String(token ?? '').trim() || cfg.telegram?.token
+      if (!tk) throw new Error('paste the token @BotFather gave you')
+      if (!/^\d+:[\w-]{20,}$/.test(tk)) throw new Error("that doesn't look like a bot token (it's like 123456789:AAH…, from @BotFather)")
+      const r = await connect(tk)
+      const chat = r.chats[0]
+      const was = cfg.telegram?.token === tk ? cfg.telegram : {}
+      cfg.telegram = { ...was, token: tk, bot: r.bot, ...(chat ? { chatId: chat.id, chatName: chat.name } : { chatId: undefined, chatName: undefined }), on: was.on ?? true }
+      save('setting:telegram')
+      if (chat) await sendTelegram(cfg.telegram, "✅ HeartCode is connected. You'll get a message here when a task finishes, fails, or waits for you.")
+      return { ...state(), found: chat?.name ?? null }
+    },
+    'POST /api/telegram/test': async () => {
+      if (!tgReady({ ...cfg.telegram, on: true })) throw new Error('connect Telegram first')
+      await sendTelegram(cfg.telegram, '🔔 A test from HeartCode\'s settings: notifications reach you.')
+      return state()
+    },
+    'POST /api/telegram/set': ({ on, event, value }) => {
+      if (!cfg.telegram) throw new Error('connect Telegram first')
+      if (typeof on === 'boolean') cfg.telegram.on = on
+      if (event !== undefined) {
+        if (!EVENTS[event] || typeof value !== 'boolean') throw new Error(`event: ${Object.keys(EVENTS).join(', ')}, on or off`)
+        cfg.telegram.events = { ...cfg.telegram.events, [event]: value }
+      }
+      save('setting:telegram')
+      return state()
+    },
+    'POST /api/telegram/remove': () => {
+      cfg.telegram = undefined
+      save('setting:telegram')
+      return state()
+    },
     'POST /api/statusbar': ({ statusBar }) => {
       const clean = (a) => (Array.isArray(a) ? a.filter((x) => STATUS_IDS.has(x)) : [])
       if (statusBar === false) cfg.statusBar = false

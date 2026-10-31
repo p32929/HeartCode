@@ -9,6 +9,7 @@ import { Session, transcript } from '../src/agent.js'
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
 import { UI, c, PERMISSIONS, duration, copyText, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width } from '../src/ui.js'
 import { listFiles, runCommand, clip } from '../src/tools.js'
+import { notify } from '../src/telegram.js'
 import { log, LOG_FILE, LOG_DIR, requestLog, useRequestLog, useLogs, pruneLogs, logDays } from '../src/log.js'
 import { prompt, usePromptsFrom, reloadPrompts } from '../src/prompts.js'
 import { newChat, saveChat, listChats, loadChat, restoreFiles, ago, forkChat, exportChat } from '../src/sessions.js'
@@ -1517,16 +1518,21 @@ async function runTask(app, task, ctl) {
   try {
     const s = await app.session()
     if (!s) return false
+    let answer
     try {
-      await s.run(task, ctl?.signal)
+      answer = await s.run(task, ctl?.signal)
     } finally {
       app.save()
     }
+    notify(app.cfg, 'done', `✅ Done · ${path.basename(app.root)} · ${duration(ui.worked())}\n${clip(task.split('\n')[0], 200)}\n\n${clip(String(answer ?? '').trim(), 3500)}`)
   } catch (e) {
     ui.stopSpin()
     log('error', e.name === 'AbortError' || ctl?.signal.aborted ? 'task interrupted by the user' : e.stack)
     if (e.name === 'AbortError' || ctl?.signal.aborted) ui.print(c.yellow('\ninterrupted'))
-    else ui.print(c.red(`\nerror: ${e.message}`))
+    else {
+      ui.print(c.red(`\nerror: ${e.message}`))
+      notify(app.cfg, 'failed', `❌ Failed · ${path.basename(app.root)}\n${clip(task.split('\n')[0], 200)}\n\n${clip(e.message, 1500)}`)
+    }
     return false
   }
   return true
@@ -1539,6 +1545,7 @@ async function repl(app, f = {}) {
   let ctl = null
   ui.onEscape = () => ctl?.abort()
   ui.onBtw = (q) => app.btw(q, true) // /btw typed while it works
+  ui.onWaiting = (question) => notify(cfg, 'waiting', `⏳ Waiting for you · ${path.basename(app.root)}\n${clip(question.replace(/\x1b\[[0-9;]*m/g, '').replace(/\s*›\s*$/, '').replace(/^\?\s*/, '').trim(), 1000)}`) // a question or a permission while it works (Telegram)
   ui.isCommand = (l) => app.isCommand(l)
   loadPrices().then(() => ui.render?.()) // models.dev: what each model can do, for the model lists
   ui.voiceConfig = () => ({ voice: cfg.voice, providers: cfg.providers })
