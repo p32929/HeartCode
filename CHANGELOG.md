@@ -2,6 +2,41 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.23 (2026-10-31)
+
+- The "retrying in 0 seconds" message no longer lingers on the spinner while the retried request is
+  in flight: the countdown is cleared the moment the wait ends and the new request starts.
+- "Make sure it works" now applies to everything the model builds, not just web pages: before it
+  finishes it must run what it made and see it work — a CLI with real input, a server by calling
+  its endpoints, a library by a small usage snippet, tests if there are any — not just "no error".
+- A page the model builds is now checked that it actually works, not just how it looks: HeartCode
+  reads the browser console when it opens the page, and any JavaScript error (an unclosed brace, a
+  wrong name, a blocked resource) is a must-fix blocker fed back to the model before it can finish.
+- While retrying, the retry message and the "responding / waiting for model" timer are on separate
+  lines instead of one long line that got cut off.
+- A page the model builds is now checked that it actually works even when no browser is available,
+  and verification never passes silently: HeartCode statically catches JavaScript that doesn't
+  parse and the Tailwind-CDN @apply trap (applying a class you defined yourself, which throws
+  "Cannot apply unknown utility class"); and if it couldn't open the page in a browser at all,
+  the model is told so and must verify it itself before finishing, instead of assuming it's fine.
+- A model pinned in one CLI (/select_model) is now truly session-local: changing the model order
+  on the settings page (or in another instance) no longer unpins it or switches its model — that
+  only affects instances on auto. The pin isn't written to disk either, so it can't become
+  another instance's #1. (Before, a model-order change silently switched every running instance.)
+- The status bar tells auto from a pinned model: auto (rotating your list) shows "auto (current
+  model) (list size)"; a model you picked shows just its name.
+- Picking a model in the CLI (/select_model <model>, or the picker) now pins it for the session —
+  no rotation to the others. The picker has an "auto" entry to go back to the rotating list
+  (/select_model auto also does). Before, picking a model only moved it to #1 and kept rotating.
+- Command and @file suggestions now show while the model is working, not only at an empty prompt:
+  type `/` or `@`, use ↑/↓ and Tab to complete; Enter queues the command to run when the task is done.
+- The browser (chrome-devtools) no longer litters the project: it runs in its own scratch directory,
+  so a screenshot or snapshot the model saves by a bare name (screenshot.png, snapshot.txt) lands
+  there instead of the project folder. Pages are still opened by absolute path, so nothing breaks.
+- The built-in Chrome (chrome-devtools) runs headless (no window) with its own throwaway profile, so
+  it doesn't pop up a window, works over SSH, and runs don't fight over one profile. Override `args`
+  in ~/.heart/mcp.json for a visible browser.
+
 ## 0.1.22 (2026-10-31)
 
 - Times are written out: "responding 5 hours 33 minutes", "took 1 minute 25 seconds", "retrying in

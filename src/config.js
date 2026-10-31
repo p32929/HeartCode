@@ -120,8 +120,10 @@ export function loadConfig(flags = {}) {
 function saved(cfg) {
   const providers = byName(cfg.providers)
   if (cfg.adhoc) delete providers[cfg.adhoc]
-  const keep = cfg.adhoc && cfg.provider === cfg.adhoc ? fromFile() : null // the run-only provider isn't saved as current
-  const out = { providers, provider: keep ? keep.provider : cfg.provider, model: keep ? keep.model : cfg.model }
+  // a run-only provider (-m URL) or a model pinned for this session (cfg.fixed, /select_model) isn't
+  // saved as the current model: the pin is local, it must not become everyone's #1 on disk
+  const keep = (cfg.adhoc && cfg.provider === cfg.adhoc) || cfg.fixed ? fromFile() : null
+  const out = { providers, provider: keep?.provider ?? cfg.provider, model: keep?.model ?? cfg.model }
   for (const k of SETTINGS) if (cfg[k] !== undefined) out[k] = cfg[k]
   return JSON.parse(JSON.stringify(out))
 }
@@ -160,7 +162,10 @@ export const whatOf = (k) => (['provider', 'model', 'providers'].includes(k) ? '
 export function takeIn(cfg) {
   const disk = readJson(CONFIG_FILE, null)
   if (!disk || same(disk, file)) return []
-  const keys = keysOf(disk, file).filter((k) => (k === 'providers' || k === 'provider' || k === 'model' || SETTINGS.includes(k)) && !same(disk[k], file?.[k]))
+  // a pinned model (cfg.fixed) is this session's own: a change of the saved current/ranking on disk
+  // doesn't move it (its provider/model stay); everything else is still taken in
+  const takes = (k) => k === 'providers' || SETTINGS.includes(k) || ((k === 'provider' || k === 'model') && !cfg.fixed)
+  const keys = keysOf(disk, file).filter((k) => takes(k) && !same(disk[k], file?.[k]))
   for (const k of keys) {
     const value = k === 'providers' ? { ...byName(disk.providers), ...(cfg.adhoc && { [cfg.adhoc]: cfg.providers[cfg.adhoc] }) } : disk[k]
     value === undefined ? delete cfg[k] : (cfg[k] = value)

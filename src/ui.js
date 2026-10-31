@@ -890,8 +890,10 @@ export class UI {
     if (this.timer && !this.asking) {
       // how long it's been at this message, and (while waiting on the model) since this request was sent
       const request = this.requestSince?.()
-      const extra = this.busySince ? ` · responding ${duration(this.worked())}${request ? ` · waiting for model ${duration(Date.now() - request)}` : ''} · Esc to stop` : ''
-      bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(this.#label())}${c.faint(extra)}`, cols))
+      const timer = this.busySince ? `responding ${duration(this.worked())}${request ? ` · waiting for model ${duration(Date.now() - request)}` : ''} · Esc to stop` : ''
+      const retrying = this.beforeRetry !== undefined // the label is the retry message: its own line, timer below
+      bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(this.#label())}${retrying || !timer ? '' : c.faint(` · ${timer}`)}`, cols))
+      if (retrying && timer) bottom.push(fit(`  ${c.faint(timer)}`, cols))
     }
     if (this.scroll) bottom.push(c.dim(`  ↓ ${this.scroll} more lines below · scroll down, Shift+↓ or PgDn`))
     if (this.ahead.length) {
@@ -1056,15 +1058,32 @@ export class UI {
   // input), sent when the answer is done, or at once with send_first / send_all. Esc stops the task.
   #typeAhead(s, key, write) {
     const rl = this.rl
-    if (key.name === 'escape') return this.onEscape?.()
+    const m = this.menu
+    const it = m.on && m.items[m.sel] // a suggestion is highlighted (commands/@files show while working too)
+    if (key.name === 'escape') {
+      if (m.on) return (m.off = rl.line), this.#suggestWhileWorking() // first Esc just closes the suggestions
+      return this.onEscape?.()
+    }
     if (key.name === 'tab' && key.shift) return this.setPermission(PERMISSIONS[(PERMISSIONS.findIndex(([p]) => p === this.permission) + 1) % PERMISSIONS.length][0])
     if (key.name === 'pageup' || key.name === 'pagedown') return this.scrollBy(key.name === 'pageup' ? this.page() : -this.page())
+    if (it && (key.name === 'up' || key.name === 'down')) {
+      m.sel = (m.sel + (key.name === 'up' ? m.items.length - 1 : 1)) % m.items.length
+      return this.render()
+    }
+    if (m.on && key.name === 'tab') {
+      if (it) (this.#accept(it), (m.off = rl.line))
+      return this.#suggestWhileWorking()
+    }
     if (key.name === 'return' && !key.meta && !this.pasting) {
+      if (it && rl.line.slice(it.start, it.end) !== it.value) this.#accept(it) // complete first, then send on the next Enter
+      if (it && rl.line.slice(it.start, it.end) !== it.value + (it.space ? ' ' : '')) return
       const line = rl.line.trim()
       rl.line = ''
       rl.cursor = 0
+      m.items = []
+      m.off = null
       if (/^\/btw\b/.test(line) && this.onBtw) this.onBtw(line.replace(/^\/btw\b/, '').trim()) // answered now, beside the task
-      else if (line) this.ahead.push(line)
+      else if (line) this.ahead.push(line) // a /command runs when the task is done (the queue)
       return this.render()
     }
     if (['up', 'down', 'tab'].includes(key.name) || key.name === 'paste-start' || key.name === 'paste-end') {
@@ -1075,7 +1094,17 @@ export class UI {
       rl.line = rl.line.slice(0, rl.cursor) + '\n' + rl.line.slice(rl.cursor)
       rl.cursor++
     } else write(s, key)
-    this.render()
+    this.#suggestWhileWorking()
+  }
+
+  // Commands and @files suggested while the model works (type-ahead), the same menu as at the prompt.
+  #suggestWhileWorking() {
+    const rl = this.rl
+    const before = rl.line.slice(0, rl.cursor)
+    this.menu.on = this.full && !this.pasting && this.menu.off !== rl.line && (/^\/\S*$/.test(rl.line.trimStart()) || /(^|\s)@\S*$/.test(before))
+    if (this.menu.off !== rl.line) this.menu.off = this.menu.on ? this.menu.off : null
+    if (this.menu.on) this.refreshMenu()
+    else (this.menu.items = []), this.render()
   }
 
   // A key from keybindings.json: an action, or text to send (a /command, a message).

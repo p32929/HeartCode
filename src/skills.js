@@ -18,7 +18,26 @@ export const USES = ['me', 'model', 'both']
 
 export function frontMatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text)
-  const meta = Object.fromEntries((m?.[1] ?? '').split('\n').map((l) => /^([\w-]+):\s*(.*)$/.exec(l.trim())).filter(Boolean).map(([, k, v]) => [k, v.replace(/^["']|["']$/g, '')]))
+  const lines = (m?.[1] ?? '').replace(/\r/g, '').split('\n')
+  const meta = {}
+  const indent = (l) => l.length - l.trimStart().length
+  for (let i = 0; i < lines.length; i++) {
+    const key = /^([\w-]+):\s*(.*)$/.exec(lines[i])
+    if (!key) continue
+    const [, k, raw] = key
+    const base = indent(lines[i])
+    const block = /^([|>])([+-]?)\s*$/.exec(raw) // a YAML block scalar: | literal, > folded (Claude Code, others use "description: >-")
+    if (block) {
+      const kept = []
+      while (i + 1 < lines.length && (lines[i + 1].trim() === '' || indent(lines[i + 1]) > base)) kept.push(lines[++i])
+      const minIndent = Math.min(...kept.filter((l) => l.trim()).map(indent), Infinity)
+      let v = kept.map((l) => l.slice(Number.isFinite(minIndent) ? minIndent : 0)).join(block[1] === '>' ? ' ' : '\n')
+      if (block[2] !== '+') v = v.replace(/\n+$/, '') // "-" strips trailing newlines; default keeps one at most
+      meta[k] = v.trim()
+    } else {
+      meta[k] = raw.replace(/^["']|["']$/g, '')
+    }
+  }
   return { meta, body: (m ? m[2] : text).trim() }
 }
 

@@ -11,6 +11,8 @@
 // HeartCode exits.
 import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { HOME, readJson, readConfig, writeJson, VERSION } from './config.js'
@@ -21,7 +23,12 @@ import { savedToken, signIn } from './oauth.js'
 export const DEFAULT_SERVERS = {
   'chrome-devtools': {
     command: 'npx',
-    args: ['-y', 'chrome-devtools-mcp@latest'],
+    // headless: no window pops up (works over SSH too); isolated: its own throwaway profile, so
+    // runs don't fight over one. Override args in ~/.heart/mcp.json for a visible browser.
+    args: ['-y', 'chrome-devtools-mcp@latest', '--headless', '--isolated'],
+    // a screenshot/snapshot saved by a relative path lands in the server's cwd: a scratch dir, not
+    // the project, so the browser never litters it (pages are opened by absolute file:// URLs).
+    scratchCwd: true,
     description: 'a Chrome browser: open pages, click, fill forms, read the console and network requests, take screenshots',
   },
 }
@@ -118,7 +125,8 @@ class Server {
   async #spawn(init) {
     const { command, args = [], env = {} } = this.cfg
     log('mcp', `starting ${this.name}: ${command} ${args.join(' ')}`)
-    const child = (this.child = spawn(command, args, { cwd: this.root ?? undefined, env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' })) // in the project, so a relative path in its config works
+    const cwd = this.cfg.scratchCwd ? scratchDir(this.root, this.name) : (this.root ?? undefined) // in the project, so a relative path in its config works; a browser gets a scratch dir instead
+    const child = (this.child = spawn(command, args, { cwd, env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' }))
     let buf = ''
     child.stdout.setEncoding('utf8') // a character split between two chunks stays whole
     child.stdout.on('data', (d) => {
@@ -326,6 +334,16 @@ class Server {
 
 const TOOLS_FILE = path.join(HOME, 'mcp-tools.json')
 const keyOf = (cfg) => crypto.createHash('sha256').update(JSON.stringify(cfg)).digest('hex').slice(0, 16)
+
+// A throwaway working directory for a server (the browser), so files it writes by a relative path
+// don't land in the project. One per project, under the OS temp dir.
+function scratchDir(root, name) {
+  const dir = path.join(os.tmpdir(), 'heartcode', name, crypto.createHash('sha256').update(root ?? '').digest('hex').slice(0, 12))
+  try {
+    fs.mkdirSync(dir, { recursive: true })
+  } catch {}
+  return dir
+}
 
 // All configured servers for a project; nothing runs until a server is first used.
 // onSignIn(name, url): set by the screen, to show a remote server's sign-in page (none headless).

@@ -426,9 +426,9 @@ export class Client {
       if (attempt && opts.fit && this.can?.context && tokensOf(body.messages, body.tools, this.tokenRatio) > this.can.context * COMPACT_SHARE) {
         throw Object.assign(new Error(`the conversation is too big for ${this.provider} · ${this.model} (~${tokensOf(body.messages, body.tools, this.tokenRatio)} tokens; its window is ${this.can.context})`), { tooBig: true })
       }
+      if (attempt) this.onRetry(null) // the wait is over and the retried request is starting: drop the countdown, back to the normal spinner
       try {
         const r = await this.#timed(body, { ...opts, once: true })
-        if (attempt) this.onRetry(null)
         const rot = this.rotation
         if (rot && rot.good !== rot.list[rot.at]) this.onSwitch?.((rot.good = rot.list[rot.at]))
         return r

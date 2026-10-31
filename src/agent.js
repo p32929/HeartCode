@@ -935,10 +935,39 @@ export function newGuard() {
 // and at phone width, given to the model to check against its brief and fix. Twice per message at
 // most; nothing when there's no browser. A model that can't see gets them described by one of
 // yours that can.
+// Problems found in a built page without a browser: JavaScript that doesn't parse, and the Tailwind
+// CDN used with @apply/@layer (it throws "Cannot apply unknown utility class" at runtime and the
+// styling breaks). These are caught even when the browser can't be opened.
+function staticChecks(root, rel) {
+  const out = []
+  let html
+  try {
+    html = fs.readFileSync(path.join(root, rel), 'utf8')
+  } catch {
+    return out
+  }
+  for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+    const attrs = m[1]
+    if (/\bsrc\s*=/.test(attrs) || /\btype\s*=\s*["']?module/.test(attrs) || !m[2].trim()) continue // external or ESM: can't check this way
+    try {
+      new Function(m[2]) // compiles without running: throws on a syntax error (unclosed brace, typo)
+    } catch (e) {
+      out.push(`${rel}: the <script> doesn't parse — ${e.message}. The page's JavaScript won't run at all. Find and fix it (often an unclosed brace or bracket).`)
+    }
+  }
+  const tailwindCdn = /cdn\.tailwindcss\.com|@tailwindcss\/browser|type\s*=\s*["']text\/tailwindcss/.test(html)
+  if (tailwindCdn) {
+    const css = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n')
+    const defined = new Set([...css.matchAll(/(?:^|\})\s*\.([a-zA-Z][\w-]*)\s*\{/g)].map((m) => m[1])) // classes defined with a rule
+    const applied = new Set([...css.matchAll(/@apply\b([^;}{]*)/g)].flatMap((m) => m[1].split(/\s+/).map((t) => t.replace(/[^\w-].*$/, '')).filter(Boolean)))
+    const bad = [...applied].filter((c) => defined.has(c))
+    if (bad.length) out.push(`${rel}: the Tailwind browser build (CDN) throws "Cannot apply unknown utility class" here — you @apply a class you defined yourself (${bad.join(', ')}), which only a real build step allows. Put those utility classes directly in the HTML (class="…"), not behind @apply; or drop the @apply and write the rules in plain CSS.`)
+  }
+  return out
+}
+
 async function lookAtUi(s, signal) {
-  if (!s.uiTouched?.size || s.uiLooks >= 2 || s.ui.permission === 'plan') return null
-  const browser = s.mcp?.get?.('chrome-devtools')
-  if (!browser) return null
+  if (!s.uiTouched?.size || s.uiLooks >= 3 || s.ui.permission === 'plan') return null
   const touched = [...s.uiTouched]
   s.uiTouched.clear()
   const styles = touched.filter((f) => /\.css$/i.test(f)).map((f) => path.basename(f))
@@ -953,14 +982,26 @@ async function lookAtUi(s, signal) {
   const shown = [...new Set(pages)].filter((f) => fs.existsSync(path.join(s.root, f))).slice(0, 2)
   if (!shown.length) return null
   s.uiLooks++
+  const browser = s.mcp?.get?.('chrome-devtools')
+  const errors = shown.flatMap((rel) => staticChecks(s.root, rel)) // works with no browser
   const shots = []
-  const done = await s.mcpGate?.()
+  let opened = 0 // pages actually opened in the browser (0: couldn't verify it runs)
+  const text = (r) => (r.content ?? []).map((p) => p.text ?? '').join('\n')
+  const done = browser ? await s.mcpGate?.() : null
   try {
+    if (!browser) throw new Error('no browser')
     for (const rel of shown) {
       s.ui.spinner(`opening ${rel} in the browser`)
-      const opened = (await browser.call('new_page', { url: pathToFileURL(path.join(s.root, rel)).href }, signal)).content?.map((p) => p.text ?? '').join('\n') ?? ''
-      const id = Number(/(\d+):[^\n]*\[selected\]/.exec(opened)?.[1]) || undefined // newer versions number the pages
+      const openedText = text(await browser.call('new_page', { url: pathToFileURL(path.join(s.root, rel)).href }, signal))
+      opened++
+      const id = Number(/(\d+):[^\n]*\[selected\]/.exec(openedText)?.[1]) || undefined // newer versions number the pages
       const page = id ? { pageId: id } : {}
+      await new Promise((r) => setTimeout(r, 600)) // the scripts run before we read the console
+      const con = await browser.call('list_console_messages', page, signal).catch(() => null)
+      for (const line of (con ? text(con) : '').split('\n')) {
+        if (!/\[error\]/i.test(line) || /favicon\.ico/i.test(line)) continue // a missing favicon isn't a real problem
+        errors.push(`${rel}: ${line.replace(/^\s*msgid=\d+\s*\[error\]\s*/i, '').replace(/\s*\(\d+ args?\)\s*$/, '').trim()}`)
+      }
       for (const [width, height, fullPage] of [[1280, 900, true], [390, 844, false]]) {
         await browser.call('resize_page', { ...page, width, height }, signal)
         const r = await browser.call('take_screenshot', { ...page, ...(fullPage && { fullPage }) }, signal)
@@ -971,37 +1012,47 @@ async function lookAtUi(s, signal) {
     }
   } catch (e) {
     if (signal?.aborted) throw e
-    log('look', `couldn't look at ${shown.join(', ')}: ${e.message}`)
+    log('look', `couldn't open ${shown.join(', ')} in the browser: ${e.message}`)
   } finally {
     done?.()
     s.ui.stopSpin()
   }
-  if (!shots.length) return null
-  log('look', shots.map((x) => x.label))
-  // reviewed in a request of its own (the screenshots and the user's request, nothing else): a model
-  // checking its own work in its own conversation tends to call it fine
-  const self = { provider: s.client.provider, model: s.client.model, images: s.strat.vision }
-  const reviewers = [...(self.images ? [self] : []), ...(s.team?.() ?? []).filter((t) => t.images && !(t.provider === self.provider && t.model === self.model))]
-  const ask = prompt('agent/ui-review', { task: s.task ?? '', shots: shots.map((x, i) => `${i + 1}. ${x.label}`).join('\n') })
+  if (errors.length) log('look', `problems found: ${errors.join(' | ')}`)
+  // Couldn't open it in a browser (none configured, or it failed): don't pass silently — the model
+  // must verify it itself. Static checks still apply.
+  const unverified = opened === 0 ? `${shown.join(', ')} could not be opened in a browser here, so HeartCode could not confirm it works. Before you finish, verify it yourself: open it and check it actually works — no errors in the console, every button and interaction does what it should.` : ''
+  // JavaScript errors mean the page is broken however good it looks: fed back on their own (text,
+  // no model that sees needed), and the visual review added when there is one.
+  const brokenList = errors.length ? errors.map((e, i) => `${i + 1}. ${e}`).join('\n') : ''
   let found = ''
-  for (const t of reviewers) {
-    s.ui.spinner(`${t.model} is reviewing ${shown.join(', ')}`)
-    try {
-      const { client } = t === self ? { client: s.client } : await s.engineFor(t)
-      found = (await client.chat({ messages: [{ role: 'user', content: [{ type: 'text', text: ask }, ...shots.map((x) => ({ type: 'image_url', image_url: { url: x.url } }))] }] }, { signal })).content.trim()
-      if (found) break
-    } catch (e) {
-      if (signal?.aborted) throw e
-      log('look', `${t.model} couldn't review: ${e.message}`)
+  if (shots.length) {
+    log('look', shots.map((x) => x.label))
+    // reviewed in a request of its own (the screenshots and the user's request, nothing else): a
+    // model checking its own work in its own conversation tends to call it fine
+    const self = { provider: s.client.provider, model: s.client.model, images: s.strat.vision }
+    const reviewers = [...(self.images ? [self] : []), ...(s.team?.() ?? []).filter((t) => t.images && !(t.provider === self.provider && t.model === self.model))]
+    const ask = prompt('agent/ui-review', { task: s.task ?? '', shots: shots.map((x, i) => `${i + 1}. ${x.label}`).join('\n') })
+    for (const t of reviewers) {
+      s.ui.spinner(`${t.model} is reviewing ${shown.join(', ')}`)
+      try {
+        const { client } = t === self ? { client: s.client } : await s.engineFor(t)
+        found = (await client.chat({ messages: [{ role: 'user', content: [{ type: 'text', text: ask }, ...shots.map((x) => ({ type: 'image_url', image_url: { url: x.url } }))] }] }, { signal })).content.trim()
+        if (found) break
+      } catch (e) {
+        if (signal?.aborted) throw e
+        log('look', `${t.model} couldn't review: ${e.message}`)
+      }
     }
+    s.ui.stopSpin()
   }
-  s.ui.stopSpin()
-  if (!found) return null
-  const none = /^\W*none\W*$/i.test(found) || !/\d+[.)]\s/.test(found)
-  s.ui.step('look', `${shown.join(', ')} at desktop and phone width: ${none ? 'nothing to fix' : `${found.match(/^\s*\d+[.)]\s/gm)?.length ?? 'some'} things to fix`}`)
-  log('look', found)
-  if (none) return null
-  return prompt('agent/look-at-ui', { files: shown.join(', '), problems: found })
+  const visual = found && !(/^\W*none\W*$/i.test(found) || !/\d+[.)]\s/.test(found)) ? found : ''
+  if (!brokenList && !visual && !unverified) {
+    if (shots.length) s.ui.step('look', `${shown.join(', ')}: works, nothing to fix`)
+    return null
+  }
+  s.ui.step('look', `${shown.join(', ')}: ${[errors.length && `${errors.length} problem${errors.length > 1 ? 's' : ''}`, visual && 'review notes', unverified && 'verify it yourself'].filter(Boolean).join(', ')}`)
+  const problems = [brokenList, visual, unverified].filter(Boolean).join('\n')
+  return prompt('agent/look-at-ui', { files: shown.join(', '), problems })
 }
 
 // The model says it's done: is it? Not while its todo list (from this message) has open items, or

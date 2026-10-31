@@ -587,9 +587,13 @@ class App {
     const rot = this.s?.client.rotation
     const now = this.inUse() // the model list's one in use; never one of a provider that's off
     if (!now) return c.dim('the providers of all your models are off · /settings to switch one on')
-    // provider (providers on) · model (models in your list)
+    // provider (providers on) · the model. Auto (rotating your list): "auto (current model) (list
+    // size)". A model you picked (pinned, no rotation): just its name.
     const on = Object.values(cfg.providers).filter((p) => !p.off).length
-    const parts = [`${c.brand('●')} ${c.muted(now.provider)} ${c.faint(`(${on})`)} ${c.ghost('·')} ${c.info(now.model)} ${c.faint(`(${this.myModels().length})`)}${rot ? c.faint(` ↻ ${rot.at + 1}/${rot.list.length}`) : ''}`]
+    const model = cfg.fixed
+      ? c.info(now.model)
+      : `${c.muted('auto')} ${c.faint('(')}${c.info(now.model)}${c.faint(')')} ${c.faint(`(${this.myModels().length})`)}${rot ? c.faint(` ↻ ${rot.at + 1}/${rot.list.length}`) : ''}`
+    const parts = [`${c.brand('●')} ${c.muted(now.provider)} ${c.faint(`(${on})`)} ${c.ghost('·')} ${model}`]
     const key = `${now.provider}/${now.model}`
     if (this.profileKey !== key) [this.profileKey, this.profile] = [key, this.s?.profile ?? loadProfile(this.client(now.provider, now.model))]
     const profile = this.s?.profile ?? this.profile
@@ -758,7 +762,22 @@ class App {
     await this.use(t.provider, t.model)
   }
 
-  // The picker: your models only, #1 first; Enter makes it #1.
+  // Pin one model for this session: used alone, no rotating to the others (cfg.fixed). The status
+  // bar shows just its name; the saved ranking is left alone (that's for auto / the settings page).
+  async pin(t) {
+    this.cfg.fixed = true
+    await this.use(t.provider, t.model)
+  }
+
+  // Back to auto: rotate your list (#1, then the next when one fails).
+  async auto() {
+    delete this.cfg.fixed
+    const top = this.myModels()[0]
+    if (top) await this.use(top.provider, top.model)
+    this.s = null
+  }
+
+  // The picker: "auto" (rotate your list) first, then your models; Enter pins the one you choose.
   async chooseModel(filter = '') {
     const { ui, cfg } = this
     const mine = this.myModels()
@@ -766,18 +785,22 @@ class App {
       if (!Object.keys(cfg.providers).length && (await this.detectLocal())) return this.session()
       return ui.print(NO_MODELS)
     }
-    const items = mine.map((t, i) => ({ label: t.model, t, current: i === 0, desc: this.modelDesc(t, i) }))
+    const auto = { label: 'auto', auto: true, current: !cfg.fixed, desc: `rotate your ${mine.length} model${mine.length > 1 ? 's' : ''} (#1, then the next when one fails)` }
+    const inUse = this.inUse()
+    const items = [auto, ...mine.map((t) => ({ label: t.model, t, current: cfg.fixed && t.provider === inUse?.provider && t.model === inUse?.model, desc: this.modelDesc(t, mine.indexOf(t)) }))]
     const it = await ui.pick('Choose a model (more on /settings)', items, { filter })
-    if (it && !it.current) await this.useMine(it.t)
+    if (!it || it.current) return
+    return it.auto ? this.auto() : this.pin(it.t)
   }
 
-  // "/select_model gpt-oss-120b" or "/select_model groq openai/gpt-oss-120b": one of your models;
-  // no argument, or one that's not in your list: the picker.
+  // "/select_model gpt-oss-120b" or "/select_model groq openai/gpt-oss-120b": pin one of your models
+  // (no rotation). "/select_model auto": rotate your list. No/unknown argument: the picker.
   async pickModel(args) {
     if (!args.length) return this.chooseModel()
+    if (args.length === 1 && isAuto(args[0])) return this.cfg.fixed ? this.auto() : this.ui.print(c.dim('already on auto'))
     const [name, model] = args.length > 1 ? [args[0], args.slice(1).join(' ')] : [null, args[0]]
     const found = this.myModels().filter((t) => t.model === model && (!name || t.provider === name))
-    if (found.length === 1) return found[0].provider === this.inUse()?.provider && found[0].model === this.inUse()?.model ? this.ui.print(c.dim(`${model} is in use already`)) : this.useMine(found[0])
+    if (found.length === 1) return this.cfg.fixed && found[0].provider === this.inUse()?.provider && found[0].model === this.inUse()?.model ? this.ui.print(c.dim(`${model} is pinned already`)) : this.pin(found[0])
     if (!found.length) this.ui.print(c.dim(`${model} isn't one of your models: add it on /settings`))
     return this.chooseModel(found.length ? model : '')
   }
@@ -923,14 +946,15 @@ function applySettings(apps, cfg, what) {
     const busy = Boolean(ui.busySince || app.working)
     const now = (fn) => (busy ? app.later.push(fn) : fn())
     if (app.cfg !== cfg) for (const k of ['providers', 'provider', 'model', 'effort', 'theme', 'context', 'autoCompact', 'director', 'format', 'lsp', 'voice', 'rotation']) app.cfg[k] = cfg[k]
-    if (what === 'model') {
+    // a model pinned in this CLI (/select_model) is a session choice: a model/order change on the
+    // settings page leaves it alone (only /select_model auto here returns it to the list)
+    if (what === 'model' && !app.cfg.fixed) {
       app.lists = {}
-      delete app.cfg.fixed // a model chosen on the page: your list again
       if (app.s && !(cfg.providers[cfg.provider] && cfg.model)) now(() => ((app.s = null), ui.print(c.dim('settings: no model chosen'))))
       else if (app.s && !app.myModels().length) now(() => ((app.s = null), ui.print(c.dim('settings: the providers of all your models are switched off'))))
     }
     // your model list: into the running session now, its next request goes to the new #1
-    if ((what === 'model' || what === 'setting:rotation') && app.s && cfg.providers[cfg.provider] && cfg.model) {
+    if ((what === 'model' || what === 'setting:rotation') && !app.cfg.fixed && app.s && cfg.providers[cfg.provider] && cfg.model) {
       const was = `${app.s.client.provider} · ${app.s.client.model}`
       app.useRotation()
       const is = `${app.s.client.provider} · ${app.s.client.model}`
