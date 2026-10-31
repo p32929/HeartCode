@@ -2,6 +2,20 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.26 (2026-10-31)
+
+- edit_file can now change a file by line number: give start_line (and end_line for a range) with the
+  new replace text and no search is needed — so a weak model that can't reproduce the file's exact
+  bytes can still edit it, and a line edit can't mis-match. "replace": "" with a range deletes those
+  lines. Text-based search still works exactly as before.
+- A failed edit_file (the SEARCH text not matching) no longer sends the model in circles. The error
+  now shows a line-by-line diff of what it sent (✗) against what the file actually has (✓) at the
+  right place — found by how alike the lines are, not loose word overlap — so a one-character or
+  whitespace mistake is obvious. If the same file misses twice in a row, the error includes the file
+  itself with line numbers (the whole thing if short, else the lines around the target) and steers
+  the model to edit by line number (start_line/end_line), copy an exact block, or use write_file —
+  so it can't keep guessing. The count clears once an edit to that file lands.
+
 ## 0.1.25 (2026-10-31)
 
 - The model(s) you choose for a folder with /select_model are remembered per folder, in

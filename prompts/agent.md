@@ -185,7 +185,10 @@ Ask a language server about the code. `server`: the command that starts it over 
 
 ## tool-edit_file
 
-Change an existing file: replace `search`, copied exactly from the file (including indentation) and matching one place, with `replace`. For several changes, call it several times in one reply.
+Change an existing file, two ways:
+- By text: `search` (copied exactly from the file, indentation and all, matching one place) is replaced with `replace`.
+- By line number: `start_line` (and `end_line` for a range) say which lines to replace with `replace` — no `search` needed. Use this when you know the line numbers (e.g. from read_file, which numbers them) or when a text match keeps failing; it can't mis-match.
+Give one or the other, plus `path` and `replace` ("replace": "" deletes). For several changes, call it several times in one reply.
 
 ## tool-write_file
 

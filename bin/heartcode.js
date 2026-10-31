@@ -638,7 +638,6 @@ class App {
       second.push(`${c.faint('ctx')} ${paint(`${kTokens(used)}/${guess}${kTokens(strat.context)}`)} ${c.faint(`${pct}%`)}`)
       const tps = this.s?.client.tps
       if (tps) second.push(`${c.muted(String(tps))} ${c.faint('tok/s')}`)
-      if (this.chat.usage?.priced) second.push(c.muted(money(this.chat.usage.cost)))
     } else {
       first.push(c.dim('not probed yet'))
     }

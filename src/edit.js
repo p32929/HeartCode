@@ -3,7 +3,7 @@
 const lead = (l) => /^\s*/.exec(l)[0]
 const key = (l) => l.trim().replace(/\s+/g, ' ')
 
-function trimBlank(lines) {
+export function trimBlank(lines) {
   let a = 0
   let b = lines.length
   while (a < b && !lines[a].trim()) a++
@@ -27,7 +27,7 @@ export function applyEdit(text, search, replace) {
     if (sk.every((k, j) => key(lines[i + j]) === k)) hits.push(i)
   }
   if (hits.length > 1) return { error: `the SEARCH text matches ${hits.length} places; include more surrounding lines so it matches only one` }
-  if (!hits.length) return { error: notFound(lines, sk) }
+  if (!hits.length) return { error: notFound(lines, s) }
 
   const i = hits[0]
   lines.splice(i, s.length, ...reindent(s, trimBlank(replace.split('\n')), lines.slice(i, i + s.length)))
@@ -46,17 +46,47 @@ export function reindent(seen, repl, orig = seen) {
   return repl.map((l) => (l.trim() && l.startsWith(from) ? to + l.slice(from.length) : l))
 }
 
-function notFound(lines, sk) {
-  const words = new Set(sk.join(' ').split(/\W+/).filter((w) => w.length > 2))
+// How alike two lines are, 0–1: 1 if equal ignoring whitespace, else the share of words in common
+// (so a line the model got slightly wrong still counts). Blank-vs-blank is a full match.
+const toks = (l) => l.split(/\W+/).filter(Boolean)
+function sim(a, b) {
+  if (key(a) === key(b)) return 1
+  const ta = toks(a)
+  const tb = new Set(toks(b))
+  if (!ta.length) return 0
+  return ta.filter((t) => tb.has(t)).length / Math.max(ta.length, toks(b).length || 1)
+}
+
+// Where the search block most likely belongs: the window of its height whose lines are, in sum, most
+// like the search lines (blank search lines don't count). -1 only if nothing overlaps at all.
+export function closest(lines, s) {
+  const span = Math.min(s.length, lines.length)
+  if (!span) return -1
   let best = -1
   let score = 0
-  lines.forEach((l, i) => {
-    const sc = l.split(/\W+/).filter((w) => words.has(w)).length
+  for (let i = 0; i + span <= lines.length; i++) {
+    let sc = 0
+    for (let j = 0; j < span; j++) if (s[j].trim()) sc += sim(s[j], lines[i + j])
     if (sc > score) [best, score] = [i, sc]
-  })
+  }
+  return score > 0 ? best : -1
+}
+
+// The not-found message, as a line-by-line diff of what the model sent (✗) against what the file
+// actually has (✓) at the closest place — so it can see exactly which lines are off and copy them.
+function notFound(lines, s) {
   const msg = 'the SEARCH text was not found in the file'
-  if (best < 0) return msg
-  return `${msg}. The closest lines are around line ${best + 1}:\n${lines.slice(Math.max(0, best - 2), best + 3).join('\n')}`
+  const at = closest(lines, s)
+  if (at < 0) return `${msg}. Read the file again (read_file) and copy the exact lines, or use write_file.`
+  const out = [`${msg}. The closest place is line ${at + 1} — your SEARCH (✗) against the file (✓); copy the ✓ lines exactly, whitespace included, or use write_file:`]
+  const n = Math.min(s.length, lines.length - at, 14)
+  for (let j = 0; j < n; j++) {
+    const have = lines[at + j]
+    const want = s[j] ?? ''
+    if (key(want) === key(have)) out.push(`   ${have}`)
+    else out.push(`✗ you sent: ${want}`, `✓ file has: ${have}`)
+  }
+  return out.join('\n')
 }
 
 // Parses git-conflict-style blocks. Accepts 5-9 marker chars and missing SEARCH/REPLACE words; a

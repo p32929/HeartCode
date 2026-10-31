@@ -8,7 +8,7 @@ import { prompt } from './prompts.js'
 import path from 'node:path'
 import os from 'node:os'
 import { spawn, execFileSync } from 'node:child_process'
-import { applyEdit } from './edit.js'
+import { applyEdit, closest, trimBlank } from './edit.js'
 import { readJson } from './config.js'
 import { c, diffLines, renderDiff } from './ui.js'
 import { webFetch, webSearch } from './web.js'
@@ -486,7 +486,7 @@ export const TOOL_DEFS = [
   { name: 'find_command', description: prompt('agent/tool-find_command'), parameters: obj({ names: { type: 'array', items: str } }, ['names']) },
   { name: 'lsp', description: prompt('agent/tool-lsp'), parameters: obj({ server: str, language: str, action: { type: 'string', enum: ['definition', 'references', 'hover', 'errors'] }, file: str, line: int, column: int, name: str }, ['server', 'language', 'action', 'file']) },
   // One edit per call: a list of edits per call measured 2–6 malformed calls per benchmark run vs 0.
-  { name: 'edit_file', description: prompt('agent/tool-edit_file'), parameters: obj({ path: str, search: str, replace: str }, ['path', 'search', 'replace']) },
+  { name: 'edit_file', description: prompt('agent/tool-edit_file'), parameters: obj({ path: str, search: str, replace: str, start_line: int, end_line: int }, ['path', 'replace']) },
   { name: 'write_file', description: prompt('agent/tool-write_file'), parameters: obj({ path: str, content: str, append: { type: 'boolean' } }, ['path', 'content']) },
   { name: 'run_command', description: prompt('agent/tool-run_command'), parameters: obj({ command: str }, ['command']) },
   { name: 'todo', description: prompt('agent/tool-todo'), parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] } }, ['content', 'status']) } }, ['todos']) },
@@ -826,7 +826,7 @@ async function editFiles(s, args) {
     }
   }
   if (edits && typeof edits === 'object' && !Array.isArray(edits)) edits = [edits] // one edit, not in a list
-  if (!Array.isArray(edits)) edits = [{ search: args.search, replace: args.replace }]
+  if (!Array.isArray(edits)) edits = [{ search: args.search, replace: args.replace, start_line: args.start_line, end_line: args.end_line }]
   const files = new Map() // path → { old, text }
   const textOf = (rel) => {
     if (!files.has(rel)) files.set(rel, { old: fs.readFileSync(resolveIn(root, rel), 'utf8') })
@@ -847,15 +847,34 @@ async function editFiles(s, args) {
     return hits.length === 1 ? hits[0] : null
   }
   for (const [i, e] of edits.entries()) {
-    const { search: s0, replace: r0, path: p0 } = normalize(e ?? {})
+    const { search: s0, replace: r0, path: p0, start_line: a0, end_line: b0 } = normalize(e ?? {})
     const search = String(s0 ?? '')
     const given = p0 ?? args.path
     const label = edits.length > 1 ? `edit ${i + 1} of ${edits.length}: ` : ''
     // no "replace" at all isn't "replace with nothing": a model that left it out would delete code
     // (one did). Deleting is an explicit "replace": "".
-    if (r0 === undefined || r0 === null) return `error: ${label}"replace" is missing: give the new text (or "replace": "" to delete the search text). Nothing was changed.`
+    if (r0 === undefined || r0 === null) return `error: ${label}"replace" is missing: give the new text (or "replace": "" to delete the lines). Nothing was changed.`
     if (typeof r0 !== 'string' && !(Array.isArray(r0) && r0.every((l) => typeof l === 'string'))) return `error: ${label}"replace" must be text, a string. Nothing was changed.`
     const replace = Array.isArray(r0) ? r0.join('\n') : r0
+
+    // Line-range edit: given start_line (and optionally end_line), replace exactly those lines —
+    // no text to reproduce, so a weak model that can't copy the file byte-for-byte can still edit it.
+    if (a0 !== undefined && a0 !== null && String(a0).trim() !== '') {
+      const rel = given && fs.existsSync(resolveIn(root, given)) ? path.relative(root, resolveIn(root, given)) : null
+      if (!rel) return `error: ${label}${given ? `${given} does not exist; use write_file to create it` : 'start_line needs a "path"'}. Nothing was changed.`
+      const lines = textOf(rel).split('\n')
+      const a = Math.trunc(Number(a0))
+      const b = b0 === undefined || b0 === null || String(b0).trim() === '' ? a : Math.trunc(Number(b0))
+      if (!Number.isFinite(a) || !Number.isFinite(b) || a < 1 || b < a || a > lines.length)
+        return `error: ${label}start_line ${a0}/end_line ${b0 ?? a0} is out of range; ${rel} has ${lines.length} lines (read_file to see them). Nothing was changed.`
+      lines.splice(a - 1, Math.min(b, lines.length) - a + 1, ...(replace === '' ? [] : replace.split('\n'))) // "" deletes the lines
+
+      files.get(rel).text = lines.join('\n')
+      s.editFails?.delete(rel) // it landed: clear the miss count for this file
+      continue
+    }
+
+    if (!search.trim()) return `error: ${label}give "search" (the exact text to find) or "start_line"/"end_line" (the line numbers to replace). Nothing was changed.`
     let rel = given && fs.existsSync(resolveIn(root, given)) ? path.relative(root, resolveIn(root, given)) : null
     let r = rel ? applyEdit(textOf(rel), search, replace) : null
     if (!r || r.error) {
@@ -865,16 +884,46 @@ async function editFiles(s, args) {
       else if (other && other !== rel) return `error: ${label}${rel ? `the search text isn't in ${given}` : `${given} does not exist`}, but the text is in ${other}: give that path if that's the file to change. Nothing was changed.`
     }
     if (!rel) return `error: ${label}${given ? `${given} does not exist; use write_file to create it` : 'no "path" given, and its search text is not in exactly one file'}. Nothing was changed.`
-    if (r.error) return `error: ${label}${r.error}. Nothing was changed.`
+    if (r.error) {
+      // a second miss on the same file: show it, numbered, so the model can copy an exact block or
+      // rewrite it instead of guessing the search text over and over
+      const fails = (s.editFails ??= new Map())
+      const n = (fails.get(rel) ?? 0) + 1
+      fails.set(rel, n)
+      return `error: ${label}${r.error}. Nothing was changed.${n >= 2 ? fileToCopy(root, rel, search) : ''}`
+    }
     files.get(rel).text = r.text
   }
   const out = []
   for (const [rel, f] of files) {
     if (f.text === undefined) continue
     const res = await proposeWrite(s, rel, f.old, f.text)
+    if (res.status === 'applied') s.editFails?.delete(rel) // it worked: start the fail count over
     out.push(writeResult(rel, res) + (res.status === 'applied' ? `\nNow:\n${excerpt(res.text, res.ops)}` : ''))
   }
   return out.join('\n\n')
+}
+
+// After an edit keeps missing: the file with line numbers (the whole thing if short, else the lines
+// around where the search text most nearly fits) so the model can copy an exact block or write_file.
+function fileToCopy(root, rel, search) {
+  let text
+  try {
+    text = fs.readFileSync(resolveIn(root, rel), 'utf8')
+  } catch {
+    return ''
+  }
+  const lines = text.split('\n')
+  let a = 0
+  let b = lines.length
+  if (lines.length > 150) {
+    const at = closest(lines, trimBlank(search.split('\n')))
+    const c = at < 0 ? 0 : at
+    a = Math.max(0, c - 8)
+    b = Math.min(lines.length, c + trimBlank(search.split('\n')).length + 8)
+  }
+  const where = lines.length > 150 ? `${rel} around there` : `all of ${rel}`
+  return `\nThis edit has missed twice. Stop guessing the SEARCH text. Here is ${where}, with line numbers. Easiest: call edit_file again with start_line and end_line (the line numbers below) and the new "replace" text — no search needed. Or copy an exact block (without the "N| " prefixes) for SEARCH, or use write_file for the whole file:\n${numberLines(lines.slice(a, b), a + 1)}`
 }
 
 // apply_patch (patch.js): every file's change is worked out first (nothing is written if one
@@ -953,7 +1002,7 @@ async function toolRun(name, args, s, signal, id) {
 
 // Argument names other tools use (Claude Code's file_path, old_string, new_string, …): models
 // trained on them send them here too.
-const ALIASES = { file_path: 'path', filePath: 'path', file: 'path', old_string: 'search', old_str: 'search', oldText: 'search', new_string: 'replace', new_str: 'replace', newText: 'replace', cmd: 'command' }
+const ALIASES = { file_path: 'path', filePath: 'path', file: 'path', old_string: 'search', old_str: 'search', oldText: 'search', new_string: 'replace', new_str: 'replace', newText: 'replace', cmd: 'command', startLine: 'start_line', lineStart: 'start_line', start: 'start_line', endLine: 'end_line', lineEnd: 'end_line', end: 'end_line' }
 function normalize(args) {
   const out = { ...args }
   for (const [from, to] of Object.entries(ALIASES)) if (out[to] === undefined && out[from] !== undefined) out[to] = out[from]
