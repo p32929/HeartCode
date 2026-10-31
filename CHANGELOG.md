@@ -2,6 +2,31 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.24 (2026-10-31)
+
+- A pinned model (one picked with /select_model, or -m) is now used by the helpers it spawns too:
+  with a model pinned, HeartCode won't hand a helper's job to another of your models, and a
+  helper uses the pinned model even if a different one is named. Auto mode still spreads work
+  across your models as before.
+- A built page is now actually driven like a user before it's called done, not just loaded: HeartCode
+  fills the inputs, clicks every button, and toggles every checkbox in the headless browser, and
+  any error a control throws (a dead button, a popup that fails) is a must-fix, fed back to the
+  model to fix and re-test — like Replit's test-and-fix loop. (Navigation is blocked so one click
+  can't end the test.) These failures also become lessons.
+- HeartCode now learns from its mistakes in any language, not just web: when something it ran
+  failed and then passed after a fix (a Python traceback, a failing test, a build error, a
+  broken button in the browser…), it saves the fix as a one-line rule in memory, tagged by
+  technology, and recalls it on later tasks of the same kind so the mistake isn't repeated.
+  Near-duplicate lessons are skipped. A rerun only counts as a fix if a file was edited between.
+
+- When the model uses any external tool, library, API or framework, it now goes to the official
+  source first — always, even when it's sure it knows — assumes its memory is stale, relearns the
+  current way from that official page, then acts on it. Official docs/sites/repos come first;
+  blogs, listicles and memory are a last resort. (A change to the project's own code, or a question
+  the code answers, still needs no lookup.)
+  This reminder is repeated across the prompt (research, how it works, on a failure, using a tool,
+  every message, and for small models) so a model is far more likely to actually do it.
+
 ## 0.1.23 (2026-10-31)
 
 - The "retrying in 0 seconds" message no longer lingers on the spinner while the retried request is
@@ -23,11 +48,13 @@ What changed in each version of HeartCode, newest first.
   on the settings page (or in another instance) no longer unpins it or switches its model — that
   only affects instances on auto. The pin isn't written to disk either, so it can't become
   another instance's #1. (Before, a model-order change silently switched every running instance.)
-- The status bar tells auto from a pinned model: auto (rotating your list) shows "auto (current
-  model) (list size)"; a model you picked shows just its name.
-- Picking a model in the CLI (/select_model <model>, or the picker) now pins it for the session —
-  no rotation to the others. The picker has an "auto" entry to go back to the rotating list
-  (/select_model auto also does). Before, picking a model only moved it to #1 and kept rotating.
+- /select_model now picks the model(s) for this session: tick one to pin it (no rotation), several
+  to rotate among just those, or all/none for auto (your whole list). /select_model <model> pins,
+  /select_model a, b, c chooses a set, /select_model auto goes back to the list. It's session-local
+  — your saved ranking (settings page) is untouched and stays the default for new sessions. The
+  status bar shows it: "auto (model) (N)", a pinned model's name alone, or "model (K chosen)".
+  A single pinned/chosen set is also what spawned helpers use (no handing off outside the set).
+  In the picker, Ctrl+A ticks all and Ctrl+N unticks all, so you can clear then tick what you want.
 - Command and @file suggestions now show while the model is working, not only at an empty prompt:
   type `/` or `@`, use ↑/↓ and Tab to complete; Enter queues the command to run when the task is done.
 - The browser (chrome-devtools) no longer litters the project: it runs in its own scratch directory,

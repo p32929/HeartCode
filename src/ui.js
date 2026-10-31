@@ -948,6 +948,11 @@ export class UI {
       if (this.recording) return this.recording.key(key, bound) // voice: Space, Enter, Esc; the rest waits
       // a fixed dialog (pick(…, { fixed })): only its keys, nothing typed and no shortcuts
       if (this.menu.pick?.fixed && !['up', 'down', 'return', 'escape'].includes(key.name) && !(key.ctrl && key.name === 'c')) return
+      // In a multi-select: Ctrl+A ticks all, Ctrl+N unticks all (before tab shortcuts claim Ctrl+N)
+      if (this.menu.pick?.multi && key.ctrl && (key.name === 'a' || key.name === 'n')) {
+        for (const x of this.menu.pick.items) x.checked = key.name === 'a'
+        return this.refreshMenu()
+      }
       if (bound) return this.#action(bound, write)
       if (!this.asking && !(key.ctrl && key.name === 'c')) return this.#typeAhead(s, key, write)
       if (key.name === 'tab' && key.shift) return this.setPermission(PERMISSIONS[(PERMISSIONS.findIndex(([p]) => p === this.permission) + 1) % PERMISSIONS.length][0])
@@ -1003,7 +1008,7 @@ export class UI {
         if (key.name === 'up' || key.name === 'down') return this.#move(key.name === 'up' ? -1 : 1)
         if (key.name === 'tab') return
         if (m.pick.multi && key.name === 'space' && it) {
-          it.item.checked = !it.item.checked // Space ticks; Enter takes the ticked ones
+          it.item.checked = !it.item.checked // Space ticks; Enter takes the ticked ones; Ctrl+A/N all/none (handled earlier, before tab shortcuts)
           return this.refreshMenu()
         }
         if (key.name === 'escape' || (key.name === 'return' && it)) {
@@ -1324,7 +1329,7 @@ export class UI {
     })
     const more = m.items.length - first - shown.length
     if (more > 0) lines.push(c.faint(`  … ${more} more`))
-    const how = m.pick?.multi ? '↑↓ move · Space tick · Enter take the ticked ones · Esc cancel · type to filter' : '↑↓ move · Enter choose · Esc cancel · type to filter'
+    const how = m.pick?.multi ? '↑↓ move · Space tick · Ctrl+A all · Ctrl+N none · Enter take · Esc cancel · type to filter' : '↑↓ move · Enter choose · Esc cancel · type to filter'
     if (m.pick) lines.unshift(c.faint(m.items.length ? how : `nothing matches "${this.rl.line}" · Esc cancel`))
     return lines
   }

@@ -207,7 +207,8 @@ export class Session {
     const self = { provider: this.client.provider, model: this.client.model, images: this.strat.vision, tools: this.strat.actions === 'tools', self: true }
     const all = [self, ...(this.team?.() ?? [])]
     const want = String(args.model ?? '').trim()
-    const first = !want ? self : (all.find((t) => name(t) === want) ?? all.find((t) => t.model === want || want.endsWith(` ${t.model}`)))
+    // only one model available (a pinned model, or you have just one): helpers use it, whatever was asked
+    const first = !want || all.length === 1 ? self : (all.find((t) => name(t) === want) ?? all.find((t) => t.model === want || want.endsWith(` ${t.model}`)))
     if (!first) return `error: no model "${want}". Yours: ${all.map(name).join(', ')}`
     // the one asked for first (if it can do the job), then the others that can: those that call
     // tools first, then the ones that failed least this session, in your list's order
@@ -662,6 +663,9 @@ async function runNative(s, task, images, signal) {
   s.task = task // the user's message, for the page review (lookAtUi)
   s.uiTouched = new Set() // pages (and styles) written in this message: looked at before it ends
   s.uiLooks = 0
+  s.uiErrorsPrev = [] // hard errors from the last look: when one is gone next look, it was fixed — learn from it
+  s.runFails = new Map() // a command that failed (by its tool) → its error; when the same tool runs clean after an edit, that's a verified fix to learn from (any language, not just web)
+  s.edits = 0 // successful file edits so far this message (to tell a real fix from a lucky rerun)
   let nudged = 0 // reminders sent this message about open todo items or a Stop hook
 
   let empty = 0 // replies in a row with neither text nor tool calls
@@ -854,6 +858,7 @@ async function runNative(s, task, images, signal) {
       let out = refused ?? (pre ? await pre.running : together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal, call.id) : 'error: the tool arguments were not valid JSON')
       if (!refused && args) out += guard.after(name, args, out)
       if (guard.stuck) stuck ??= guard.stuck
+      if (!s.isSub && s.memory && !refused && args) await noteRun(s, name, args, out, signal).catch((e) => log('learn', `run note: ${e.message}`)) // learn from any run that failed then passed
       // the same call again and again in a row (a weak model going round): told at the third, stopped at the fifth
       const sig = `${name} ${call.function.arguments}`
       inRow = sig === lastCall ? inRow + 1 : 1
@@ -966,6 +971,101 @@ function staticChecks(root, rel) {
   return out
 }
 
+// The tech a mistake is about, for tagging a lesson so it's recalled on later tasks of the same
+// kind. Reads both the error and the command/file it came from; works for any language, not just web.
+function techOf(context) {
+  const t = String(context).toLowerCase()
+  const tags = []
+  const add = (re, tag) => re.test(t) && tags.push(tag)
+  add(/tailwind/, 'tailwind')
+  add(/\btsc?\b|\.tsx?\b|typescript|ts-node/, 'typescript')
+  add(/\bnode\b|\.c?js\b|\.mjs\b|javascript|npm|pnpm|yarn|\bbun\b|vite|webpack|eslint|referenceerror|is not defined/, 'javascript')
+  add(/\breact\b|usestate|useeffect|\bjsx\b|next\.?js/, 'react')
+  add(/\bpython3?\b|\bpip3?\b|\bpytest\b|\buv\b|\.py\b|traceback|modulenotfound|indentationerror/, 'python')
+  add(/\bgo\b|\.go\b|golang|go\.mod/, 'go')
+  add(/\bcargo\b|\brustc\b|\.rs\b|rust/, 'rust')
+  add(/\bjava\b|\bmvn\b|gradle|\.java\b/, 'java')
+  add(/\bruby\b|\bgem\b|bundle|\.rb\b|rails/, 'ruby')
+  add(/\bphp\b|composer|\.php\b|laravel/, 'php')
+  add(/\bmake\b|cmake|\bgcc\b|clang|\.c\b|\.cpp\b/, 'c')
+  add(/\bdocker\b|dockerfile|kubectl|\bk8s\b/, 'docker')
+  add(/\bcurl\b|\bwget\b|http|endpoint|\bapi\b|\bfetch\b/, 'api')
+  add(/\.html\b|<script|<style|\bdom\b/, 'html')
+  add(/\.css\b|@apply|@layer|utility class|stylesheet/, 'css')
+  add(/\bsql\b|postgres|sqlite|mysql|database/, 'sql')
+  return tags.length ? [...new Set(tags)].slice(0, 4) : ['general']
+}
+
+// A command's tool: its first word (npm, python3, go, cargo, make, curl…), paths and flags dropped,
+// so the same kind of command failing then passing is recognised across runs.
+const runTool_ = (cmd) => (String(cmd).trim().match(/^[\w./-]+/)?.[0] ?? '').split('/').pop()
+
+// After a command: a failure (non-zero exit, or a tool error) is remembered by its tool; a later
+// clean run of the same tool, once files were edited, means it was fixed — learn from it. This is
+// how HeartCode learns from anything it runs, in any language, not only web pages.
+async function noteRun(s, name, args, out, signal) {
+  if (name === 'edit_file' || name === 'write_file' || name === 'apply_patch') {
+    if (!failed(out) && !/error:/i.test(out.slice(0, 40))) s.edits++
+    return
+  }
+  if (name !== 'run_command') return
+  const tool = runTool_(args.command)
+  if (!tool) return
+  const code = Number(/^exit code (-?\d+)/.exec(out)?.[1] ?? (failed(out) ? 1 : 0))
+  const bad = code !== 0 || /\b(error|traceback|exception|failed|cannot|not found|undefined)\b/i.test(out.split('\n').slice(0, 6).join(' '))
+  if (bad) {
+    const line = out.split('\n').find((l) => /\b(error|traceback|exception|failed|cannot|not found)\b/i.test(l)) ?? out.split('\n').find((l) => l.trim()) ?? ''
+    s.runFails.set(tool, { error: `${args.command.split(/\s+/)[0]}: ${line.trim().slice(0, 160)}`, atEdits: s.edits, cmd: args.command })
+    return
+  }
+  // a clean run: did this tool fail earlier, and have files been edited since? then it's a real fix
+  const prev = s.runFails.get(tool)
+  if (prev && s.edits > prev.atEdits) {
+    s.runFails.delete(tool)
+    await learnFromFixes(s, [{ error: prev.error, context: `${prev.cmd} ${prev.error}` }], signal)
+  }
+}
+
+// Turn each fixed mistake into one reusable rule and save it (global memory, tagged by tech). The
+// model writes the rule from the error; a near-duplicate lesson is skipped. Recall is automatic
+// (memory.relevant attaches matching notes to a later message).
+async function learnFromFixes(s, fixed, signal) {
+  for (const { error, context } of fixed.slice(0, 5)) {
+    const tags = techOf(context ?? error)
+    const near = s.memory.search(`tag:lesson ${tags.join(' ')}`).find((n) => n.body.toLowerCase().includes(error.replace(/^[^:]*:\s*/, '').toLowerCase().slice(0, 30)))
+    if (near) continue // already learned
+    let rule = ''
+    try {
+      rule = (await s.client.chat({ messages: [{ role: 'user', content: prompt('agent/lesson', { error }) }] }, { signal })).content.trim().split('\n')[0].replace(/^["'\s-]+|["']+$/g, '').slice(0, 200)
+    } catch {}
+    if (!rule || rule.length < 10) rule = error.replace(/^[^:]*:\s*/, '') // the model couldn't phrase it: keep the error's own wording
+    const name = s.memory.write({ description: rule, type: 'reference', tags: ['lesson', ...tags], content: `${rule}\n\nLearned after this was caught and fixed while building: ${error}`, scope: 'global' })
+    s.ui.step('learned', rule.slice(0, 90))
+    log('learn', `saved lesson [[${name}]] (#${tags.join(' #')}): ${rule}`)
+  }
+}
+
+// Injected into the page (evaluate_script): fills inputs, clicks buttons, toggles checkboxes, and
+// returns the errors any of them threw. Navigation is blocked so one click can't end the test.
+const SMOKE_TEST = `async () => {
+  const errs = []
+  const push = (m) => { const s = String(m && m.message ? m.message : m).slice(0, 180); if (s && !errs.includes(s)) errs.push(s) }
+  addEventListener('error', (e) => push(e.message || (e.error && e.error.message) || e), true)
+  addEventListener('unhandledrejection', (e) => push('unhandled: ' + ((e.reason && e.reason.message) || e.reason)), true)
+  const ce = console.error; console.error = (...a) => { push(a.map(String).join(' ')); ce.apply(console, a) }
+  document.addEventListener('submit', (e) => e.preventDefault(), true)
+  document.addEventListener('click', (e) => { const a = e.target.closest && e.target.closest('a'); const h = a && a.getAttribute('href'); if (h && h[0] !== '#') e.preventDefault() }, true)
+  for (const inp of document.querySelectorAll('input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]):not([type=file]), textarea')) {
+    try { inp.focus(); inp.value = 'Test 123'; inp.dispatchEvent(new Event('input', { bubbles: true })); inp.dispatchEvent(new Event('change', { bubbles: true })); for (const t of ['keydown','keypress','keyup']) inp.dispatchEvent(new KeyboardEvent(t, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true })) } catch (e) { push('typing: ' + e.message) }
+  }
+  const btns = [...document.querySelectorAll('button, [role=button], input[type=button], input[type=submit], a[href^="#"], a:not([href]), [onclick]')]
+  let controls = btns.length
+  for (const el of btns.slice(0, 30)) { try { el.click() } catch (e) { push('click "' + ((el.textContent || el.getAttribute('aria-label') || el.value || '').trim().slice(0, 30)) + '": ' + e.message) } ; await new Promise((r) => setTimeout(r, 10)) }
+  for (const cb of document.querySelectorAll('input[type=checkbox], input[type=radio]')) { controls++; try { cb.click() } catch (e) { push('toggle: ' + e.message) } }
+  await new Promise((r) => setTimeout(r, 200))
+  return JSON.stringify({ errors: errs, controls })
+}`
+
 async function lookAtUi(s, signal) {
   if (!s.uiTouched?.size || s.uiLooks >= 3 || s.ui.permission === 'plan') return null
   const touched = [...s.uiTouched]
@@ -1002,6 +1102,20 @@ async function lookAtUi(s, signal) {
         if (!/\[error\]/i.test(line) || /favicon\.ico/i.test(line)) continue // a missing favicon isn't a real problem
         errors.push(`${rel}: ${line.replace(/^\s*msgid=\d+\s*\[error\]\s*/i, '').replace(/\s*\(\d+ args?\)\s*$/, '').trim()}`)
       }
+      // Drive it like a user: fill the inputs, click every button, toggle every checkbox. An error a
+      // control throws means it doesn't work (a dead button, a popup that fails) — caught here, not on a plain load.
+      s.ui.spinner(`testing ${rel} (clicking through it)`)
+      const ran = await browser.call('evaluate_script', { ...page, function: SMOKE_TEST }, signal).catch((e) => (log('look', `smoke test failed on ${rel}: ${e.message}`), null))
+      const blob = ran && /\{"errors":\s*\[[\s\S]*?\],\s*"controls":\s*\d+\}/.exec(text(ran).replace(/\\n/g, ' ').replace(/\\"/g, '"').replace(/\\\\/g, '\\'))
+      if (blob) {
+        try {
+          const r = JSON.parse(blob[0])
+          for (const err of r.errors.slice(0, 8)) errors.push(`${rel}: a control is broken — ${err}`)
+          log('look', `${rel}: exercised ${r.controls} control(s), ${r.errors.length} broke`)
+        } catch (e) {
+          log('look', `smoke parse: ${e.message}`)
+        }
+      }
       for (const [width, height, fullPage] of [[1280, 900, true], [390, 844, false]]) {
         await browser.call('resize_page', { ...page, width, height }, signal)
         const r = await browser.call('take_screenshot', { ...page, ...(fullPage && { fullPage }) }, signal)
@@ -1018,6 +1132,15 @@ async function lookAtUi(s, signal) {
     s.ui.stopSpin()
   }
   if (errors.length) log('look', `problems found: ${errors.join(' | ')}`)
+  // Learn: a hard error that was there last look and is gone now was fixed — save the lesson so it
+  // isn't made again (recalled on later tasks about the same tech). Only in the main agent.
+  if (!s.isSub && s.memory) {
+    const key = (e) => e.replace(/^[^:]*:\s*/, '').toLowerCase().replace(/["'`]/g, '').replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().slice(0, 120)
+    const nowKeys = new Set(errors.map(key))
+    const fixed = (s.uiErrorsPrev ?? []).filter((p) => !nowKeys.has(p.key))
+    if (fixed.length) await learnFromFixes(s, fixed, signal).catch((e) => log('learn', `failed: ${e.message}`))
+    s.uiErrorsPrev = errors.map((e) => ({ key: key(e), error: e }))
+  }
   // Couldn't open it in a browser (none configured, or it failed): don't pass silently — the model
   // must verify it itself. Static checks still apply.
   const unverified = opened === 0 ? `${shown.join(', ')} could not be opened in a browser here, so HeartCode could not confirm it works. Before you finish, verify it yourself: open it and check it actually works — no errors in the console, every button and interaction does what it should.` : ''

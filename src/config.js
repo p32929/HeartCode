@@ -106,12 +106,13 @@ export function loadConfig(flags = {}) {
     if (cfg.provider !== name) cfg.model = undefined
     cfg.provider = name
     cfg.adhoc = name
-    cfg.fixed = true
   } else if (apiKey && cfg.providers[cfg.provider] && !cfg.providers[cfg.provider].apiKey) {
     cfg.providers[cfg.provider].apiKey = apiKey
   }
   const model = flags.model || process.env.HEART_MODEL
-  if (model && !isAuto(model)) Object.assign(cfg, parseModel(model, cfg.providers, cfg.provider), { fixed: true })
+  if (model && !isAuto(model)) Object.assign(cfg, parseModel(model, cfg.providers, cfg.provider))
+  // -m / an ad-hoc URL pins the chosen model for this run (a session of one): cfg.session, below
+  if ((baseUrl || (model && !isAuto(model))) && cfg.providers[cfg.provider] && cfg.model) cfg.session = [{ provider: cfg.provider, model: cfg.model }]
   synced(cfg, readJson(CONFIG_FILE, {}))
   return cfg
 }
@@ -120,9 +121,9 @@ export function loadConfig(flags = {}) {
 function saved(cfg) {
   const providers = byName(cfg.providers)
   if (cfg.adhoc) delete providers[cfg.adhoc]
-  // a run-only provider (-m URL) or a model pinned for this session (cfg.fixed, /select_model) isn't
+  // a run-only provider (-m URL) or models chosen for this session (cfg.session, /select_model) aren't
   // saved as the current model: the pin is local, it must not become everyone's #1 on disk
-  const keep = (cfg.adhoc && cfg.provider === cfg.adhoc) || cfg.fixed ? fromFile() : null
+  const keep = (cfg.adhoc && cfg.provider === cfg.adhoc) || cfg.session?.length ? fromFile() : null // a run-only provider or a model set chosen for this session isn't saved as the current
   const out = { providers, provider: keep?.provider ?? cfg.provider, model: keep?.model ?? cfg.model }
   for (const k of SETTINGS) if (cfg[k] !== undefined) out[k] = cfg[k]
   return JSON.parse(JSON.stringify(out))
@@ -162,9 +163,8 @@ export const whatOf = (k) => (['provider', 'model', 'providers'].includes(k) ? '
 export function takeIn(cfg) {
   const disk = readJson(CONFIG_FILE, null)
   if (!disk || same(disk, file)) return []
-  // a pinned model (cfg.fixed) is this session's own: a change of the saved current/ranking on disk
   // doesn't move it (its provider/model stay); everything else is still taken in
-  const takes = (k) => k === 'providers' || SETTINGS.includes(k) || ((k === 'provider' || k === 'model') && !cfg.fixed)
+  const takes = (k) => k === 'providers' || k === 'provider' || k === 'model' || SETTINGS.includes(k)
   const keys = keysOf(disk, file).filter((k) => takes(k) && !same(disk[k], file?.[k]))
   for (const k of keys) {
     const value = k === 'providers' ? { ...byName(disk.providers), ...(cfg.adhoc && { [cfg.adhoc]: cfg.providers[cfg.adhoc] }) } : disk[k]
