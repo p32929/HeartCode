@@ -646,21 +646,21 @@ async function webTool(s, name, args, signal) {
   if (name === 'web_search') {
     s.lastQuery = what
     // already read for this project: offered first (the model decides: use it, or search fresh)
-    const saved = !args.fresh && s.root ? findResearch(s.root, what, 5).filter((r) => r.kind !== 'search') : []
+    const saved = !args.fresh && s.root && !s.noResearch ? findResearch(s.root, what, 5).filter((r) => r.kind !== 'search') : []
     if (saved.length) {
       log('research', `"${what}": ${saved.length} saved page(s) offered first`)
       return prompt('agent/research-saved', { query: what, pages: saved.map((r) => `- ${r.title} — ${r.url} (read ${r.fetched}${r.used_for ? `; used for: ${r.used_for}` : ''}) → ${r.file}`).join('\n') })
     }
     s.ui.spinner(`searching: ${clip(what, 60)}`)
     const out = await webSearch(what, { signal })
-    if (s.root && !/^(error:|no results)/.test(out)) {
+    if (s.root && !s.noResearch && !/^(error:|no results)/.test(out)) {
       const { file } = saveSearch(s.root, what, out)
       s.research?.push({ kind: 'search', file, title: `Search: ${what}` })
     }
     return out
   }
   s.ui.spinner(`fetching ${clip(what, 60)}`)
-  if (!s.root) return await webFetch(what, { start: args.start, signal })
+  if (!s.root || s.noResearch) return await webFetch(what, { start: args.start, signal }) // nothing kept (--no-memory)
   const page = await fetchPage(what, { signal })
   if (page.error) return `error: ${page.error}`
   const head = `${page.ok ? '' : `error: HTTP ${page.status}\n`}${page.url !== page.asked ? `(redirected to ${page.url})\n` : ''}`

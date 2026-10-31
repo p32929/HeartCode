@@ -248,7 +248,7 @@ export class Session {
     }
     const label = clip(`${client.model}: ${String(description ?? '').trim() || task.split('\n')[0]}`, 60)
     const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
-    Object.assign(helper, { isSub: true, research: this.research, ran: this.ran, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
+    Object.assign(helper, { isSub: true, research: this.research, ran: this.ran, noResearch: this.noResearch, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
     helper.track = (rel, before) => this.track(rel, before)
     helper.mcpGate = async () => (await this.#gate(helper), () => {})
     if (this.onEvent) helper.onEvent = (e) => this.onEvent({ ...e, parent: id, helper: label })
@@ -771,7 +771,7 @@ async function runNative(s, task, images, signal) {
     pages.length && prompt('agent/research-known', { pages: pages.map((r) => `- ${r.title} — ${r.url} (read ${r.fetched}) → ${r.file}`).join('\n') }),
   ].filter(Boolean)
   const text = known.length ? `${task}\n\n${known.join('\n\n')}` : task
-  if (!s.isSub) Object.assign(s, { research: [], ran: [], lastQuery: '', dirsBefore: foldersOf(s.root) }) // this message's pages and commands (helpers add theirs), and the folders there were, for the wrap-up
+  if (!s.isSub) Object.assign(s, { research: [], ran: [], lastQuery: '', dirsBefore: foldersOf(s.root), noResearch: !s.memory }) // this message's pages and commands (helpers add theirs), and the folders there were, for the wrap-up
   const planning = ui.permission === 'plan'
   // the research-first reminder: small models follow the user's message far more than the system
   // prompt (not a helper's job, nor a program's own task with its own instructions)

@@ -12,7 +12,7 @@
 // told to the model. Logs and warnings go to stderr (and HEART_LOG), never stdout.
 import readline from 'node:readline'
 import { log } from './log.js'
-import { clip, TOOL_DEFS, extraTools, loadMcpTools, failed as toolFailed } from './tools.js'
+import { clip, TOOL_DEFS, extraTools, loadMcpTools, mcpName, failed as toolFailed } from './tools.js'
 import { allowed } from './agent.js'
 
 // Claude Code's tool names → HeartCode's (for --allowedTools / --disallowedTools).
@@ -119,6 +119,10 @@ export async function runHeadless(app, opts) {
     return e
   }
 
+  // An MCP call goes out as Claude Code sends one: the tool by its own name (mcp__server__tool) with
+  // its own arguments, not HeartCode's one mcp tool around them (a program reading it, Nibedita,
+  // knows its tools by those names).
+  const asClaude = (name, input) => (name === 'mcp' && input?.server && input?.tool ? { name: mcpName(String(input.server), String(input.tool)), input: input.arguments ?? {} } : { name, input })
   let said = false // the model's text was already sent as an assistant message
   if (out === 'stream-json') {
     s.onEvent = (e) => {
@@ -126,7 +130,7 @@ export async function runHeadless(app, opts) {
         const content = [
           ...(e.reasoning ? [{ type: 'thinking', thinking: e.reasoning }] : []),
           ...(e.content ? [{ type: 'text', text: e.content }] : []),
-          ...e.toolCalls.map((t) => ({ type: 'tool_use', id: t.id, name: t.function.name, input: parseArgs(t.function.arguments) })),
+          ...e.toolCalls.map((t) => ({ type: 'tool_use', id: t.id, ...asClaude(t.function.name, parseArgs(t.function.arguments)) })),
         ]
         if (e.content && !e.parent) said = true
         // a helper's (agent) steps too, as Claude Code sends a subagent's: parent_tool_use_id is its agent call
@@ -136,7 +140,8 @@ export async function runHeadless(app, opts) {
       }
     }
     if (s.strat.actions === 'tools' && s.mcp?.names.length) await loadMcpTools(s) // their tools are in the list, as in Claude Code's
-    const tools = s.strat.actions === 'tools' ? [...TOOL_DEFS, ...extraTools(s)].map((f) => f.name).filter((n) => allowed(s, n)) : []
+    // each MCP tool by its own name (mcp__server__tool), as Claude Code lists them; the model reaches them through its one mcp tool
+    const tools = s.strat.actions === 'tools' ? [...[...TOOL_DEFS, ...extraTools(s)].map((f) => f.name), ...(s.mcpDirect?.keys() ?? [])].filter((n) => allowed(s, n)) : []
     emit({ type: 'system', subtype: 'init', session_id, model, cwd: app.root, tools, mcp_servers: app.mcp.names.map((name) => ({ name, status: s.mcpCatalog?.has(name) ? 'connected' : 'pending' })), permissionMode: app.ui.permission, apiKeySource: 'none' })
   }
 

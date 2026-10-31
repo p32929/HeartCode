@@ -16,6 +16,7 @@
     --accent: #16824c; --accent-soft: #e8f5ee; --on-accent: #ffffff;
     --brand: var(--accent); --brand-soft: var(--accent-soft); --on-brand: var(--on-accent);
     --ok: #1d8a4b; --ok-soft: #e7f5ec; --err: #d1242f; --err-soft: #fdecee;
+    --warn: #a16207; /* in progress, or needs a look: not green (works) and not red (broken) */
     --ring: 0 0 0 3px rgba(22, 130, 76, .18);
     --shadow: 0 1px 2px rgba(20, 22, 30, .04), 0 8px 24px rgba(20, 22, 30, .06);
     --shadow-pop: 0 24px 64px rgba(20, 22, 30, .18), 0 2px 6px rgba(20, 22, 30, .06);
@@ -31,6 +32,7 @@
       --line: #23252c; --line-strong: #2f323a; --hover: #1c1e24; --input: #101115;
       --accent: #5ccf8a; --accent-soft: rgba(92, 207, 138, .13); --on-accent: #07140d;
       --ok: #62cf8b; --ok-soft: rgba(98, 207, 139, .12); --err: #ff7a7a; --err-soft: rgba(255, 122, 122, .12);
+      --warn: #e3b341;
       --ring: 0 0 0 3px rgba(92, 207, 138, .25);
       --shadow: 0 1px 2px rgba(0, 0, 0, .3);
       --shadow-pop: 0 28px 72px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .03);
@@ -42,6 +44,7 @@
     --line: #23252c; --line-strong: #2f323a; --hover: #1c1e24; --input: #101115;
     --accent: #5ccf8a; --accent-soft: rgba(92, 207, 138, .13); --on-accent: #07140d;
     --ok: #62cf8b; --ok-soft: rgba(98, 207, 139, .12); --err: #ff7a7a; --err-soft: rgba(255, 122, 122, .12);
+      --warn: #e3b341;
     --ring: 0 0 0 3px rgba(92, 207, 138, .25);
     --shadow: 0 1px 2px rgba(0, 0, 0, .3);
     --shadow-pop: 0 28px 72px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .03);
@@ -69,6 +72,14 @@
   nav a.on::before { content: ''; position: absolute; left: -14px; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
   nav a .ic { width: 18px; text-align: center; opacity: .7; font-size: 13px; }
   nav a.on .ic { color: var(--accent); opacity: 1; }
+  .nav-group { height: 1px; margin: 10px 12px; background: var(--line); }
+  .nav-group:first-child { display: none; }
+  .subtabs { display: flex; gap: 4px; margin: -4px 0 18px; border-bottom: 1px solid var(--line); }
+  .subtabs a { position: relative; padding: 8px 12px 10px; color: var(--muted); text-decoration: none; font-weight: 500; font-size: 13.5px; transition: color .15s; }
+  .subtabs a:hover { color: var(--text); }
+  .subtabs a.on { color: var(--text); font-weight: 600; }
+  .subtabs a.on::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
+  .subtabs a .count { margin-left: 6px; font-size: 11.5px; color: var(--faint); font-weight: 500; font-variant-numeric: tabular-nums; }
   nav a .count { margin-left: auto; font-size: 11.5px; color: var(--faint); font-weight: 500; font-variant-numeric: tabular-nums; }
   .using:empty { visibility: hidden; } /* until your settings are in */
   .using { margin: auto 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; font-size: 12px; background: var(--panel); }
@@ -316,7 +327,7 @@
   .olist .test .spin { flex: none; }
   .olist .test button { flex: none; }
   .olist .test.ok { color: var(--ok); }
-  .olist .test.warn { color: var(--accent); }
+  .olist .test.warn { color: var(--warn); }
   dialog { width: 70vw; max-width: none; max-height: calc(100vh - 32px); overflow: auto; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); color: var(--text); padding: 26px 28px 24px; box-shadow: var(--shadow-pop); }
   dialog[open] { animation: pop-in .18s cubic-bezier(.2, .8, .3, 1); }
   @keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(.985); } to { opacity: 1; transform: none; } }
@@ -330,7 +341,7 @@
   #pr-list li.dragging { opacity: .4; }
   dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
   .olist .test.failed { color: var(--err); }
-  .olist .test.testing, .olist .test.waiting { color: var(--accent); }
+  .olist .test.testing, .olist .test.waiting { color: var(--warn); }
   .olist .test button { padding: 0 7px; font-size: 11px; }
   .spin { width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -404,7 +415,7 @@
   .mtable .yes { color: var(--ok); }
   .mtable .no { color: var(--faint); }
   .mtable .src { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-  .mtable .src.warn { color: var(--accent); }
+  .mtable .src.warn { color: var(--warn); }
   .mtable button { padding: 2px 8px; font-size: 11.5px; border-color: transparent; background: transparent; color: var(--muted); }
   .mtable li:hover button, .mtable li.picked button { border-color: var(--line-strong); background: var(--panel); color: var(--text); }
   .mtable li:hover button.danger { color: var(--err); }
@@ -412,7 +423,10 @@
   .mtable .try .msg { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mtable .try.ok { color: var(--ok); }
   .mtable .try.bad { color: var(--err); }
-  .mtable .try.going { color: var(--accent); }
+  .mtable .try.going { color: var(--warn); }
+  .mtable .try.going .msg { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .45; } }
+  @media (prefers-reduced-motion: reduce) { .mtable .try.going .msg { animation: none; } }
   .mt-empty { padding: 28px 18px; color: var(--muted); }
   .olist .grip { cursor: grab; color: var(--faint); padding: 0 2px; user-select: none; }
   .olist .n { font-weight: 800; color: var(--brand); min-width: 24px; }
@@ -443,9 +457,24 @@
 
   /* choices as cards (permissions, colors) */
   .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .choices.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .choices.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  /* General: cards in pairs on rows that line up (related ones side by side: permissions | colors,
+     behavior | model, voice | tools), the full width; one column when there isn't room for two */
+  .settings-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: stretch; }
+  @media (max-width: 1280px) { .settings-col { grid-template-columns: minmax(0, 1fr); } }
+  .settings-col .card h2 { margin-bottom: 4px; }
+  .settings-col #g-toggles { margin-top: 8px; }
+  .setting { display: flex; align-items: center; gap: 18px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .setting:last-child { border-bottom: 0; padding-bottom: 2px; }
+  .setting .t { flex: 1; min-width: 0; cursor: default; }
+  .setting .t b { display: block; font-weight: 600; }
+  .setting .t span { display: block; margin-top: 2px; color: var(--muted); font-size: 13px; line-height: 1.45; text-wrap: pretty; }
+  .setting select, .setting input { flex: none; width: 240px; }
   .choice { position: relative; border: 1px solid var(--line-strong); border-radius: 12px; padding: 13px 15px; cursor: pointer; background: var(--panel); transition: border-color .15s, box-shadow .15s, background .15s; }
   .choice:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line-strong)); }
-  .choice.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: var(--ring); }
+  .choice.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 60%, var(--panel)); }
+  .choice:has(input:focus-visible) { box-shadow: var(--ring); }
   .choice b { display: block; }
   .choice span { display: block; margin-top: 2px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
   .choice input { position: absolute; opacity: 0; }
@@ -499,11 +528,14 @@
     nav { display: flex; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
     nav a { flex: none; margin: 0; }
     nav a.on::before { display: none; } /* a strip of tabs: the highlighted one is enough */
-    nav a .count, .using { display: none; }
+    nav a .count, .using, .nav-group { display: none; }
     .theme-pick { margin: 6px 0 4px; max-width: 280px; }
     main { padding: 20px 16px 60px; }
     .steps { grid-template-columns: 1fr; }
-    .choices { grid-template-columns: 1fr; }
+    .choices, .choices.three { grid-template-columns: 1fr; }
+    .choices.four { grid-template-columns: 1fr 1fr; }
+    .setting { flex-direction: column; align-items: stretch; gap: 10px; }
+    .setting select, .setting input { width: 100%; }
     .grid, .cols { grid-template-columns: 1fr; }
     .md { grid-template-columns: 1fr; }
     .md .list { position: static; max-height: 300px; }
@@ -565,16 +597,17 @@
   <aside>
     <div class="brand"><span>♥</span> HeartCode <small>settings</small></div>
     <nav id="nav">
-      <a href="#providers" data-page="providers"><span class="ic">◉</span> Providers &amp; models <span class="count" id="n-providers"></span></a>
-      <a href="#models" data-page="models"><span class="ic">☰</span> Your models <span class="count" id="n-mine"></span></a>
-      <a href="#general" data-page="general"><span class="ic">⚙</span> General</a>
-      <a href="#statusbar" data-page="statusbar"><span class="ic">▭</span> Status bar</a>
+      <div class="nav-group" role="separator"></div>
+      <a href="#models" data-page="models" data-tabs="models providers"><span class="ic">☰</span> Models <span class="count" id="n-mine"></span></a>
+      <div class="nav-group" role="separator"></div>
+      <a href="#general" data-page="general" data-tabs="general statusbar"><span class="ic">⚙</span> General</a>
       <a href="#notify" data-page="notify"><span class="ic">✉</span> Notifications</a>
-      <a href="#logging" data-page="logging"><span class="ic">▤</span> Logging <span class="count" id="n-failed"></span></a>
-      <a href="#prompts" data-page="prompts"><span class="ic">✎</span> System prompt</a>
-      <a href="#mcp" data-page="mcp"><span class="ic">⧉</span> MCP servers <span class="count" id="n-mcp"></span></a>
+      <div class="nav-group" role="separator"></div>
       <a href="#skills" data-page="skills"><span class="ic">✦</span> Skills <span class="count" id="n-skills"></span></a>
-      <a href="#files" data-page="files"><span class="ic">≡</span> Advanced files</a>
+      <a href="#mcp" data-page="mcp"><span class="ic">⧉</span> MCP servers <span class="count" id="n-mcp"></span></a>
+      <a href="#prompts" data-page="prompts"><span class="ic">✎</span> System prompt</a>
+      <div class="nav-group" role="separator"></div>
+      <a href="#logging" data-page="logging" data-tabs="logging files"><span class="ic">▤</span> Advanced <span class="count" id="n-failed"></span></a>
     </nav>
     <div class="using" id="using"></div>
     <div class="seg theme-pick" id="theme-pick" role="radiogroup" aria-label="Light or dark">
@@ -587,7 +620,7 @@
     <!-- Providers & models -->
     <section class="page" id="page-providers">
       <div class="head">
-        <div><h1>Providers &amp; models</h1><p class="lead">Click a model to add it to your list, or tick several. HeartCode tries your list in order: #1 first, the next when one fails.</p></div>
+        <div><h1>Providers</h1><p class="lead">Click a model to add it to your list, or tick several. HeartCode tries your list in order: #1 first, the next when one fails.</p></div>
         <div class="head-actions"><button id="p-mine" type="button"></button><button class="primary" id="p-open">+ Add a provider</button></div>
       </div>
       <div class="steps" id="steps"></div>
@@ -637,7 +670,7 @@
 
     <!-- Logging -->
     <section class="page" id="page-logging">
-      <div class="head"><div><h1>Logging</h1><p class="lead">What HeartCode writes down, for finding out what went wrong. Off unless you switch it on.</p></div><div class="disk" id="l-disk"></div></div>
+      <div class="head"><div><h1>Logs</h1><p class="lead">What HeartCode writes down, for finding out what went wrong. Off unless you switch it on.</p></div><div class="disk" id="l-disk"></div></div>
       <div class="card">
         <div class="log-opts">
           <div>
@@ -681,47 +714,55 @@
       </div>
     </section>
 
-    <!-- General -->
+    <!-- General: one column, a card per topic, every setting saved as it changes -->
     <section class="page" id="page-general">
-      <div class="head"><div><h1>General</h1><p class="lead">How HeartCode works for you. Saved for next time; a running HeartCode takes changes right away.</p></div></div>
-      <div class="cols">
-        <div class="stack">
-          <div class="card">
-            <h2>What can HeartCode do without asking?</h2>
-            <p class="sub">Shift+Tab in HeartCode switches between these too (and to plan mode).</p>
-            <div class="choices" id="g-perm"></div>
+      <div class="head"><div><h1>General</h1><p class="lead">How HeartCode works for you. Every change saves on its own, and a running HeartCode picks it up right away.</p></div></div>
+      <div class="settings-col">
+        <div class="card">
+          <h2>Permissions</h2>
+          <p class="sub">What HeartCode may do without asking you first. <span class="mono">Shift+Tab</span> in HeartCode switches between these too.</p>
+          <div class="choices three" id="g-perm"></div>
+        </div>
+        <div class="card">
+          <h2>Terminal colors</h2>
+          <p class="sub">Your own colors on top of one: theme.json in <a href="#files">Advanced → Files</a>.</p>
+          <div class="choices four" id="g-theme"></div>
+        </div>
+        <div class="card">
+          <h2>Behavior</h2>
+          <div id="g-toggles"></div>
+        </div>
+        <div class="card">
+          <h2>Model</h2>
+          <div class="setting">
+            <label class="t" for="g-effort"><b>Thinking effort</b><span>How hard a thinking model thinks before it answers.</span></label>
+            <select id="g-effort"></select>
           </div>
-          <div class="card">
-            <h2>Colors</h2>
-            <p class="sub">Your own colors on top of a theme: theme.json in <a href="#files">Advanced files</a>.</p>
-            <div class="choices" id="g-theme"></div>
-          </div>
-          <div class="card">
-            <h2>Thinking and context</h2>
-            <div class="row">
-              <div class="grow"><label class="f" for="g-effort">How hard a thinking model thinks</label><select id="g-effort"></select></div>
-              <div class="grow"><label class="f" for="g-context">Context window (tokens)</label><input type="number" id="g-context" min="1" placeholder="as the model says"></div>
-            </div>
-            <div class="hint">Leave the context window empty unless HeartCode gets it wrong for your model.</div>
+          <div class="setting">
+            <label class="t" for="g-context"><b>Context window</b><span>How many tokens the model can hold. Leave it on auto unless HeartCode gets it wrong.</span></label>
+            <input type="number" id="g-context" min="1" placeholder="Auto">
           </div>
         </div>
-        <div class="stack">
-          <div class="card">
-            <h2>Features</h2>
-            <p class="sub">Switch each one on or off.</p>
-            <div id="g-toggles"></div>
+        <div class="card">
+          <h2>Voice input</h2>
+          <p class="sub">Press Space in an empty input box (or type /voice), talk, and Enter. Your words land in the box.</p>
+          <div class="setting">
+            <label class="t" for="v-src"><b>Transcribe with</b><span id="v-src-about"></span></label>
+            <select id="v-src"></select>
           </div>
-          <div class="card">
-            <h2>Voice input</h2>
-            <p class="sub">/voice in HeartCode. Empty: whisper-cli on this machine. Or a provider's transcription API: <span class="mono">{ "provider": "groq", "model": "whisper-large-v3" }</span>; add <span class="mono">"language": "auto"</span> for other languages.</p>
-            <textarea id="v-text" spellcheck="false" rows="3" placeholder="(whisper-cli on this machine)"></textarea>
-            <div class="actions"><button class="primary" id="v-save">Save voice</button></div>
+          <div class="setting">
+            <label class="t" for="v-model"><b>Model</b><span id="v-model-about"></span></label>
+            <input type="text" id="v-model" spellcheck="false" autocomplete="off">
           </div>
-          <div class="card">
-            <h2>External tools</h2>
-            <p class="sub">Some features need a tool or service on your machine. Ready ones are ticked; the rest show what to install.</p>
-            <div id="g-caps"></div>
+          <div class="setting">
+            <label class="t" for="v-lang"><b>Language</b><span id="v-lang-about"></span></label>
+            <input type="text" id="v-lang" spellcheck="false" autocomplete="off">
           </div>
+        </div>
+        <div class="card">
+          <h2>External tools</h2>
+          <p class="sub">Some features need a tool on your machine. Ready ones are ticked; the rest say what to install.</p>
+          <div id="g-caps"></div>
         </div>
       </div>
     </section>
@@ -791,7 +832,7 @@
 
     <!-- Advanced files -->
     <section class="page" id="page-files">
-      <div class="head"><div><h1>Advanced files</h1><p class="lead">The rest of HeartCode's settings, as the files they're kept in (<span class="mono" id="f-home"></span>). A JSON file that doesn't parse isn't saved; save one empty to delete it.</p></div></div>
+      <div class="head"><div><h1>Settings files</h1><p class="lead">The rest of HeartCode's settings, as the files they're kept in (<span class="mono" id="f-home"></span>). A JSON file that doesn't parse isn't saved; save one empty to delete it.</p></div></div>
       <div class="md">
         <div class="list"><div class="items" id="f-items"></div></div>
         <div class="detail" id="f-detail"></div>
@@ -1043,7 +1084,8 @@ const page = () => (PAGES.includes(location.hash.slice(1)) ? location.hash.slice
 function showPage() {
   for (const p of PAGES) $('page-' + p).classList.toggle('on', p === page())
   $('page-' + page()).querySelector('.head').after(document.querySelector('.job-slot[data-where="page"]')) // what's loading: under this page's title
-  for (const a of document.querySelectorAll('nav a')) a.classList.toggle('on', a.dataset.page === page())
+  for (const a of document.querySelectorAll('nav a')) a.classList.toggle('on', (a.dataset.tabs?.split(' ') ?? [a.dataset.page]).includes(page()))
+  for (const a of document.querySelectorAll('.subtabs a')) a.classList.toggle('on', a.dataset.tab === page())
   if (S) drawUsing(S)
   if (page() === 'logging') drawDisk()
   scrollTo(0, 0)
@@ -1052,6 +1094,16 @@ function showPage() {
   document.querySelector('nav a.on')?.scrollIntoView({ inline: 'center', block: 'nearest' }) // on a phone the pages scroll sideways
 }
 addEventListener('hashchange', showPage)
+// A sidebar item with several pages (data-tabs): a tab bar on top of each of them. Each page keeps
+// its own address (#providers, #statusbar, #files…), so links to one still open it.
+const TAB_NAMES = { models: 'Your list', providers: 'Providers', general: 'Settings', statusbar: 'Status bar', logging: 'Logs', files: 'Files' }
+const TAB_COUNTS = { providers: 'n-providers' } // a count shown on the tab, not the sidebar item
+for (const a of document.querySelectorAll('nav a[data-tabs]')) {
+  const tabs = a.dataset.tabs.split(' ')
+  for (const p of tabs) {
+    $('page-' + p).prepend(h('div', { className: 'subtabs', role: 'tablist' }, tabs.map((t) => h('a', { href: '#' + t, role: 'tab', 'data-tab': t }, TAB_NAMES[t], TAB_COUNTS[t] ? h('span', { className: 'count', 'data-count': TAB_COUNTS[t] }) : null))))
+  }
+}
 
 // A list on the left, the chosen one on the right (prompts, skills, files). Unsaved text in the
 // editor is kept per item while you look at others, marked with a dot in the list.
@@ -1489,7 +1541,7 @@ function drawProviders(s) {
   catalogShape = shape
   markCatalog()
   $('m-search').placeholder = `Search ${Object.values(MODELS).reduce((n, m) => n + (m.list?.length ?? 0), 0) || 'all'} models…`
-  $('n-providers').textContent = s.providers.length || ''
+  for (const el of document.querySelectorAll('[data-count="n-providers"]')) el.textContent = s.providers.length || ''
 }
 // Your models: pick one up (anywhere on it with a mouse, by its ⋮⋮ on a touch screen) and the
 // others move aside as it goes; let go and it's saved, already in its place (no jump when the
@@ -2079,7 +2131,7 @@ function drawGeneral(s) {
   put($('g-toggles'), Object.entries(s.choices.toggles).map(([k, d]) => h('label', { className: 'opt' },
     h('div', { className: 't' }, h('b', { textContent: TOGGLE_INFO[k] ?? k }), h('span', { textContent: d[0].toUpperCase() + d.slice(1) })),
     sw({ checked: s.settings[k], onchange: (e) => act('/api/setting', { name: k, value: e.target.checked }, `${TOGGLE_INFO[k] ?? k}: ${e.target.checked ? 'on' : 'off'}`) }))))
-  if (document.activeElement !== $('v-text')) $('v-text').value = s.voice
+  drawVoice(s)
   put($('g-caps'), ...(s.capabilities || []).map((c) =>
     h('div', { className: 'cap' + (c.ok ? '' : ' cap-off') },
       h('div', { className: 'cap-h' }, h('span', { className: 'cap-mark', textContent: c.ok ? '✓' : '✗' }), h('b', { textContent: c.name }), h('span', { className: c.ok ? 'tag ok' : 'tag need', textContent: c.ok ? 'ready' : 'needs setup' })),
@@ -2088,7 +2140,39 @@ function drawGeneral(s) {
 }
 $('g-effort').onchange = (e) => act('/api/setting', { name: 'effort', value: e.target.value }, 'effort saved')
 $('g-context').onchange = (e) => act('/api/setting', { name: 'context', value: e.target.value.trim() ? Number(e.target.value) : null }, 'context window saved')
-$('v-save').onclick = () => act('/api/voice', { text: $('v-text').value }, 'voice saved')
+// Voice: this machine (whisper-cli and a ggml model) or a provider's transcription API, a model and a
+// language: kept as config's "voice" ({ provider, model, language }; nothing set: this machine).
+function voiceNow() {
+  try {
+    return S?.voice ? JSON.parse(S.voice) : {}
+  } catch {
+    return {}
+  }
+}
+function drawVoice(s) {
+  const v = voiceNow()
+  const names = (s.providers ?? []).map((p) => p.name)
+  put($('v-src'), h('option', { value: '', textContent: 'This machine (whisper-cli)' }), names.map((n) => h('option', { value: n, textContent: `${n} (its transcription API)` })))
+  $('v-src').value = v.provider && names.includes(v.provider) ? v.provider : ''
+  const remote = Boolean($('v-src').value)
+  $('v-src-about').textContent = remote ? 'Sent to that provider to turn into text: fast, needs its key.' : 'Runs on your computer: private, free, slower. Needs whisper-cli and a model.'
+  $('v-model-about').textContent = remote ? 'Its speech-to-text model, like whisper-large-v3 (Groq) or whisper-1 (OpenAI).' : 'A whisper model file (ggml-….bin). Empty: the best one in ~/.whisper-models.'
+  $('v-lang-about').textContent = remote ? 'What you speak, like en or bn. Empty: worked out from what you say.' : 'What you speak, like en or bn; auto works it out. Empty: English.'
+  $('v-model').placeholder = remote ? 'whisper-large-v3' : 'auto'
+  $('v-lang').placeholder = remote ? 'auto' : 'en'
+  for (const [id, k] of [['v-model', 'model'], ['v-lang', 'language']]) if (document.activeElement !== $(id)) $(id).value = v[k] ?? ''
+}
+function saveVoice(what) {
+  const v = { provider: $('v-src').value || undefined, model: $('v-model').value.trim() || undefined, language: $('v-lang').value.trim() || undefined }
+  const set = Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined))
+  act('/api/voice', { text: Object.keys(set).length ? JSON.stringify(set) : '' }, what)
+}
+$('v-src').onchange = (e) => {
+  $('v-model').value = '' // a local model's path means nothing to a provider, and the other way round
+  saveVoice(`voice: ${e.target.value || 'this machine'}`)
+}
+$('v-model').onchange = () => saveVoice('voice model saved')
+$('v-lang').onchange = () => saveVoice('voice language saved')
 
 // --- Notifications: Telegram set up in three steps (a bot from @BotFather, its token, Start in the
 // bot), then on/off, a test, and which events send one ---

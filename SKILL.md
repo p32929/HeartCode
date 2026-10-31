@@ -71,9 +71,10 @@ all refused the request outright, else after `--max-retries` (10) whole rounds o
 model (`-m <model>`) waits out rate limits and outages, up to `--max-retries` tries, and stops at
 any other error. A provider that refuses a part of the request HeartCode can do without (the
 model's thinking sent back, keys in the tools' schemas, images) gets it again without that part,
-and that is remembered for the model for a day. A conversation is summarized when it takes 85% of
-the window of the model answering (room is kept for the reply); when the list moves on to a model
-with a smaller window, it's summarized for that model before it's sent.
+and that is remembered for the model for a day. When a conversation takes 85% of the window of the
+model answering (room is kept for the reply), a model of the list with room for all of it takes
+over (the first such one in the list's order); only when none has room is it summarized. When the
+list moves on to a model with a smaller window, it's summarized for that model before it's sent.
 Each request is fitted to the model it goes to: one that can't see gets a note in place of each
 image, one that can't call tools gets the tool calls as text.
 
@@ -142,7 +143,8 @@ Tool names: HeartCode's own (`read_file`, `edit_file`, `write_file`, `run_comman
 `list_files`, `web_fetch`, `web_search`…) or Claude Code's (`Read`, `Edit`, `Write`, `Bash`,
 `Grep`, `Glob`, `WebFetch`, `WebSearch`). `--disallowedTools Bash` takes one away. MCP servers'
 tools are named as in Claude Code: `mcp__<server>__<tool>`; `mcp__<server>` means all of one
-server's tools, `mcp` all of them.
+server's tools, `mcp` all of them. (The model itself reaches them through one `mcp` tool that lists
+each by name; in the output they keep their own names, below.)
 
 ## Choose the model
 
@@ -163,8 +165,8 @@ The model in use knows the user's other models (what each can do, how often it f
 session) and works with them through its `agent` tool: it asks a model that can for what it
 can't do itself (a model that can't see asks one that can about a screenshot: "which tiles show a
 chair?"), several at once when there are many images or parts, and a helper that fails is handed to
-the next capable model until one does the job. A helper takes 25 steps at most, then answers with
-what it has. Their tokens are in `usage`, and each model's in
+the next capable model until one does the job. A helper works until its job is done (no step
+limit; `--max-turns` applies to it too). Their tokens are in `usage`, and each model's in
 `modelUsage`.
 
 ## Setting up a model
@@ -189,11 +191,27 @@ answers. A run that fails with a wrong key or an unknown model: ask the user to 
 | Flag | |
 |---|---|
 | `--append-system-prompt "<text>"` | your instructions for this run, at the end of the system prompt. HeartCode's own part then says less (no role of its own, no "stay in the project folder", no way of finishing of its own) and tells the model to follow yours where they differ; its `manage` tool is left out, and nothing from the run's messages is saved to its memory |
-| `--mcp-config <file or JSON>` | more MCP servers (repeatable); `--strict-mcp-config`: only those. Each server's tools are tools of their own for the model, `mcp__<server>__<tool>`, as in Claude Code, and what the server says about using them goes in the system prompt |
+| `--mcp-config <file or JSON>` | more MCP servers (repeatable); `--strict-mcp-config`: only those. The model sees every server's tools by name, one line each, and gets a tool's arguments when it uses it (a call that doesn't fit them comes back with what's wrong, not run). What a server says about using its tools goes in the system prompt |
 | `--skills-dir <folder>` | more skills (repeatable) |
-| `--no-memory` | don't read or write HeartCode's memory notes |
+| `--no-memory` | nothing read or kept: no memory notes, no web pages saved in the project, no wrap-up at the end (see "What a run leaves") |
 
 A project's own `HEARTCODE.md` (or `AGENTS.md`, `CLAUDE.md`) is read like instructions.
+
+## What a run leaves, and the extra requests
+
+Unless you pass `--no-memory`, a run keeps what it learns in the project it works in:
+`.heartcode/research/` (every web page it read, whole, as Markdown; that folder ignores itself in
+git) and `.heartcode/memory/` (notes). Notes and pages that match a task come with it next time,
+so later runs research less. After a task that read the web, ran commands or made files, a
+wrap-up request saves notes, keeps or deletes the pages it read, and removes throwaway files and
+empty folders the task made (a test script, a debug log).
+
+Before a task that changed files ends, another of the user's models (the same one when only one is
+used) reviews the work against the request in a request of its own; a NO sends it back to fix.
+The first file change of a task waits for the model's plan (its todo list). Changing files and
+then saying it's done without running anything since sends it back to check. Nothing stops a
+task but `--max-turns`, `--max-retries` or an interrupt: a model going round in circles hands the
+work to the next model in the list. These requests are in `usage` and `modelUsage` too.
 
 ## Long tasks: a stream of events
 
@@ -204,9 +222,11 @@ heart -p --input-format stream-json --output-format stream-json
 Stdin: one message per line, `{"type":"user","message":{"role":"user","content":"…"}}`.
 Stop the running one with `{"type":"control_request","request_id":"1","request":{"subtype":"interrupt"}}`;
 any other control request gets a `control_response` with `subtype: "error"` (not supported).
-Stdout: one JSON event per line, `system`/`init` (its `tools` include the MCP servers' tools,
-`mcp_servers` says which are `connected`), then `assistant` (text, thinking, `tool_use`),
-`user` (`tool_result`), and a `result` after each message. It runs until stdin closes.
+Stdout: one JSON event per line, `system`/`init` (its `tools` include the MCP servers' tools, each
+`mcp__<server>__<tool>`, and `mcp_servers` says which are `connected`), then `assistant` (text, thinking, `tool_use`),
+`user` (`tool_result`), and a `result` after each message. It runs until stdin closes. An MCP
+call's `tool_use` is named as in Claude Code, `mcp__<server>__<tool>`, with the tool's own
+arguments as `input`.
 
 A helper's steps (the `agent` tool: another of the user's models, or the same one, doing a job;
 several can run at once) come as `assistant` and `user` lines too, as Claude Code sends a

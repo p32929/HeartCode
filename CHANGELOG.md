@@ -2,6 +2,24 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.30 (2026-11-01)
+
+- Settings page: the sidebar is 7 items in 4 groups split by lines (Models · General, Notifications ·
+  Skills, MCP servers, System prompt · Advanced); merged pages have tabs (Your list / Providers,
+  Settings / Status bar, Logs / Files) and every old address still opens its tab. General is one
+  calm column of cards (permissions three across, colors four across, rows with the control on the
+  right), and voice input is a form (this machine or a provider, model, language) instead of JSON.
+  "Testing…" and warnings are amber, not the green that means "works".
+- Headless (`heart -p`) output keeps Claude Code's shape for MCP tools: the `init` event lists each
+  as `mcp__<server>__<tool>`, and an MCP call's `tool_use` is named so, with the tool's own
+  arguments (it went out as HeartCode's one `mcp` tool since 0.1.28, which programs reading the
+  stream, like Nibedita, don't know).
+- `--no-memory` now also keeps web pages out of the project (no `.heartcode/research/`), and helpers
+  follow it.
+- SKILL.md brought up to date: no helper step limit, how the model reaches MCP tools, a model with
+  room before summarizing, and what a run leaves (research, notes, the wrap-up) and the extra
+  requests it makes (the review).
+
 ## 0.1.29 (2026-11-01)
 
 - Telegram notifications: a message on your phone when a task finishes (the task, how long it took,
