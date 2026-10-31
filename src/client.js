@@ -143,7 +143,7 @@ export function fitFor(messages, can, model) {
 // Refusals a provider may make of one part of a request, learned when sending it without that
 // part works (then kept in the model's profile for a day): temperature, reasoning_effort, the
 // usage in a stream, the thinking sent back, the tools' full schemas, images.
-export const QUIRKS = ['noTemperature', 'noEffort', 'noStreamUsage', 'noReasoningBack', 'simpleSchemas', 'noImages']
+export const QUIRKS = ['noTemperature', 'noEffort', 'noStreamUsage', 'noReasoningBack', 'simpleSchemas', 'noImages', 'noParallel']
 
 export class Client {
   constructor({ baseUrl, apiKey, model, provider, timeout = 600_000 } = {}) {
@@ -496,6 +496,7 @@ export class Client {
     if (this.quirks.noTemperature) delete req.temperature
     if (this.effort && !this.quirks.noEffort) req.reasoning_effort = this.effort
     if (req.stream && !this.quirks.noStreamUsage) req.stream_options = { include_usage: true } // token counts for the status bar
+    if (req.tools?.length && !this.quirks.noParallel) req.parallel_tool_calls = true // several calls in one reply (llama.cpp's default is one)
     let res
     let sent
     let firstAt
@@ -553,11 +554,13 @@ export class Client {
       if (/temperature/i.test(said) && 'temperature' in req && !this.quirks.noTemperature) return without('noTemperature')
       if (/reasoning_effort/.test(said) && 'reasoning_effort' in req && !this.quirks.noEffort) return without('noEffort')
       if (/stream_options/.test(said) && req.stream_options && !this.quirks.noStreamUsage) return without('noStreamUsage')
+      if (/parallel_tool_calls/.test(said) && req.parallel_tool_calls && !this.quirks.noParallel) return without('noParallel')
       if (reasoningSent && /reasoning(?!_effort)/i.test(said)) return without('noReasoningBack')
       if (imagesSent && /image|vision|multimodal|modalit|content.{0,20}(type|part)/i.test(said)) return without('noImages')
       if (req.tools?.length && !this.quirks.simpleSchemas && /schema|function_declarations|parameters|additionalProperties|exclusiveM|minItems|unknown name|invalid.{0,40}(tool|function)|tools\[/i.test(said)) return without('simpleSchemas')
       if (imagesSent) return without('noImages')
       if (reasoningSent) return without('noReasoningBack')
+      if (req.parallel_tool_calls && !this.quirks.noParallel) return without('noParallel') // refused without naming it
       throw e
     }
     // Tokens the last request used (prompt + reply): what the status bar shows against the context size.
@@ -596,6 +599,16 @@ export class Client {
     let finishReason
     const calls = []
     let raw = '' // the stream as it came (its start), kept for a reply that turns out empty
+    // A reply going round (a small model repeating itself, which could fill the window): checked
+    // every 2000 characters of its thinking, its text and each call's arguments; cut where it began.
+    let looped = null
+    const checked = new Map()
+    const watch = (what, text) => {
+      if (looped || text.length - (checked.get(what) ?? 0) < 2000) return
+      checked.set(what, text.length)
+      const at = loopStart(text)
+      if (at >= 0) looped = { what, at, sample: text.slice(-200).replace(/\s+/g, ' ').trim().slice(0, 120) }
+    }
     const emit = (v) => {
       if (onToken && v.startsWith(emitted) && v.length > emitted.length) {
         onToken(v.slice(emitted.length))
@@ -650,6 +663,7 @@ export class Client {
         if (r) {
           reasoning += r
           onReasoning?.(r)
+          watch('reasoning', reasoning)
         }
         for (const tc of d.tool_calls ?? []) {
           const i = tc.index ?? (tc.id ? calls.length : Math.max(calls.length - 1, 0))
@@ -658,6 +672,7 @@ export class Client {
           if (tc.function?.name) call.function.name ||= tc.function.name
           if (tc.function?.arguments) call.function.arguments += tc.function.arguments
           onToolDelta?.(call.function.name, call.function.arguments)
+          watch(`call ${i}`, call.function.arguments)
         }
         if (d.content) {
           content += d.content
@@ -667,11 +682,23 @@ export class Client {
             thought = t
           }
           emit(visible(content, thinks))
+          watch('content', content)
         }
+        if (looped) break
+      }
+      if (looped) {
+        await reader.cancel().catch(() => {}) // the server stops generating
+        break
       }
     }
     clearTimeout(timer)
-    const result = done(content, reasoning, calls.filter(Boolean), usage, finishReason, thinks)
+    if (looped) {
+      log('reply', `${this.model}: went into a loop in its ${looped.what} (cut after ${looped.at} characters): "${looped.sample}"`)
+      if (looped.what === 'reasoning') reasoning = reasoning.slice(0, looped.at)
+      if (looped.what === 'content') content = content.slice(0, looped.at)
+    }
+    const result = done(content, reasoning, looped ? [] : calls.filter(Boolean), usage, looped ? 'loop' : finishReason, thinks) // a call cut short isn't made
+    if (looped) result.looped = looped.sample
     emit(result.content)
     if (!result.content.trim() && !result.toolCalls.length && !result.reasoning) {
       result.raw = raw // nothing read from it: what came, for the requests log
@@ -686,6 +713,21 @@ export class Client {
     if (d.reasoning_content) this.quirks.reasoningField = 'reasoning_content'
     else if (typeof d.reasoning === 'string' && d.reasoning) this.quirks.reasoningField = 'reasoning'
   }
+}
+
+// Where a text started going round: its newest 200 characters are already there 6+ times in its
+// last 12,000 (a phrase or a block of up to 2000 characters, repeated). -1: it isn't.
+export function loopStart(text) {
+  if (text.length < 2000) return -1
+  const probe = text.slice(-200)
+  const win = text.slice(-12_000)
+  let n = 0
+  let first = -1
+  for (let i = win.indexOf(probe); i !== -1; i = win.indexOf(probe, i + 1)) {
+    n++
+    if (first < 0) first = i
+  }
+  return n >= 6 ? text.length - win.length + first : -1
 }
 
 // A tool's arguments as the most limited providers take them (Gemini's function declarations):

@@ -104,14 +104,17 @@ export function setTheme(name = 'dark') {
 setTheme()
 
 // keybindings.json: { "ctrl+o": "cycle_permissions", "ctrl+g": "/toggle_thinking", "shift+tab": "none" }.
-// Actions: stop, cycle_permissions, newline, clear_input, scroll_up, scroll_down (a page),
+// Actions: stop, send_first, send_all, queue_mode, cycle_permissions, newline, clear_input, scroll_up, scroll_down (a page),
 // scroll_line_up, scroll_line_down (3 lines), voice, new_tab,
 // close_tab, next_tab, prev_tab, tab_1…tab_9, none (turns a
 // built-in key off); anything else is sent as typed (a /command or a message). Ctrl+C stays Ctrl+C.
-export const keyId = (key, s = '') => [key.ctrl && 'ctrl', key.meta && 'alt', key.shift && 'shift', key.name ?? s].filter(Boolean).join('+').toLowerCase()
-// Ctrl+R records; Ctrl+T, Ctrl+Q, Ctrl+N/P (or Ctrl+PgDn/PgUp), Alt+1…9: tabs; Shift+↑↓ and Alt+↑↓
+const CONTROL_KEYS = { '\x1c': 'ctrl+\\', '\x1d': 'ctrl+]', '\x1e': 'ctrl+^', '\x1f': 'ctrl+_' } // no name from readline
+export const keyId = (key, s = '') => CONTROL_KEYS[key.sequence ?? s] ?? [key.ctrl && 'ctrl', key.meta && 'alt', key.shift && 'shift', key.name ?? s].filter(Boolean).join('+').toLowerCase()
+// While it works, Enter queues a message; Ctrl+] stops the answer and sends the first queued one,
+// Ctrl+\ all of them (as one message); Ctrl+_ switches what goes when an answer is done (all or
+// the next one). /voice records (no key unless keybindings.json gives it one); Ctrl+T, Ctrl+Q, Ctrl+N/P (or Ctrl+PgDn/PgUp), Alt+1…9: tabs; Shift+↑↓ and Alt+↑↓
 // scroll the conversation (as PgUp/PgDn and the mouse wheel do). keybindings.json can move them.
-export const DEFAULT_KEYS = { 'ctrl+r': 'voice', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'ctrl+t': 'new_tab', 'ctrl+q': 'close_tab', 'ctrl+n': 'next_tab', 'ctrl+p': 'prev_tab', 'ctrl+pagedown': 'next_tab', 'ctrl+pageup': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
+export const DEFAULT_KEYS = { 'ctrl+]': 'send_first', 'ctrl+\\': 'send_all', 'ctrl+_': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'ctrl+t': 'new_tab', 'ctrl+q': 'close_tab', 'ctrl+n': 'next_tab', 'ctrl+p': 'prev_tab', 'ctrl+pagedown': 'next_tab', 'ctrl+pageup': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
 export function loadKeys(file = path.join(HOME, 'keybindings.json')) {
   let raw = {}
   try {
@@ -165,10 +168,13 @@ function sliceCols(text, from, to) {
 }
 const FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 
-// 75000 → "1m 15s"
+// 75000 → "1 minute 15 seconds"; the two biggest units: "5 hours 33 minutes", "2 days 3 hours"
 export function duration(ms) {
-  const secs = Math.floor(ms / 1000)
-  return secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`
+  const s = Math.max(0, Math.floor(ms / 1000))
+  const units = [['day', Math.floor(s / 86400)], ['hour', Math.floor(s / 3600) % 24], ['minute', Math.floor(s / 60) % 60], ['second', s % 60]]
+  const first = units.findIndex(([, n]) => n)
+  if (first < 0) return '0 seconds'
+  return units.slice(first, first + 2).filter(([, n]) => n).map(([u, n]) => `${n} ${u}${n === 1 ? '' : 's'}`).join(' ')
 }
 const WIDE = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]|\p{Emoji_Presentation}/u // ♥ © etc. are 1 cell; 😀 is 2
 
@@ -198,6 +204,7 @@ export function legacyKeys(text) {
     if (code === 127 || code === 8) return (alt ? '\x1b' : '') + (ctrl ? '\x17' : '\x7f')
     if (code < 32 || (code >= 0xe000 && code <= 0xf8ff) || code > 0x10ffff) return '' // keypad, F13+, …
     let ch = String.fromCodePoint(code)
+    if (ctrl && /^[-/]$/.test(ch)) return '\x1f' // Ctrl+- / Ctrl+/ (and with Shift: Ctrl+_), as terminals send them
     if (ctrl && /^[a-z@[\\\]^_ ]$/i.test(ch)) ch = String.fromCharCode(ch.toUpperCase().charCodeAt(0) & 0x1f)
     else if (shift) ch = ch.toUpperCase()
     return (alt ? '\x1b' : '') + ch
@@ -658,19 +665,19 @@ export class UI {
   // who: the model thinking, named over its thinking (helpers say their own: helperUI in agent.js)
   response(who) {
     const t0 = Date.now()
-    const secs = () => ((Date.now() - t0) / 1000).toFixed(1)
+    const secs = () => duration(Date.now() - t0)
     const write = (x) => this.write(x)
     let think = null
     let text = null
     let thought = false
     const summary = () => {
-      if (thought && !this.showThinking) this.print(c.faint(c.italic(`✻ ${who ? `${who} ` : ''}thought for ${secs()}s`)))
+      if (thought && !this.showThinking) this.print(c.faint(c.italic(`✻ ${who ? `${who} ` : ''}thought for ${secs()}`)))
     }
     return {
       think: (t) => {
         if (!t || text) return
         thought = true
-        if (!this.showThinking) return this.spinner(`thinking · ${secs()}s`)
+        if (!this.showThinking) return this.spinner(`thinking · ${secs()}`)
         if (!think) {
           this.gap()
           this.print(c.faint(c.italic(`✻ ${who ? `${who} is thinking` : 'Thinking'}…`)))
@@ -760,6 +767,7 @@ export class UI {
     if (!this.full) return
     if (b & 64) return (b & 0xc3) === 64 || (b & 0xc3) === 65 ? this.scrollBy(b & 1 ? -3 : 3) : undefined // 64 up, 65 down
     if ((b & 3) !== 0 && !up) return // the left button only (a release says 3 in some terminals)
+    if (!(b & 32) && !up && y <= 3 && this.onTabClick) return this.onTabClick(x - 1) // the tab bar's 3 rows
     const v = this.viewAt
     if (!v) return
     const r = Math.min(Math.max(y - 1 - v.first, 0), v.avail - 1) // a drag past the edge stops at it
@@ -886,6 +894,13 @@ export class UI {
       bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(this.#label())}${c.faint(extra)}`, cols))
     }
     if (this.scroll) bottom.push(c.dim(`  ↓ ${this.scroll} more lines below · scroll down, Shift+↓ or PgDn`))
+    if (this.ahead.length) {
+      const key = (k, d) => `${c.muted(k)} ${c.faint(d)}`
+      const sep = c.ghost(' · ')
+      bottom.push(fit(`  ${c.bright(`queued ${this.ahead.length}`)}${sep}${c.faint(`when done: ${this.queueMode === 'one' ? 'one by one' : 'all together'}`)}${sep}${[key('Ctrl+]', 'send first now'), key('Ctrl+\\', 'send all now'), key('Ctrl+_', 'change when done')].join(sep)}`, cols))
+      for (const [i, l] of this.ahead.slice(0, 5).entries()) bottom.push(fit(`  ${c.accent(`${i + 1}.`)} ${c.muted(l.replace(/\s+/g, ' '))}`, cols))
+      if (this.ahead.length > 5) bottom.push(c.faint(`  … ${this.ahead.length - 5} more`))
+    }
     if (this.noticeText) bottom.push(fit(`${c.warn('!')} ${c.muted(this.noticeText)}`, cols))
     if (menu.on) bottom.push(...this.#menuLines(cols))
     bottom.push(first ? note(first, '↑') : rule)
@@ -1037,8 +1052,8 @@ export class UI {
     }
   }
 
-  // Typing while HeartCode works: the text stays in the box; Enter sends it, to the running task
-  // (it reads it before its next step; takeAhead) or as the next message. Esc stops the task.
+  // Typing while HeartCode works: the text stays in the box; Enter queues it (shown above the
+  // input), sent when the answer is done, or at once with send_first / send_all. Esc stops the task.
   #typeAhead(s, key, write) {
     const rl = this.rl
     if (key.name === 'escape') return this.onEscape?.()
@@ -1049,10 +1064,7 @@ export class UI {
       rl.line = ''
       rl.cursor = 0
       if (/^\/btw\b/.test(line) && this.onBtw) this.onBtw(line.replace(/^\/btw\b/, '').trim()) // answered now, beside the task
-      else if (line) {
-        this.ahead.push(line)
-        this.print(`${c.faint(' ↳')} ${c.muted(line.split('\n')[0])} ${c.faint(this.isCommand(line) ? '(runs when this is done)' : '(goes to the model at its next step, or runs next)')}`)
-      }
+      else if (line) this.ahead.push(line)
       return this.render()
     }
     if (['up', 'down', 'tab'].includes(key.name) || key.name === 'paste-start' || key.name === 'paste-end') {
@@ -1098,6 +1110,16 @@ export class UI {
       case 'clear_input':
         this.clearInput()
         return this.refreshMenu()
+      case 'send_first':
+      case 'send_all':
+        if (!this.ahead.length) return this.notice('Nothing queued: while it works, type a message and press Enter', 2500)
+        this.sendNow = what === 'send_all' ? 'all' : 'first'
+        if (this.asking && !this.histOn) this.cancelAsk() // a question in the middle of the work: answered no
+        return this.onEscape?.() // stops the answer; the next prompt takes the queue (ask)
+      case 'queue_mode':
+        this.queueMode = this.queueMode === 'one' ? 'all' : 'one'
+        this.onQueueMode?.(this.queueMode)
+        return this.notice(`When an answer is done: ${this.queueMode === 'all' ? 'all queued messages go together' : 'the next queued message goes'}`, 2500)
       default:
         if (/^tab_\d$/.test(what)) return this.onTab?.(what)
         break
@@ -1110,7 +1132,7 @@ export class UI {
     }
     if (!this.asking) {
       this.ahead.push(what)
-      return this.print(`${c.faint(' ↳')} ${c.muted(what)} ${c.faint('(runs when this is done)')}`)
+      return this.render()
     }
     if (!this.histOn || m.pick) return // only at the main prompt, not in a question or picker
     rl.line = what
@@ -1119,7 +1141,7 @@ export class UI {
     write('\r', { name: 'return' })
   }
 
-  // Voice mode (/voice, Ctrl+R): Space to talk, Space again to pause (and again to go on), Enter
+  // Voice mode (/voice, or a key bound to voice): Space to talk, Space again to pause (and again to go on), Enter
   // (or the voice key) to finish, Esc to cancel. While you speak, what's been heard so far shows in
   // the input box (where the cursor was), redone about every second with the quickest model; a
   // stretch you pause or finish is done again with the best one. Returns the words, or null (Esc,
@@ -1211,13 +1233,6 @@ export class UI {
     this.notice(go && !text ? failed ?? 'heard nothing' : '', failed ? 8000 : 3000)
     if (keep) this.render()
     return text || null
-  }
-
-  // Messages typed while working that can go to the running task now (not commands); taken.
-  takeAhead() {
-    const out = this.ahead.filter((l) => !this.isCommand(l))
-    this.ahead = this.ahead.filter((l) => this.isCommand(l))
-    return out
   }
 
   #accept(it) {
@@ -1365,7 +1380,13 @@ export class UI {
     const rl = this.#rl()
     if (history) this.mainPrompt = prompt
     if (history && this.ahead.length) {
-      const l = this.ahead.shift()
+      // all: every queued message as one (commands stay, run after, one each); else the first one
+      const how = this.sendNow ?? (this.queueMode === 'one' ? 'first' : 'all')
+      this.sendNow = null
+      const msgs = this.ahead.filter((x) => !this.isCommand(x))
+      const together = how === 'all' && msgs.length > 1
+      const l = together ? msgs.join('\n\n') : this.ahead.shift()
+      if (together) this.ahead = this.ahead.filter((x) => this.isCommand(x))
       log('input', `${prompt.trim()} ${l} (typed while working)`)
       this.write(prompt.replace(/^ /, '') + c.bright(l) + '\n')
       return Promise.resolve(l)
@@ -1390,7 +1411,9 @@ export class UI {
     }
     rl.setPrompt(prompt)
     rl.prompt()
-    if (initial && rl.terminal) rl.write(initial)
+    // put in the box as it is: typed in (rl.write), each line break would be an Enter
+    if (initial && rl.terminal && this.full) [rl.line, rl.cursor] = [initial, initial.length]
+    else if (initial && rl.terminal) rl.write(initial.replace(/\n/g, ' '))
     if (this.menu.on) this.refreshMenu()
     else this.render()
     return new Promise((resolve) =>
@@ -1552,9 +1575,9 @@ export class UI {
     this.beforeRetry ??= typeof this.label === 'function' ? 'thinking' : this.label || 'thinking'
     const until = Date.now() + ms
     const why = shortError(err)
-    const secs = () => Math.max(0, Math.ceil((until - Date.now()) / 1000))
-    if (next) return this.spinner(() => `${c.yellow('⚠')} ${why} · trying ${next.provider} · ${next.model}${secs() ? ` in ${secs()}s (all failed once)` : ''} (attempt ${attempt})`)
-    this.spinner(() => `${c.yellow('⚠')} retrying in ${secs()}s (attempt ${attempt}) · ${why}`)
+    const left = () => Math.max(0, Math.ceil((until - Date.now()) / 1000)) * 1000
+    if (next) return this.spinner(() => `${c.yellow('⚠')} ${why} · trying ${next.provider} · ${next.model}${left() ? ` in ${duration(left())} (all failed once)` : ''} (attempt ${attempt})`)
+    this.spinner(() => `${c.yellow('⚠')} retrying in ${duration(left())} (attempt ${attempt}) · ${why}`)
   }
 
   stopSpin() {

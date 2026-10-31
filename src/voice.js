@@ -1,4 +1,4 @@
-// Voice input: /voice (or Ctrl+R), then Space to talk (and again to pause), Enter to finish, Esc to
+// Voice input: /voice, then Space to talk (and again to pause), Enter to finish, Esc to
 // cancel. What's said shows in the input box as it's said, and stays there to read over and send.
 // Recording: ffmpeg (macOS: the default microphone; Linux: PulseAudio, else ALSA). Speech to text:
 //   - on this machine with whisper.cpp's whisper-cli and a model already on disk (~/.whisper-models,

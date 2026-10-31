@@ -42,7 +42,7 @@ export class Tabs {
     tab.output = Object.assign(new EventEmitter(), { isTTY: true, write: (s) => (on() ? real.output.write(s) : true) })
     for (const k of ['columns', 'rows']) Object.defineProperty(tab.output, k, { get: () => real.output[k] })
     Object.defineProperty(tab.output, 'hidden', { get: () => !on() })
-    tab.hooks = { tabBar: (cols) => this.bar(cols), onTab: (what) => this.key(what) }
+    tab.hooks = { tabBar: (cols) => this.bar(cols), onTab: (what) => this.key(what), onTabClick: (col) => this.click(col) }
     this.list.push(tab)
     this.at = tab
     tab.id = this.made = (this.made ?? 0) + 1 // for its log file: tab-1.log… (its place in the bar can change)
@@ -96,6 +96,13 @@ export class Tabs {
     if (n) this.show(this.list[Number(n) - 1])
   }
 
+  // a click on the tab bar (a 0-based column): that tab
+  click(col) {
+    if (this.locked) return
+    const hit = this.spans?.find((s) => col >= s.from && col < s.to)
+    if (hit && hit.tab !== this.at) this.show(hit.tab)
+  }
+
   // working, waiting for an answer, or done since you last looked at it
   state(t) {
     const ui = t.ui
@@ -108,12 +115,14 @@ export class Tabs {
   // The tab bar, three rows: tabs drawn as tabs, the one on screen open onto it (its bottom
   // edge missing), the others closed off. Number, name, and what it's doing.
   //  ╭─────────────╮ ╭──────────────╮
-  //  │ 1 heart_cli │ │ 2 fix tests ●│  + Ctrl+T new tab
+  //  │ 1 heart_cli │ │ 2 fix tests ●│  Ctrl+T open a new tab
   // ─╯             ╰─┴──────────────┴──────────────────
   bar(cols = 100) {
     const mark = { '?': c.warn('?'), '●': c.brand('●'), '✓': c.ok('✓') }
     const room = Math.max(6, Math.floor((cols - 24) / this.list.length) - 7) // a name's cells, so they all fit
     let [top, mid, bottom] = [' ', ' ', c.ghost('─')]
+    let col = 1
+    this.spans = [] // the columns each tab takes, for a click (click)
     this.list.forEach((t, i) => {
       const on = t === this.at
       const s = this.state(t)
@@ -122,11 +131,13 @@ export class Tabs {
       const w = width(text)
       const line = on ? c.brand : c.ghost
       const label = ` ${on ? c.bright(c.bold(`${i + 1} ${name}`)) : c.muted(`${i + 1} ${name}`)}${s ? ' ' + mark[s] : ''} `
+      this.spans.push({ from: col, to: col + w + 2, tab: t })
+      col += w + 3
       top += line(`╭${'─'.repeat(w)}╮`) + ' '
       mid += line('│') + label + line('│') + ' '
       bottom += (on ? c.brand(`╯${' '.repeat(w)}╰`) : c.ghost(`┴${'─'.repeat(w)}┴`)) + c.ghost('─')
     })
-    const hint = this.list.length > 1 ? 'Ctrl+T new · Ctrl+Q close · Ctrl+N/P switch' : 'Ctrl+T new tab'
+    const hint = this.list.length > 1 ? 'Ctrl+T open a tab · Ctrl+Q close this one · Ctrl+N/P switch tabs' : 'Ctrl+T open a new tab'
     mid += ` ${c.faint(hint)}`
     bottom += c.ghost('─'.repeat(Math.max(0, cols - width(bottom.replace(/\x1b\[[0-9;]*m/g, '')))))
     return [top, mid, bottom]

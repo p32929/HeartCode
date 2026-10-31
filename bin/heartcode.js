@@ -101,7 +101,7 @@ const SECTIONS = [
   ]],
   ['settings', [
     ['/toggle_thinking', "show or collapse the model's thinking"],
-    ['/voice', 'say your message (or Ctrl+R): Space to talk, Enter to finish; it shows in the input box as you speak'],
+    ['/voice', 'say your message: Space to talk, Enter to finish; it shows in the input box as you speak'],
   ]],
   ['session', [
     ['/resume', 'continue an earlier session in this folder'],
@@ -587,7 +587,9 @@ class App {
     const rot = this.s?.client.rotation
     const now = this.inUse() // the model list's one in use; never one of a provider that's off
     if (!now) return c.dim('the providers of all your models are off · /settings to switch one on')
-    const parts = [`${c.brand('●')} ${c.muted(now.provider)} ${c.ghost('·')} ${c.info(now.model)}${rot ? c.faint(` ↻ ${rot.at + 1}/${rot.list.length}`) : ''}`]
+    // provider (providers on) · model (models in your list)
+    const on = Object.values(cfg.providers).filter((p) => !p.off).length
+    const parts = [`${c.brand('●')} ${c.muted(now.provider)} ${c.faint(`(${on})`)} ${c.ghost('·')} ${c.info(now.model)} ${c.faint(`(${this.myModels().length})`)}${rot ? c.faint(` ↻ ${rot.at + 1}/${rot.list.length}`) : ''}`]
     const key = `${now.provider}/${now.model}`
     if (this.profileKey !== key) [this.profileKey, this.profile] = [key, this.s?.profile ?? loadProfile(this.client(now.provider, now.model))]
     const profile = this.s?.profile ?? this.profile
@@ -1074,7 +1076,7 @@ async function getProfile(client, ui, force, signal, quiet = false) {
   const t0 = Date.now()
   const tested = await probe(client, (label) => ui.spinner(`testing: ${label}`), signal)
   ui.stopSpin()
-  ui.print(c.dim(`done in ${((Date.now() - t0) / 1000).toFixed(1)}s · saved to ${profilePath(client)}`))
+  ui.print(c.dim(`done in ${duration(Date.now() - t0)} · saved to ${profilePath(client)}`))
   return tested
 }
 
@@ -1394,7 +1396,7 @@ async function repl(app, f = {}) {
   const where = home && app.root.startsWith(home) ? '~' + app.root.slice(home.length) : app.root
   ui.header = (cols = 100) => [
     `${c.brand('♥')} ${c.bright(c.bold('HeartCode'))} ${c.faint(VERSION)}  ${c.muted(where.length > cols - 16 ? '…' + where.slice(-(cols - 17)) : where)}`,
-    [['/', 'commands'], ['@', 'files'], [NEWLINE_KEY, 'new line'], ['Esc', 'stop'], ['Shift+Tab', 'permissions'], ['Ctrl+R', 'voice']].map(([k, d]) => `${c.muted(k)} ${c.faint(d)}`).join(c.ghost(' · ')),
+    [['/', 'run a command'], ['@', 'attach a file'], [NEWLINE_KEY, 'add a new line'], ['Esc', 'stop'], ['Shift+Tab', 'change permissions']].map(([k, d]) => `${c.muted(k)} ${c.faint(d)}`).join(c.ghost(' · ')),
     '',
   ]
   if (!ui.full) ui.print(ui.header().join('\n'))
@@ -1574,6 +1576,11 @@ async function main() {
     // Everything is allowed unless the user chose otherwise (saved), or --ask for this run.
     ui.permission = f['dangerously-skip-permissions'] ? 'all' : f['permission-mode'] ? PERMISSION_MODES[f['permission-mode']] : f.ask ? 'ask' : f.yes ? 'all' : (cfg.permissions ?? 'all')
     if (!headless) {
+      ui.queueMode = cfg.queue ?? 'all'
+      ui.onQueueMode = (mode) => {
+        cfg.queue = mode
+        saveConfig(cfg)
+      }
       ui.onPermission = (mode) => {
         if (mode === 'plan') return // for this session only: HeartCode doesn't start in plan mode
         cfg.permissions = mode

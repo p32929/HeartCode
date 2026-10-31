@@ -4,12 +4,14 @@ import { log } from './log.js'
 import { prompt, userInstructions } from './prompts.js'
 import { newChat } from './sessions.js'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { est, Client, writtenBy, tokensOf, COMPACT_SHARE } from './client.js'
 import { runGuided } from './guided.js'
-import { TOOL_DEFS, PLAN_HIDDEN, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, OUTPUTS, imageUrl, MAX_IMAGE, failed } from './tools.js'
+import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, OUTPUTS, imageUrl, MAX_IMAGE, failed } from './tools.js'
+import { serversNote } from './lsp.js'
 import { loadHooks, runHooks } from './hooks.js'
 import { takeConfigErrors } from './config.js'
-import { c } from './ui.js'
+import { c, duration } from './ui.js'
 
 // Images for a helper (the agent tool's "images"), as data: URLs: image URLs (fetched), data: URLs,
 // or files: in the project, saved screenshots (OUTPUTS), or a path the user gave in a message.
@@ -412,10 +414,16 @@ const envLine = () => {
   return `${OS_NAMES[process.platform] ?? process.platform} (${process.platform} ${os.release()}, ${process.arch})${shell ? `, shell ${shell}` : ''}`
 }
 
+// The project root's entries, every one (names only), for the system prompt.
+const rootList = (root) => {
+  const v = folderView(root)
+  return v.error ? `(can't read it: ${v.error})` : v.entries.length ? v.entries.join(' · ') + (v.more ? ` · … ${v.more} more` : '') : '(empty)'
+}
+
 const SYSTEM = (s) => {
   const instructions = userInstructions(s.root)
   return [
-    prompt('agent/system', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), files: '', more: '', caller: Boolean(s.appendSystem) }),
+    prompt('agent/system', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), rootList: rootList(s.root), servers: serversNote(s.root), files: '', more: '', caller: Boolean(s.appendSystem) }),
     instructions && prompt('agent/instructions', { instructions }),
     s.memory && prompt('agent/memory', { tags: s.memory.tagSummary() || '(none yet)' }),
     s.strat.vision && prompt('agent/you-see'), // models that can see often say they can't
@@ -645,15 +653,20 @@ async function runNative(s, task, images, signal) {
   // the tools: built again each step (the model answering may change; client.js leaves them out for
   // one that can't call tools)
   const toolList = () => [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name) && !(planning && PLAN_HIDDEN.has(f.name)) && !(f.name === 'ask_user' && ui.noUser)).map((f) => ({ type: 'function', function: f }))
+  const guard = newGuard() // calls made again with nothing changed: the earlier result instead
   let lastCall = '' // the last call (tool and arguments), and how many times in a row
   let inRow = 0
   // A todo list left done from an earlier message is cleared; an unfinished one stays.
   if (!s.isSub && s.chat.todos?.every((t) => t.status === 'completed')) s.chat.todos = []
   s.todoTouched = false
+  s.task = task // the user's message, for the page review (lookAtUi)
+  s.uiTouched = new Set() // pages (and styles) written in this message: looked at before it ends
+  s.uiLooks = 0
   let nudged = 0 // reminders sent this message about open todo items or a Stop hook
 
   let empty = 0 // replies in a row with neither text nor tool calls
-  let stuck = null // a tool called the same way five times this message: stop
+  let looping = 0 // replies cut for going into a loop, this message
+  let stuck = null // why it's stopped: going round in circles this message
   let garbled = 0 // replies with a tool call written as text (template markup), this message
   let movedOn = 0 // models given up on for that, in this message
   let refitted = false // this step's conversation was just compacted for a smaller model the list moved on to
@@ -681,13 +694,6 @@ async function runNative(s, task, images, signal) {
           log('compact', `failed (${e.message}); trying again once it's ~${s.compactFailedAt} tokens`)
         },
       )
-    }
-    // what the user typed while it worked goes in before the next step (steering)
-    const added = step && !s.isSub ? (ui.takeAhead?.() ?? []) : []
-    if (added.length) {
-      for (const l of added) ui.print(`${c.magenta('♥')} ${c.bright(l)}`)
-      log('task', 'the user added while working:', added)
-      s.messages.push({ role: 'user', content: prompt('agent/user-added', { text: added.join('\n\n') }) })
     }
     // the model answering can change mid-message (your model list): the system prompt follows it
     const now = SYSTEM(s)
@@ -727,6 +733,17 @@ async function runNative(s, task, images, signal) {
       out.text(res.content)
     }
     out.end()
+    // the reply went round and round (client.js cut it): told so, and asked again
+    if (res.looped) {
+      if (++looping > 3) {
+        ui.warn(`stopped: ${client.model} keeps going into a loop`)
+        return finalAnswer(s, signal, 'its replies kept going into a loop')
+      }
+      ui.warn(`${client.model} went into a loop; cut, and asked again`)
+      if (res.content.trim()) s.messages.push({ role: 'assistant', content: res.content })
+      s.messages.push({ role: 'user', content: prompt('agent/looped', { sample: res.looped }) })
+      continue
+    }
     s.messages.push({ role: 'assistant', content: res.content || '', ...(res.toolCalls.length && { tool_calls: res.toolCalls }), ...(res.reasoning && res.toolCalls.length && { reasoning_content: res.reasoning }) }) // client.js sends it by the name the provider uses, or not at all
     s.counted = { tokens: client.lastTokens, upTo: s.messages.length } // the server's count: up to this reply (auto-compact)
     writtenBy.set(s.messages.at(-1), client.model) // its thinking goes back to this model only
@@ -774,6 +791,12 @@ async function runNative(s, task, images, signal) {
     }
     empty = 0
     if (!res.toolCalls.length) {
+      // a page it built or restyled: HeartCode opens it and shows it the result, to check and fix
+      const look = !s.isSub && (await lookAtUi(s, signal))
+      if (look) {
+        s.messages.push({ role: 'user', content: look })
+        continue
+      }
       const more = nudged < 3 && !s.isSub && (await notDone(s, signal, nudged > 0))
       if (!more) return res.content
       nudged++
@@ -797,6 +820,18 @@ async function runNative(s, task, images, signal) {
       ui.step('agent', clip([args.model && `${args.model}:`, args.description].filter(Boolean).join(' '), 80))
       together.set(call.id, runTool('agent', args, s, signal, call.id))
     }
+    // lookups in one reply (searches, pages, files) run at the same time; the same one twice, once
+    const early = new Map() // call id → { refused } or { running }
+    const bySig = new Map()
+    for (const call of res.toolCalls) {
+      const name = call.function.name
+      const args = argsOf(call)
+      if (!LOOKUPS.has(name) || !args || !allowed(s, name)) continue
+      const sig = `${name} ${JSON.stringify(args)}`
+      const refused = guard.before(name, args)
+      if (refused) early.set(call.id, { refused })
+      else early.set(call.id, { running: bySig.get(sig) ?? bySig.set(sig, runTool(name, args, s, signal, call.id)).get(sig) })
+    }
     for (const call of res.toolCalls) {
       const name = call.function.name
       const args = argsOf(call)
@@ -814,13 +849,17 @@ async function runNative(s, task, images, signal) {
                   ? ''
                   : (args.path ?? args.url ?? args.query ?? args.filter ?? args.name ?? '')
       if (name !== 'run_command' && !together.has(call.id)) ui.step(name, clip(detail, 80))
-      let out = together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal, call.id) : 'error: the tool arguments were not valid JSON'
+      const pre = early.get(call.id)
+      const refused = pre ? (pre.refused ?? null) : !together.has(call.id) && args && allowed(s, name) ? guard.before(name, args) : null
+      let out = refused ?? (pre ? await pre.running : together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal, call.id) : 'error: the tool arguments were not valid JSON')
+      if (!refused && args) out += guard.after(name, args, out)
+      if (guard.stuck) stuck ??= guard.stuck
       // the same call again and again in a row (a weak model going round): told at the third, stopped at the fifth
       const sig = `${name} ${call.function.arguments}`
       inRow = sig === lastCall ? inRow + 1 : 1
       lastCall = sig
       if (inRow >= 3) out += `\n\n${prompt('agent/repeating', { n: inRow })}`
-      if (inRow >= 5) stuck = name
+      if (inRow >= 5) stuck = `made the same ${name} call five times in a row`
       if (name === 'read_file' || name === 'search' || name === 'list_files' || name === 'web_fetch' || name === 'web_search') ui.result(`${out.split('\n').length} lines`)
       else if (name === 'agent' && !failed(out)) ui.result(`${s.ui.permission === 'plan' ? 'planned' : 'done'}: ${clip(out.split('\n').find((l) => l.trim()) ?? '', 100)}`)
       else if (failed(out)) ui.result(clip(out, 120))
@@ -832,8 +871,8 @@ async function runNative(s, task, images, signal) {
     }
     trimOldResults(s)
     if (stuck) {
-      ui.warn(`stopped: ${client.model} made the same ${stuck} call five times in a row`)
-      return finalAnswer(s, signal, `the same ${stuck} call five times`)
+      ui.warn(`stopped: ${client.model} ${stuck}`)
+      return finalAnswer(s, signal, stuck)
     }
     // screenshots from MCP tools: tool results are text only, so images follow as a message
     if (s.pendingImages?.length) {
@@ -841,6 +880,128 @@ async function runNative(s, task, images, signal) {
       s.pendingImages = []
     }
   }
+}
+
+// One message's calls, so a model going round in circles is caught even when the calls aren't in a
+// row or differ only a little: the same search or page again, the same command, read or search
+// again with nothing changed since (it gets the earlier result back instead), command after command
+// failing. No limit on how much it looks up: new searches and pages always run; only going round
+// (ten calls already made) stops it.
+// before: what to send back instead of running it (the earlier result), or null; after: a note for its result.
+const EDITS = new Set(['edit_file', 'write_file', 'append_file', 'apply_patch'])
+// Tools that only look (nothing changes): several in one reply run at the same time.
+const LOOKUPS = new Set(['web_search', 'web_fetch', 'read_file', 'search', 'list_files', 'find_command', 'lsp'])
+export function newGuard() {
+  const seen = new Map() // what a call is → { out, at }
+  let epoch = 0 // goes up with each change (an edit, a command that can change things)
+  let failing = 0
+  let repeats = 0
+  const g = { stuck: null }
+  const words = (q) => [...new Set(String(q ?? '').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])].sort().join(' ')
+  const keyOf = (name, a) => {
+    if (name === 'web_search') return `search: ${words(a.query)}`
+    if (name === 'web_fetch') return `page: ${String(a.url ?? '').toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/+$/, '')} @${a.start ?? 0}`
+    if (['run_command', 'read_file', 'search', 'list_files', 'find_command', 'lsp'].includes(name)) return `${name} ${JSON.stringify(a)} @${epoch}`
+    return null
+  }
+  g.before = (name, a) => {
+    const k = keyOf(name, a)
+    const was = k && seen.get(k)
+    // a command may be waited on (a server starting): the same one again after a while runs
+    if (!was || (name === 'run_command' && Date.now() - was.at > 20_000)) return null
+    repeats++
+    if (repeats >= 10) g.stuck = 'kept making calls it had already made (10 repeats)' // going round, not finding anything new
+    return prompt('agent/already-done', { result: was.out }) + (repeats >= 3 ? `\n\n${prompt('agent/circling')}` : '')
+  }
+  g.after = (name, a, out) => {
+    let note = ''
+    if (name === 'run_command') {
+      const code = Number(/^exit code (-?\d+)/.exec(out)?.[1] ?? 0)
+      failing = code ? failing + 1 : 0
+      if (failing >= 4) note += `\n\n${prompt('agent/failing-in-row', { n: failing })}`
+      if (failing >= 8) g.stuck = 'had eight commands in a row fail'
+      if (!readOnlyCommand(String(a.command ?? ''))) epoch++ // it may have changed things: what came before can be done again
+    }
+    if (EDITS.has(name) && !failed(out)) epoch++
+    const k = keyOf(name, a) // after the command's own change: the same again right away is the same
+    if (k) seen.set(k, { out: clip(String(out), 6000), at: Date.now() })
+    return note
+  }
+  return g
+}
+
+// The pages this message wrote or restyled (an .html written, or one using a .css written),
+// opened in the built-in browser (chrome-devtools): a screenshot at desktop width (the whole page)
+// and at phone width, given to the model to check against its brief and fix. Twice per message at
+// most; nothing when there's no browser. A model that can't see gets them described by one of
+// yours that can.
+async function lookAtUi(s, signal) {
+  if (!s.uiTouched?.size || s.uiLooks >= 2 || s.ui.permission === 'plan') return null
+  const browser = s.mcp?.get?.('chrome-devtools')
+  if (!browser) return null
+  const touched = [...s.uiTouched]
+  s.uiTouched.clear()
+  const styles = touched.filter((f) => /\.css$/i.test(f)).map((f) => path.basename(f))
+  const pages = touched.filter((f) => /\.html?$/i.test(f))
+  if (styles.length) {
+    for (const f of listFiles(s.root).filter((f) => /\.html?$/i.test(f))) {
+      try {
+        if (styles.some((c) => fs.readFileSync(path.join(s.root, f), 'utf8').includes(c))) pages.push(f)
+      } catch {}
+    }
+  }
+  const shown = [...new Set(pages)].filter((f) => fs.existsSync(path.join(s.root, f))).slice(0, 2)
+  if (!shown.length) return null
+  s.uiLooks++
+  const shots = []
+  const done = await s.mcpGate?.()
+  try {
+    for (const rel of shown) {
+      s.ui.spinner(`opening ${rel} in the browser`)
+      const opened = (await browser.call('new_page', { url: pathToFileURL(path.join(s.root, rel)).href }, signal)).content?.map((p) => p.text ?? '').join('\n') ?? ''
+      const id = Number(/(\d+):[^\n]*\[selected\]/.exec(opened)?.[1]) || undefined // newer versions number the pages
+      const page = id ? { pageId: id } : {}
+      for (const [width, height, fullPage] of [[1280, 900, true], [390, 844, false]]) {
+        await browser.call('resize_page', { ...page, width, height }, signal)
+        const r = await browser.call('take_screenshot', { ...page, ...(fullPage && { fullPage }) }, signal)
+        const img = r.content?.find((p) => p.type === 'image' && p.data)
+        if (img) shots.push({ label: `${rel} at ${width} px wide${fullPage ? ' (the whole page)' : ''}`, url: `data:${img.mimeType ?? 'image/png'};base64,${img.data}` })
+      }
+      if (id) await browser.call('close_page', page, signal).catch(() => {})
+    }
+  } catch (e) {
+    if (signal?.aborted) throw e
+    log('look', `couldn't look at ${shown.join(', ')}: ${e.message}`)
+  } finally {
+    done?.()
+    s.ui.stopSpin()
+  }
+  if (!shots.length) return null
+  log('look', shots.map((x) => x.label))
+  // reviewed in a request of its own (the screenshots and the user's request, nothing else): a model
+  // checking its own work in its own conversation tends to call it fine
+  const self = { provider: s.client.provider, model: s.client.model, images: s.strat.vision }
+  const reviewers = [...(self.images ? [self] : []), ...(s.team?.() ?? []).filter((t) => t.images && !(t.provider === self.provider && t.model === self.model))]
+  const ask = prompt('agent/ui-review', { task: s.task ?? '', shots: shots.map((x, i) => `${i + 1}. ${x.label}`).join('\n') })
+  let found = ''
+  for (const t of reviewers) {
+    s.ui.spinner(`${t.model} is reviewing ${shown.join(', ')}`)
+    try {
+      const { client } = t === self ? { client: s.client } : await s.engineFor(t)
+      found = (await client.chat({ messages: [{ role: 'user', content: [{ type: 'text', text: ask }, ...shots.map((x) => ({ type: 'image_url', image_url: { url: x.url } }))] }] }, { signal })).content.trim()
+      if (found) break
+    } catch (e) {
+      if (signal?.aborted) throw e
+      log('look', `${t.model} couldn't review: ${e.message}`)
+    }
+  }
+  s.ui.stopSpin()
+  if (!found) return null
+  const none = /^\W*none\W*$/i.test(found) || !/\d+[.)]\s/.test(found)
+  s.ui.step('look', `${shown.join(', ')} at desktop and phone width: ${none ? 'nothing to fix' : `${found.match(/^\s*\d+[.)]\s/gm)?.length ?? 'some'} things to fix`}`)
+  log('look', found)
+  if (none) return null
+  return prompt('agent/look-at-ui', { files: shown.join(', '), problems: found })
 }
 
 // The model says it's done: is it? Not while its todo list (from this message) has open items, or
@@ -870,8 +1031,7 @@ function helperUI(ui, label) {
       text() {},
       end() {
         if (!thought.trim()) return
-        const secs = ((Date.now() - t0) / 1000).toFixed(1)
-        ui.print(c.faint(c.italic(`  ✻ ${label} thought for ${secs}s`)) + (ui.showThinking ? `\n${c.think(c.italic(thought.trim().replace(/^/gm, '    ')))}` : ''))
+        ui.print(c.faint(c.italic(`  ✻ ${label} thought for ${duration(Date.now() - t0)}`)) + (ui.showThinking ? `\n${c.think(c.italic(thought.trim().replace(/^/gm, '    ')))}` : ''))
       },
     }
   }

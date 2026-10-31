@@ -15,7 +15,7 @@ import { webFetch, webSearch } from './web.js'
 import { runHooks } from './hooks.js'
 import { parsePatch, applyChunks } from './patch.js'
 import { formatFile } from './format.js'
-import { diagnose } from './lsp.js'
+import { diagnose, lspTool, findCommand } from './lsp.js'
 
 const IGNORE = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage', '.venv', 'venv', '__pycache__', 'target', '.cache', '.DS_Store'])
 
@@ -42,13 +42,26 @@ export function saveOutput(chatId, name, data, ext = 'txt') {
 export function resolveIn(root, p) {
   const clean = String(p ?? '').trim().replace(/^["'`]+|["'`]+$/g, '')
   if (!clean) throw new Error('no path given')
-  let abs = path.resolve(root, clean)
+  const bare = root.replace(/^[\\/]+/, '') // the project's own path, its leading "/" left out by a sloppy copy
+  let abs = clean === bare || clean.startsWith(bare + '/') ? path.join(root, clean.slice(bare.length)) : path.resolve(root, clean)
   if (abs.startsWith(OUTPUTS + path.sep)) return abs // a saved tool output
   // "num.js:" or "num.js," from a sloppy model: the file without the stray mark, if that one exists
   const trimmed = path.resolve(root, clean.replace(/[:;,.]+$/, ''))
   if (trimmed !== abs && !fs.existsSync(abs) && fs.existsSync(trimmed)) abs = trimmed
-  if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error(`${clean} is outside the project; use a path relative to the project folder`)
+  if (abs !== root && !abs.startsWith(root + path.sep)) abs = intoProject(root, clean) ?? abs
+  if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error(`${clean} is outside the project; use a path relative to the project folder (${root}), like "index.html" or "src/app.js"`)
   return abs
+}
+
+// A small model's mangled copy of the project's long path, meant inside it: any path with the
+// project folder's name in it ("/Users-me-…/myapp/index.html"): what comes after that name.
+// null: no such reading.
+function intoProject(root, p) {
+  const slash = p.replace(/\\/g, '/')
+  const name = path.basename(root)
+  const parts = slash.split('/')
+  const at = parts.lastIndexOf(name)
+  return at >= 0 ? path.resolve(root, parts.slice(at + 1).join('/') || '.') : null
 }
 
 // Project files a message names: by its path, or by a file name only one file in the project has
@@ -97,6 +110,33 @@ export function listFiles(root, limit = 2000) {
   }
   walk(root)
   return files.sort()
+}
+
+// One folder's entries (the project root: ''), all of them: folders end in "/", what .gitignore
+// leaves out says "(ignored)". Names only. At most `limit`.
+export function folderView(root, rel = '', limit = 200) {
+  const abs = resolveIn(root, rel || '.')
+  let entries
+  try {
+    entries = fs.readdirSync(abs, { withFileTypes: true })
+  } catch (e) {
+    return { error: e.code === 'ENOENT' ? `no folder ${rel}` : e.code === 'ENOTDIR' ? `${rel} is a file, not a folder` : e.message }
+  }
+  let ignored = null // the entries .gitignore leaves out ("node_modules/", "dist/", ".env")
+  try {
+    const out = execFileSync('git', ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory', '--', abs], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 << 20 })
+    ignored = new Set(out.split('\0').filter(Boolean).map((f) => f.replace(/\/$/, '')))
+  } catch {}
+  const here = path.relative(root, abs)
+  const names = entries
+    .map((e) => ({ name: e.name, dir: e.isDirectory() || (e.isSymbolicLink() && fs.statSync(path.join(abs, e.name), { throwIfNoEntry: false })?.isDirectory()) }))
+    .sort((a, b) => b.dir - a.dir || a.name.localeCompare(b.name))
+  const shown = names.slice(0, limit).map(({ name, dir }) => {
+    const p = path.join(here, name).split(path.sep).join('/')
+    const off = ignored ? ignored.has(p) : IGNORE.has(name)
+    return `${name}${dir ? '/' : ''}${off && name !== '.git' ? ' (ignored)' : ''}`
+  })
+  return { entries: shown, more: Math.max(0, names.length - limit) }
 }
 
 const isBinary = (buf) => buf.subarray(0, 8000).includes(0)
@@ -285,6 +325,7 @@ export async function proposeWrite(s, rel, old, next) {
   else {
     fs.mkdirSync(path.dirname(abs), { recursive: true })
     fs.writeFileSync(abs, next)
+    if (/\.(html?|css)$/i.test(rel)) (s.uiTouched ??= new Set()).add(rel) // looked at in a browser when the model says it's done (agent.js)
   }
   const add = ops.filter(([t]) => t === '+').length
   const del = ops.filter(([t]) => t === '-').length
@@ -441,7 +482,9 @@ const obj = (properties, required = []) => ({ type: 'object', properties, requir
 export const TOOL_DEFS = [
   { name: 'read_file', description: prompt('agent/tool-read_file'), parameters: obj({ path: str, start_line: int, end_line: int }, ['path']) },
   { name: 'search', description: prompt('agent/tool-search'), parameters: obj({ query: str, path: str }, ['query']) },
-  { name: 'list_files', description: prompt('agent/tool-list_files'), parameters: obj({ filter: str }) },
+  { name: 'list_files', description: prompt('agent/tool-list_files'), parameters: obj({ path: str, filter: str }) },
+  { name: 'find_command', description: prompt('agent/tool-find_command'), parameters: obj({ names: { type: 'array', items: str } }, ['names']) },
+  { name: 'lsp', description: prompt('agent/tool-lsp'), parameters: obj({ server: str, language: str, action: { type: 'string', enum: ['definition', 'references', 'hover', 'errors'] }, file: str, line: int, column: int, name: str }, ['server', 'language', 'action', 'file']) },
   // One edit per call: a list of edits per call measured 2–6 malformed calls per benchmark run vs 0.
   { name: 'edit_file', description: prompt('agent/tool-edit_file'), parameters: obj({ path: str, search: str, replace: str }, ['path', 'search', 'replace']) },
   { name: 'write_file', description: prompt('agent/tool-write_file'), parameters: obj({ path: str, content: str, append: { type: 'boolean' } }, ['path', 'content']) },
@@ -455,7 +498,15 @@ export const TOOL_DEFS = [
 // Plan mode (permission "plan"): looking around is fine, changing things isn't. Edits are refused,
 // and a command runs only when it only reads (else it's refused, not asked about).
 export const PLAN_HIDDEN = new Set(['edit_file', 'write_file', 'apply_patch'])
-const READ_ONLY = /^(ls|cat|head|tail|wc|grep|egrep|rg|find|fd|tree|pwd|file|stat|du|df|which|type|echo|date|printenv|diff|cmp|sort|uniq|cut|jq|nl|basename|dirname|realpath|readlink|uname|whoami|(node|npm|python3?|go|cargo) --version|npm (ls|list|view|outdated)|git (status|log|diff|show|ls-files|blame|grep|describe|shortlog|rev-parse|config --get)|git (branch|tag|remote)( -[avlr]+| --list| -v)*$)\b/
+const READ_ONLY = /^(cd|ls|cat|head|tail|wc|grep|egrep|rg|find|fd|tree|pwd|file|stat|du|df|which|type|echo|date|printenv|diff|cmp|sort|uniq|cut|jq|nl|basename|dirname|realpath|readlink|uname|whoami|(node|npm|python3?|go|cargo) --version|npm (ls|list|view|outdated)|git (status|log|diff|show|ls-files|blame|grep|describe|shortlog|rev-parse|config --get)|git (branch|tag|remote)( -[avlr]+| --list| -v)*$)\b/
+// A command that went into a folder outside the project (a small model copying the project's long
+// path wrong, then lost in what it finds there): told where the project is.
+function outsideNote(root, cmd) {
+  const dirs = [...cmd.matchAll(/(?:^|&&|;|\|\|)\s*cd\s+("[^"]+"|'[^']+'|\S+)/g)].map((m) => m[1].replace(/^["']|["']$/g, '').replace(/^~(?=\/|$)/, os.homedir()))
+  const out = dirs.map((d) => path.resolve(root, d)).find((d) => d !== root && !d.startsWith(root + path.sep))
+  return out ? `\n\n${prompt('agent/outside-project', { dir: out, root })}` : ''
+}
+
 export function readOnlyCommand(cmd) {
   const c = String(cmd).trim()
   if (/[>`]|\$\(|\b(sudo|rm|mv|cp|tee|chmod|chown|dd|truncate|mkdir|touch|ln)\b|-delete\b|-exec|-ok\b|sed\s+-i|\bsort\b.*\s-o/.test(c)) return false // writes, or runs something else
@@ -940,11 +991,22 @@ async function tool(name, args, s, signal, id) {
       case 'read_file':
         return IMAGE.test(String(args.path ?? '')) ? readImage(s, args.path) : readFileTool(root, args.path, args.start_line, args.end_line)
       case 'list_files': {
+        if (args.path !== undefined && args.path !== '' && !args.filter) {
+          const v = folderView(root, String(args.path))
+          return v.error ? `error: ${v.error}` : v.entries.join('\n') + (v.more ? `\n… ${v.more} more` : '') || '(empty folder)'
+        }
         const files = listFiles(root).filter((f) => !args.filter || f.includes(args.filter))
         return files.slice(0, 500).join('\n') + (files.length > 500 ? `\n… ${files.length - 500} more` : '') || 'no files'
       }
       case 'search':
         return searchFiles(root, String(args.query ?? ''), args.path)
+      case 'find_command': {
+        const names = (Array.isArray(args.names) ? args.names : String(args.names ?? args.name ?? '').split(/[\s,]+/)).map(String).filter(Boolean)
+        if (!names.length) return 'error: find_command needs "names": the commands to look for, like ["rg", "pnpm"]'
+        return names.map((n) => `${n}: ${findCommand(root, n) ?? 'not installed'}`).join('\n')
+      }
+      case 'lsp':
+        return await lspTool(s, args, signal)
       case 'edit_file':
         return await editFiles(s, args)
       case 'write_file':
@@ -963,7 +1025,7 @@ async function tool(name, args, s, signal, id) {
       }
       case 'run_command':
         if (/^\s*apply_patch\b[\s\S]*\*\*\* Begin Patch/.test(String(args.command ?? ''))) return await applyPatch(s, args.command) // apply_patch <<'EOF' … as Codex runs it
-        return await runConfirmed(s, String(args.command ?? ''), signal)
+        return (await runConfirmed(s, String(args.command ?? ''), signal)) + outsideNote(root, String(args.command ?? ''))
       case 'apply_patch':
         return await applyPatch(s, args.input ?? args.patch ?? args.command ?? '')
       case 'mcp':

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 export const HOME = process.env.HEART_HOME || path.join(os.homedir(), '.heart')
 export const CONFIG_FILE = path.join(HOME, 'config.json')
 
-const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director', 'theme', 'format', 'lsp', 'voice', 'rotation', 'log', 'logRequests', 'logDetail', 'logDays']
+const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director', 'theme', 'format', 'lsp', 'voice', 'queue', 'rotation', 'log', 'logRequests', 'logDetail', 'logDays']
 const LOCAL_NAMES = { 11434: 'ollama', 1234: 'lmstudio', 8080: 'llamacpp' }
 
 export function readJson(file, fallback) {

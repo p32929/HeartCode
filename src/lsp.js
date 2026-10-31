@@ -1,34 +1,44 @@
-// After HeartCode writes a file, a language server for it (when one is installed) says what is now
-// wrong, and the errors go back to the model with the edit's result: it fixes a type error right
-// away instead of finding it at the end, or never.
-// Servers, each found on PATH or in the project's node_modules/.bin: typescript-language-server,
-// gopls, pyright (or basedpyright), rust-analyzer, clangd, dart. One per language and project,
-// started at the first edit and kept until HeartCode exits. The settings page (General → Features) turns it off.
+// Language servers, chosen by the model: it works out which server a language needs (from the
+// project, the web), checks it's installed (find_command), and uses it with the lsp tool, naming
+// the command: definitions, references, hover, errors. HeartCode starts each server once per
+// project and command, and keeps it until it exits. A server the model used for a kind of file is
+// remembered for the project (~/.heart/lsp.json): after each edit of such a file its errors go
+// back to the model with the edit's result. The settings page (General → Features) turns that off.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { pathToFileURL } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 import { log } from './log.js'
+import { HOME, readJson, writeJson } from './config.js'
 
-const SERVERS = [
-  { name: 'typescript', ext: /\.(m?[jt]sx?|cjs|cts)$/, cmds: [['typescript-language-server', '--stdio']], id: (f) => (/\.[cm]?tsx?$/.test(f) ? (f.endsWith('x') ? 'typescriptreact' : 'typescript') : f.endsWith('x') ? 'javascriptreact' : 'javascript') },
-  { name: 'go', ext: /\.go$/, cmds: [['gopls']], id: () => 'go' },
-  { name: 'python', ext: /\.pyi?$/, cmds: [['pyright-langserver', '--stdio'], ['basedpyright-langserver', '--stdio']], id: () => 'python' },
-  { name: 'rust', ext: /\.rs$/, cmds: [['rust-analyzer']], id: () => 'rust' },
-  { name: 'c', ext: /\.(c|cc|cpp|cxx|h|hh|hpp)$/, cmds: [['clangd']], id: (f) => (/\.(c|h)$/.test(f) ? 'c' : 'cpp') },
-  { name: 'dart', ext: /\.dart$/, cmds: [['dart', 'language-server', '--client-id', 'heartcode']], id: () => 'dart' },
-]
+const SERVERS_FILE = path.join(HOME, 'lsp.json') // { [project root]: { [".ts"]: { server, language } } }
 
-// Extra servers for tests or the user: { name, ext, cmds, id }; tried before the built-in ones.
-export const extraServers = []
-
-function find(root, cmd) {
-  const local = path.join(root, 'node_modules', '.bin', cmd)
-  if (fs.existsSync(local)) return local
-  if (path.isAbsolute(cmd)) return fs.existsSync(cmd) ? cmd : null
-  for (const d of (process.env.PATH ?? '').split(path.delimiter)) if (d && fs.existsSync(path.join(d, cmd))) return path.join(d, cmd)
+// Where a command is: the project's node_modules/.bin, else PATH (with Windows' extensions). null: not installed.
+export function findCommand(root, cmd) {
+  const exts = process.platform === 'win32' ? ['', ...(process.env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').split(';').map((e) => e.toLowerCase())] : ['']
+  const runnable = (p) => {
+    try {
+      const st = fs.statSync(p)
+      if (!st.isFile()) return false
+      if (process.platform !== 'win32') fs.accessSync(p, fs.constants.X_OK)
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (cmd.includes('/') || cmd.includes(path.sep)) {
+    const abs = path.resolve(root, cmd)
+    return runnable(abs) ? abs : null
+  }
+  for (const d of [path.join(root, 'node_modules', '.bin'), ...(process.env.PATH ?? '').split(path.delimiter)]) {
+    if (!d) continue
+    for (const e of exts) if (runnable(path.join(d, cmd + e))) return path.join(d, cmd + e)
+  }
   return null
 }
+
+// "typescript-language-server --stdio" → its words ("…" and '…' keep spaces)
+const words = (cmd) => [...String(cmd).matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3])
 
 class Server {
   constructor(spec, argv, root) {
@@ -66,7 +76,13 @@ class Server {
       rootPath: root,
       workspaceFolders: [{ uri, name: path.basename(root) }],
       capabilities: {
-        textDocument: { synchronization: { didSave: true }, publishDiagnostics: { versionSupport: true } },
+        textDocument: {
+          synchronization: { didSave: true },
+          publishDiagnostics: { versionSupport: true },
+          definition: { linkSupport: true },
+          references: {},
+          hover: { contentFormat: ['plaintext', 'markdown'] },
+        },
         workspace: { configuration: true, workspaceFolders: true },
         window: { workDoneProgress: true },
       },
@@ -118,6 +134,18 @@ class Server {
     }
   }
 
+  // The file as it is on disk, opened (or brought up to date) in the server.
+  async open(abs) {
+    await this.ready
+    const uri = pathToFileURL(abs).href
+    const text = fs.readFileSync(abs, 'utf8')
+    const version = (this.docs.get(uri) ?? 0) + 1
+    if (version === 1) this.notify('textDocument/didOpen', { textDocument: { uri, languageId: this.spec.language, version, text } })
+    else this.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text }] })
+    this.docs.set(uri, version)
+    return { uri, text }
+  }
+
   // The file's errors after this change: waits for the server's report on it, then for it to go
   // quiet (servers often send a fast report, then a full one).
   async check(abs, text, wait) {
@@ -125,7 +153,7 @@ class Server {
     const uri = pathToFileURL(abs).href
     const since = Date.now()
     const version = (this.docs.get(uri) ?? 0) + 1
-    if (version === 1) this.notify('textDocument/didOpen', { textDocument: { uri, languageId: this.spec.id(abs), version, text } })
+    if (version === 1) this.notify('textDocument/didOpen', { textDocument: { uri, languageId: this.spec.language, version, text } })
     else this.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text }] })
     this.notify('textDocument/didSave', { textDocument: { uri }, text })
     this.docs.set(uri, version)
@@ -153,37 +181,128 @@ class Server {
   }
 }
 
-const running = new Map() // root + server name → Server, or null (none installed / it died)
+const running = new Map() // root + command → Server
 process.on('exit', () => {
-  for (const s of running.values()) s?.stop()
+  for (const sv of running.values()) sv.stop()
 })
 
-function serverFor(root, rel) {
-  const spec = [...extraServers, ...SERVERS].find((x) => x.ext.test(rel))
-  if (!spec) return null
-  const key = `${root}\0${spec.name}`
-  if (!running.has(key)) {
-    let server = null
-    for (const [cmd, ...args] of spec.cmds) {
-      const bin = find(root, cmd)
-      if (!bin) continue
-      server = new Server(spec, [bin, ...args], root)
-      log('lsp', `started ${spec.name}: ${bin} ${args.join(' ')}`)
-      break
-    }
-    running.set(key, server)
-  }
-  const s = running.get(key)
-  return s && !s.dead ? s : null
+// The server for this command in this project: running already, or started now. A string: why not.
+function serverFor(root, server, language) {
+  const argv = words(server)
+  if (!argv.length) return 'no command given'
+  const key = `${root}\0${argv.join(' ')}`
+  const had = running.get(key)
+  if (had && !had.dead) return had
+  const bin = findCommand(root, argv[0])
+  if (!bin) return `${argv[0]} is not installed`
+  const sv = new Server({ name: argv[0], language }, [bin, ...argv.slice(1)], root)
+  log('lsp', `started ${bin} ${argv.slice(1).join(' ')} (${language})`)
+  running.set(key, sv)
+  return sv
 }
 
-const SEVERITY = { 1: 'error', 2: 'warning' }
+// The servers this project's kinds of file use: { ".ts": { server, language } }
+export const knownServers = (root) => readJson(SERVERS_FILE, {})[root] ?? {}
+function remember(root, ext, server, language) {
+  const all = readJson(SERVERS_FILE, {})
+  const mine = (all[root] ??= {})
+  if (mine[ext]?.server === server && mine[ext]?.language === language) return
+  mine[ext] = { server, language }
+  writeJson(SERVERS_FILE, all)
+}
 
-// What's wrong in the file now, as a note for the model, or '' (no server, nothing wrong, or no
-// report in time). Errors only, unless there are none: the last check's errors are fixed is said too.
+// For the system prompt: "typescript-language-server --stdio (typescript) for .ts, .tsx"
+export function serversNote(root) {
+  const by = new Map()
+  for (const [ext, { server, language }] of Object.entries(knownServers(root))) {
+    const k = `${server} (${language})`
+    by.set(k, [...(by.get(k) ?? []), ext])
+  }
+  return [...by].map(([k, exts]) => `${k} for ${exts.join(', ')}`).join('; ')
+}
+
+// Waits for a promise, at most ms; the server is unref'd, so this keeps HeartCode up meanwhile.
+async function within(p, ms, what) {
+  let t
+  const keep = setInterval(() => {}, 1000)
+  try {
+    return await Promise.race([p, new Promise((_, reject) => (t = setTimeout(() => reject(new Error(`no answer to ${what} in ${ms / 1000} seconds`)), ms)))])
+  } finally {
+    clearTimeout(t)
+    clearInterval(keep)
+  }
+}
+
+const SEVERITY = { 1: 'error', 2: 'warning', 3: 'info', 4: 'hint' }
+const at = (root, uri, range) => {
+  const abs = uri.startsWith('file:') ? fileURLToPath(uri) : uri
+  const rel = path.relative(root, abs)
+  let text = ''
+  try {
+    text = fs.readFileSync(abs, 'utf8').split('\n')[range.start.line]?.trim().slice(0, 160) ?? ''
+  } catch {}
+  return `${rel.startsWith('..') ? abs : rel}:${range.start.line + 1}:${range.start.character + 1}${text ? `: ${text}` : ''}`
+}
+const hoverText = (c) => (Array.isArray(c) ? c.map(hoverText).join('\n') : typeof c === 'string' ? c : (c?.value ?? ''))
+
+// The lsp tool: { server: the command, language: its language id, action, file, line, column | name }
+export async function lspTool(s, args, signal) {
+  const { root } = s
+  const server = String(args.server ?? '').trim()
+  const language = String(args.language ?? '').trim()
+  const action = String(args.action ?? '')
+  if (!server || !language) return 'error: lsp needs "server" (the command that starts it, like "typescript-language-server --stdio") and "language" (its language id, like "typescript")'
+  if (!['definition', 'references', 'hover', 'errors'].includes(action)) return 'error: "action" is one of definition, references, hover, errors'
+  if (!args.file) return 'error: lsp needs "file"'
+  const abs = path.resolve(root, String(args.file))
+  if (!fs.existsSync(abs)) return `error: no file ${args.file}`
+  const sv = serverFor(root, server, language)
+  if (typeof sv === 'string') return `error: ${sv}. Check with find_command; install it, or use search and read_file instead.`
+  const first = !sv.used
+  const ms = first ? 60_000 : 20_000 // the first request waits for the server to start and index
+  try {
+    if (action === 'errors') {
+      const list = await within(sv.check(abs, fs.readFileSync(abs, 'utf8'), first ? 30_000 : 6000), ms, 'the errors check')
+      sv.used = true
+      remember(root, path.extname(abs), server, language)
+      if (!list) return `${server} sent no report on ${args.file} in time.`
+      if (!list.length) return `${server}: no problems in ${args.file}.`
+      return list.slice(0, 30).map((d) => `${at(root, pathToFileURL(abs).href, d.range)} — ${SEVERITY[d.severity ?? 1]}: ${String(d.message).split('\n')[0]}`).join('\n') + (list.length > 30 ? `\n… ${list.length - 30} more` : '')
+    }
+    const { uri, text } = await within(sv.open(abs), ms, 'opening the file')
+    const lines = text.split('\n')
+    const line = Math.max(1, Math.min(Number(args.line) || 1, lines.length)) - 1
+    let col = Number(args.column) > 0 ? Number(args.column) - 1 : -1
+    if (col < 0 && args.name) {
+      const m = new RegExp(`\\b${String(args.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).exec(lines[line])
+      if (!m) return `error: "${args.name}" isn't on line ${line + 1} of ${args.file}: ${lines[line].trim().slice(0, 120)}`
+      col = m.index
+    }
+    if (col < 0) col = Math.max(0, lines[line].search(/\S/))
+    const pos = { textDocument: { uri }, position: { line, character: col } }
+    const method = { definition: 'textDocument/definition', references: 'textDocument/references', hover: 'textDocument/hover' }[action]
+    const res = await within(sv.request(method, action === 'references' ? { ...pos, context: { includeDeclaration: true } } : pos), ms, action)
+    sv.used = true
+    remember(root, path.extname(abs), server, language)
+    if (action === 'hover') return hoverText(res?.contents).trim().slice(0, 3000) || 'nothing to show there'
+    const locs = (Array.isArray(res) ? res : res ? [res] : []).map((l) => ({ uri: l.uri ?? l.targetUri, range: l.range ?? l.targetSelectionRange ?? l.targetRange }))
+    if (!locs.length) return `no ${action === 'definition' ? 'definition' : 'references'} found for line ${line + 1}, column ${col + 1} (${lines[line].trim().slice(0, 80)})`
+    return locs.slice(0, 50).map((l) => at(root, l.uri, l.range)).join('\n') + (locs.length > 50 ? `\n… ${locs.length - 50} more` : '')
+  } catch (e) {
+    if (signal?.aborted) throw Object.assign(new Error('stopped'), { name: 'AbortError' })
+    log('lsp', `${server}: ${e.message}`)
+    return `error: ${server}: ${e.message}. Use search and read_file instead, or another server.`
+  }
+}
+
+// After an edit: what's wrong in the file now, as a note for the model, or '' (no server used for
+// this kind of file in the project, nothing wrong, or no report in time). Errors only, unless there
+// are none: the last check's errors are fixed is said too.
 export async function diagnose(s, rel, text) {
-  const server = serverFor(s.root, rel)
-  if (!server) return ''
+  const known = knownServers(s.root)[path.extname(rel)]
+  if (!known) return ''
+  const server = serverFor(s.root, known.server, known.language)
+  if (typeof server === 'string') return ''
   const abs = path.join(s.root, rel)
   let list
   const keep = setInterval(() => {}, 1000) // the server is unref'd: this keeps HeartCode up while it answers

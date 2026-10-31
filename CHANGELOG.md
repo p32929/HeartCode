@@ -2,6 +2,56 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.22 (2026-10-31)
+
+- Times are written out: "responding 5 hours 33 minutes", "took 1 minute 25 seconds", "retrying in
+  10 seconds", "thought for 12 seconds", "resumed … 3 hours ago" (the two biggest units).
+- Ctrl+R no longer starts voice: /voice does (keybindings.json can still give it a key).
+- Click a tab to go to it.
+- /rewind puts a message of several lines back in the input box whole (only its last line came back).
+- The key hints say what a key does: "Shift+Tab change permissions", "Ctrl+T open a new tab".
+- Finding its way in a project, in this order: the model sees every entry of the project root
+  (names only; what .gitignore leaves out is marked), then goes folder by folder (list_files with
+  a path) and searches; a language server only when the task needs code followed across files.
+- Language servers are the model's choice, for any language: it finds out which one fits, checks
+  it's installed, and uses it with the new lsp tool (definition, references, hover, errors).
+  HeartCode remembers it for the project, and checks each edit of such files with it. No built-in
+  list any more.
+- find_command: the model checks whether a command is installed before it relies on it (instant,
+  runs nothing).
+- Building a UI: the model researches the best real examples of that exact kind of screen and
+  the current UI library for the stack, writes a design brief and its own checklist from them,
+  builds with the library, then looks at screenshots (desktop and phone) and fixes what's off. A
+  model that can't see has one of your models that can check them.
+- The status bar says how many providers are on and how many models are in your list:
+  "local (2) · qwen3 (3)".
+- A queue for messages typed while it works: Enter adds one (shown above the input, numbered).
+  When the answer is done they go all together, as one message, or one by one: Ctrl+_ switches
+  (saved). Ctrl+] stops the answer and sends the first one now, Ctrl+\ sends them all now, as one
+  message (one request). The model no longer gets them in the middle of an answer.
+- Web search asks several engines at once and puts their results together: public SearXNG
+  instances (from searx.space; five at a time, the next five when none answers well, pages 2–3
+  when the first has few good results), Mwmbl, DuckDuckGo, and for coding questions Stack Overflow,
+  npm and GitHub. Each result is ranked by the query's words in it (rare words count more) and by
+  how many engines found it, and says where it came from. Searching fails only when every engine
+  does; then the model is told search can't be reached, instead of "try other words" again and again.
+- What the model makes: stability and UI/UX come first.
+- A page it builds or restyles is opened in the built-in browser when it says it's done: a model
+  that can see reviews the screenshots (desktop and phone width) in a request of its own and lists
+  what's wrong, and the model fixes it (twice per message at most).
+- A reply that goes into a loop (the same text over and over) is cut, and the model asked again.
+- A path the model copied wrong (the project's long path without its first "/", or with folder
+  names run together) is read as the project path it meant; a command that went outside the
+  project says where the project is.
+- Searches, page reads and file reads asked for in one reply run at the same time, and servers are
+  asked for several calls per reply (parallel_tool_calls). The model is told to look things up
+  together, and to get everything a task needs before doing it, as much as it takes.
+- A search, page, read or command made again in the same message, with nothing changed since,
+  isn't run again: the model gets the earlier result. Ten such repeats stop the message; four
+  failing commands in a row get a "rethink this" note.
+- The model researches the kind of thing it's asked to make, not the names in the request, and
+  installs only what its plan needs, after making sure it's the real one.
+
 ## 0.1.21 (2026-10-31)
 
 - How long HeartCode took to answer: the spinner counts "responding 45s" while it works, and when
