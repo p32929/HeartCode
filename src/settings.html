@@ -177,6 +177,21 @@
   .mono { font-family: var(--mono); font-size: 12.5px; }
   .muted { color: var(--muted); }
   .tag { display: inline-block; white-space: nowrap; font-size: 11px; font-weight: 600; line-height: 18px; padding: 0 7px; border-radius: 6px; background: var(--hover); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .tag.ok { background: var(--ok-soft); color: var(--ok); }
+  .tag.need { background: rgba(217, 164, 6, .14); color: #caa106; }
+  /* External tools / capabilities */
+  .cap { padding: 13px 0; border-bottom: 1px solid var(--line); }
+  .cap:first-child { padding-top: 2px; }
+  .cap:last-child { border-bottom: 0; padding-bottom: 2px; }
+  .cap-h { display: flex; align-items: center; gap: 8px; }
+  .cap-h b { font-weight: 600; }
+  .cap-h .tag { margin-left: auto; }
+  .cap-mark { width: 18px; text-align: center; font-weight: 700; color: var(--ok); flex: none; }
+  .cap.cap-off .cap-mark { color: var(--faint); }
+  .cap.cap-off .cap-h b, .cap.cap-off .cap-what { color: var(--faint); } /* grayed out until it's set up */
+  .cap-what { color: var(--muted); font-size: 12.5px; margin: 4px 0 0 26px; text-wrap: pretty; }
+  .cap-need { font-size: 12.5px; margin: 7px 0 0 26px; padding: 8px 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-s); }
+  .cap-need b { color: var(--muted); }
   .tag.brand { background: var(--accent-soft); color: var(--accent); }
   .tag.ok { background: var(--ok-soft); color: var(--ok); }
   .tag.err { background: var(--err-soft); color: var(--err); }
@@ -497,6 +512,48 @@
     .md.fill .detail > .card > textarea.editor { min-height: 260px; }
     .prov-head, .prov-body { padding-left: 14px; padding-right: 14px; }
   }
+  /* Status-bar editor */
+  .sb-wrap { display: flex; flex-direction: column; gap: 18px; max-width: 940px; }
+  .sb-onoff { padding-top: 0; padding-bottom: 16px; cursor: default; }
+  .sb-onoff #sb-switch { display: inline-flex; align-items: center; flex: none; } /* so the switch inside is a flex item and gets its width/height */
+  .sb-cardhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+  .sb-cardhead .sub { margin-bottom: 0; }
+  .sb-cardhead button { flex: none; }
+  .sb-hint { font-size: 11px; color: var(--faint); margin-bottom: 7px; text-transform: uppercase; letter-spacing: .04em; }
+  .sb-preview { background: #0c0d10; color: #ececf0; border: 1px solid var(--line-strong); border-radius: var(--radius-s); padding: 11px 13px; font-family: var(--mono); font-size: 13px; line-height: 1.75; overflow-x: auto; white-space: pre; }
+  .sb-preview .sb-row { display: flex; }
+  .sb-preview .sb-grow { flex: 1; }
+  .sb-preview .sb-sep { color: #4b4e57; }
+  .sb-preview .sb-empty { color: #6d717c; font-style: italic; }
+  .sb-lines { display: flex; flex-direction: column; gap: 10px; }
+  .sb-line { display: flex; gap: 8px; align-items: stretch; }
+  .sb-line .sb-no { width: 16px; flex: none; color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; display: flex; align-items: center; justify-content: center; }
+  .sb-zone { flex: 1; min-width: 0; min-height: 44px; border: 1px dashed var(--line-strong); border-radius: var(--radius-s); padding: 8px 9px; background: var(--panel2); display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; transition: background .12s, border-color .12s; }
+  .sb-zone .sb-ztag { width: 100%; font-size: 10.5px; color: var(--faint); margin-bottom: 1px; text-transform: uppercase; letter-spacing: .05em; }
+  .sb-zone .sb-drop { color: var(--faint); font-size: 12px; font-style: italic; padding: 2px 1px; }
+  .sb-zone.sb-over { border-color: var(--accent); border-style: solid; background: var(--accent-soft); }
+  .sb-line .sb-del { flex: none; width: 30px; align-self: stretch; border: 1px solid transparent; background: none; color: var(--faint); cursor: pointer; border-radius: var(--radius-s); font-size: 14px; }
+  .sb-line .sb-del:hover { background: var(--err-soft); color: var(--err); }
+  .sb-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 6px 4px 10px; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 999px; font-size: 12.5px; font-weight: 500; cursor: grab; user-select: none; box-shadow: var(--shadow); }
+  .sb-chip:active { cursor: grabbing; }
+  .sb-chip.sb-dragging { opacity: .4; }
+  .sb-chip .sb-x { border: none; background: none; color: var(--faint); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; border-radius: 50%; }
+  .sb-chip .sb-x:hover { color: var(--err); background: var(--err-soft); }
+  .sb-palette { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sb-palette .sb-chip { background: var(--panel2); padding: 5px 11px; }
+  .sb-palette .sb-chip.sb-used { opacity: .4; cursor: not-allowed; }
+  #sb-editor.sb-off { opacity: .55; } /* off: dimmed as a hint, but still editable so turning it back on keeps the layout */
+  /* Import dialog */
+  #imp { width: 560px; max-width: calc(100vw - 32px); }
+  .imp-list { max-height: 56vh; overflow: auto; margin-top: 4px; }
+  .imp-group { margin-bottom: 14px; }
+  .imp-gh { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 6px; }
+  .imp-gh label { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+  .imp-row { display: flex; align-items: baseline; gap: 10px; padding: 7px 8px; border-radius: var(--radius-s); cursor: pointer; }
+  .imp-row:hover { background: var(--hover); }
+  .imp-row input { margin: 0; flex: none; align-self: center; }
+  .imp-row .imp-label { font-weight: 500; font-family: var(--mono); font-size: 12.5px; flex: none; }
+  .imp-row .imp-desc { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -507,6 +564,7 @@
       <a href="#providers" data-page="providers"><span class="ic">◉</span> Providers &amp; models <span class="count" id="n-providers"></span></a>
       <a href="#models" data-page="models"><span class="ic">☰</span> Your models <span class="count" id="n-mine"></span></a>
       <a href="#general" data-page="general"><span class="ic">⚙</span> General</a>
+      <a href="#statusbar" data-page="statusbar"><span class="ic">▭</span> Status bar</a>
       <a href="#logging" data-page="logging"><span class="ic">▤</span> Logging <span class="count" id="n-failed"></span></a>
       <a href="#prompts" data-page="prompts"><span class="ic">✎</span> System prompt</a>
       <a href="#mcp" data-page="mcp"><span class="ic">⧉</span> MCP servers <span class="count" id="n-mcp"></span></a>
@@ -633,6 +691,39 @@
             <textarea id="v-text" spellcheck="false" rows="3" placeholder="(whisper-cli on this machine)"></textarea>
             <div class="actions"><button class="primary" id="v-save">Save voice</button></div>
           </div>
+          <div class="card">
+            <h2>External tools</h2>
+            <p class="sub">Some features need a tool or service on your machine. Ready ones are ticked; the rest show what to install.</p>
+            <div id="g-caps"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Status bar: visual drag-and-drop editor -->
+    <section class="page" id="page-statusbar">
+      <div class="head"><div><h1>Status bar</h1><p class="lead">The line(s) at the bottom of HeartCode. Drag items into each line, or onto the right to push them to the edge. Saved for next time; a running HeartCode updates right away.</p></div></div>
+      <div class="sb-wrap">
+        <div class="card">
+          <label class="opt sb-onoff">
+            <div class="t"><b>Show the status bar</b><span>Turn the whole thing on or off.</span></div>
+            <span id="sb-switch"></span>
+          </label>
+          <div class="sb-hint">Live preview</div>
+          <div class="sb-preview" id="sb-preview"></div>
+        </div>
+        <div class="card" id="sb-editor">
+          <div class="sb-cardhead">
+            <div><h2>Lines</h2><p class="sub">Drag an item from the palette into <b>Left</b> or <b>Right</b>. Drag chips to reorder or move between lines; the × removes one.</p></div>
+            <button id="sb-reset">Reset to default</button>
+          </div>
+          <div id="sb-lines"></div>
+          <div class="actions"><button id="sb-addline">+ Add a line</button></div>
+        </div>
+        <div class="card">
+          <h2>Items</h2>
+          <p class="sub">Drag any of these into a line above. Each one appears once it's placed.</p>
+          <div class="sb-palette" id="sb-palette"></div>
         </div>
       </div>
     </section>
@@ -657,7 +748,15 @@
 
     <!-- Skills -->
     <section class="page" id="page-skills">
-      <div class="head"><div><h1>Skills</h1><p class="lead">Ready-made prompts. You type one as <span class="mono">/name</span>, or the model uses it when it fits.</p></div><button class="primary" id="k-new">+ New skill</button></div>
+      <div class="head"><div><h1>Skills</h1><p class="lead">Ready-made prompts. You type one as <span class="mono">/skill:name</span>, or the model uses it when it fits.</p></div><div class="head-actions"><button id="k-import">Import from other tools</button><button class="primary" id="k-new">+ New skill</button></div></div>
+      <div class="card" id="k-install-card">
+        <h2>Install from GitHub or a URL</h2>
+        <p class="sub">A GitHub repo (<span class="mono">owner/repo</span> or its link) or a link to a <span class="mono">SKILL.md</span>. Same as <span class="mono">/install_skill</span> in HeartCode; installed for every project.</p>
+        <div class="row">
+          <div class="grow"><input type="text" id="k-url" placeholder="owner/repo   or   https://github.com/owner/repo" spellcheck="false"></div>
+          <button class="primary" id="k-install">Install</button>
+        </div>
+      </div>
       <div class="md">
         <div class="list"><div class="items" id="k-items"></div></div>
         <div class="detail" id="k-detail"></div>
@@ -718,6 +817,12 @@
   <div class="actions"><button id="c-cancel">Cancel</button><button class="primary" id="c-add">Add server</button></div>
 </dialog>
 <dialog id="k-form" aria-labelledby="k-title"></dialog>
+<dialog id="imp" aria-labelledby="imp-title">
+  <h2 id="imp-title">Import from other coding tools</h2>
+  <p class="sub">Skills, commands, MCP servers, instructions and memory found in Claude Code, Cursor, Gemini CLI and Codex. Tick what to bring into HeartCode — nothing already here is overwritten.</p>
+  <div id="imp-list" class="imp-list"></div>
+  <div class="actions"><span class="spacer"></span><button id="imp-cancel" type="button">Cancel</button><button class="primary" id="imp-go" type="button">Import selected</button></div>
+</dialog>
 <dialog id="gone" aria-labelledby="gone-title">
   <h2 id="gone-title">Disconnected</h2>
   <p class="sub">HeartCode's settings page was turned off, so nothing here can be changed or saved now.</p>
@@ -847,6 +952,7 @@ const DOING = {
   '/api/provider/list': 'Saving the model list setting',
   '/api/provider/on': 'Switching the provider',
   '/api/order': 'Saving your models',
+  '/api/mcp/login': 'Signing in — your browser will open',
   '/api/models-dev': null, // its own strip
 }
 let acting = 0
@@ -904,7 +1010,7 @@ addEventListener('scroll', drawVirtual, { capture: true, passive: true }) // the
 addEventListener('resize', drawVirtual)
 
 // pages: one at a time, from the address (#providers…)
-const PAGES = ['providers', 'models', 'general', 'logging', 'prompts', 'mcp', 'skills', 'files']
+const PAGES = ['providers', 'models', 'general', 'statusbar', 'logging', 'prompts', 'mcp', 'skills', 'files']
 const page = () => (PAGES.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'providers')
 function showPage() {
   for (const p of PAGES) $('page-' + p).classList.toggle('on', p === page())
@@ -1946,6 +2052,11 @@ function drawGeneral(s) {
     h('div', { className: 't' }, h('b', { textContent: TOGGLE_INFO[k] ?? k }), h('span', { textContent: d[0].toUpperCase() + d.slice(1) })),
     sw({ checked: s.settings[k], onchange: (e) => act('/api/setting', { name: k, value: e.target.checked }, `${TOGGLE_INFO[k] ?? k}: ${e.target.checked ? 'on' : 'off'}`) }))))
   if (document.activeElement !== $('v-text')) $('v-text').value = s.voice
+  put($('g-caps'), ...(s.capabilities || []).map((c) =>
+    h('div', { className: 'cap' + (c.ok ? '' : ' cap-off') },
+      h('div', { className: 'cap-h' }, h('span', { className: 'cap-mark', textContent: c.ok ? '✓' : '✗' }), h('b', { textContent: c.name }), h('span', { className: c.ok ? 'tag ok' : 'tag need', textContent: c.ok ? 'ready' : 'needs setup' })),
+      h('div', { className: 'cap-what', textContent: c.what }),
+      c.ok ? null : h('div', { className: 'cap-need' }, h('b', {}, 'Install: '), c.need))))
 }
 $('g-effort').onchange = (e) => act('/api/setting', { name: 'effort', value: e.target.value }, 'effort saved')
 $('g-context').onchange = (e) => act('/api/setting', { name: 'context', value: e.target.value.trim() ? Number(e.target.value) : null }, 'context window saved')
@@ -2116,9 +2227,11 @@ $('c-add').onclick = async () => {
 $('c-open').onclick = () => ($('c-form').showModal(), $('c-name').focus())
 $('c-cancel').onclick = () => $('c-form').close()
 function drawMcp(s) {
-  put($('c-list'), h('h2', { textContent: 'Servers' }), h('p', { className: 'sub', textContent: 'Built in, and yours. Switch one off to keep it without using it.' }),
+  const authTag = (a) => (a === 'in' ? h('span', { className: 'tag ok', textContent: 'signed in' }) : h('span', { className: 'tag need', textContent: 'sign-in needed' }))
+  put($('c-list'), h('h2', { textContent: 'Servers' }), h('p', { className: 'sub', textContent: 'Built in, and yours. Remote ones (a URL) may need signing in; local ones don\'t. Switch one off to keep it without using it.' }),
     s.mcp.length ? s.mcp.map((m) => h('div', { className: 'opt' },
-      h('div', { className: 't' }, h('b', {}, m.name, ' ', h('span', { className: 'tag', textContent: m.from })), m.description ? h('span', { textContent: m.description }) : null, h('div', { className: 'mono muted', style: 'word-break:break-all;margin-top:3px', textContent: m.what })),
+      h('div', { className: 't' }, h('b', {}, m.name, ' ', h('span', { className: 'tag', textContent: m.from }), m.remote ? authTag(m.auth) : null), m.description ? h('span', { textContent: m.description }) : null, h('div', { className: 'mono muted', style: 'word-break:break-all;margin-top:3px', textContent: m.what })),
+      m.remote ? h('button', { className: 'small', textContent: m.auth === 'in' ? 'Sign in again' : 'Sign in', onclick: () => act('/api/mcp/login', { name: m.name }, `signed in to ${m.name}`) }) : null,
       m.from === 'yours' ? h('button', { className: 'small danger', textContent: 'Remove', onclick: () => confirm(`Remove the MCP server ${m.name}?`) && act('/api/mcp/remove', { name: m.name }, `removed ${m.name}`) }) : null,
       sw({ checked: m.on, 'aria-label': `${m.name} on`, onchange: (e) => act('/api/mcp/toggle', { name: m.name, on: e.target.checked }, `${m.name}: ${e.target.checked ? 'on' : 'off'}`) }))) : h('div', { className: 'empty', textContent: 'No MCP servers.' }))
   const f = s.files.find((x) => x.name === 'mcp.json')
@@ -2128,7 +2241,7 @@ function drawMcp(s) {
 }
 
 // --- skills: a form (name, who uses it, what it's for, the prompt); SKILL.md is made from it ---
-const USES = [['both', 'You and the model', 'type /name, or the model uses it when it fits'], ['me', 'Only you', 'only when you type /name'], ['model', 'Only the model', "when it fits; you don't type it"]]
+const USES = [['both', 'You and the model', 'type /skill:name, or the model uses it when it fits'], ['me', 'Only you', 'only when you type /skill:name'], ['model', 'Only the model', "when it fits; you don't type it"]]
 function parseSkill(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text)
   const out = { description: '', use: 'both', extra: [], body: (m ? m[2] : text).replace(/^\s*\n/, '') }
@@ -2169,30 +2282,84 @@ function skillForm(id, start, { isNew, readOnly }) {
   const uses = h('div', { className: 'choices' }, USES.map(([v, t, sub]) => h('label', { className: 'choice' + (d.use === v ? ' on' : '') },
     h('input', { type: 'radio', name: `use-${id}`, checked: d.use === v, disabled: readOnly, onchange: () => ((d.use = v), touch(), uses.querySelectorAll('.choice').forEach((c) => c.classList.toggle('on', c.querySelector('input').checked))) }),
     h('b', { textContent: t }), h('span', { textContent: sub }))))
-  const body = grow(h('textarea', { className: 'editor', spellcheck: false, readOnly, value: d.body, placeholder: 'What the model should do. $ARGUMENTS is what you type after /name: "/review the login page" gives "the login page".', oninput: (e) => ((d.body = e.target.value), touch()) }), 220)
+  const body = grow(h('textarea', { className: 'editor', spellcheck: false, readOnly, value: d.body, placeholder: 'What the model should do. $ARGUMENTS is what you type after /skill:name: "/skill:review the login page" gives "the login page".', oninput: (e) => ((d.body = e.target.value), touch()) }), 220)
   return { d, el: [
     h('div', { className: 'row' },
-      isNew ? h('div', { className: 'grow' }, h('label', { className: 'f', textContent: "Name: you'll type /name" }), field('name', { placeholder: 'review' })) : null,
+      isNew ? h('div', { className: 'grow' }, h('label', { className: 'f', textContent: "Name: you'll type /skill:name" }), field('name', { placeholder: 'review' })) : null,
       h('div', { className: 'grow', style: 'flex:3' }, h('label', { className: 'f', textContent: 'What it does (the model reads this to know when to use it)' }), field('description', { placeholder: 'Reviews the changes for bugs and unclear code' }))),
     h('label', { className: 'f', textContent: 'Who uses it' }), uses,
     h('label', { className: 'f', textContent: 'The prompt' }), body,
   ] }
 }
+// Import from other coding CLIs (/import): list what was found, grouped with checkboxes, then run the picks.
+async function openImport() {
+  let r
+  try {
+    r = await api('/api/imports', {})
+  } catch (e) {
+    return toast(e.message, true)
+  }
+  const items = r.items || []
+  if (!items.length) return toast('Nothing found in Claude Code, Cursor, Gemini CLI or Codex on this machine')
+  const byGroup = {}
+  for (const it of items) (byGroup[it.group] ??= []).push(it)
+  put($('imp-list'), ...Object.entries(byGroup).map(([g, its]) =>
+    h('div', { className: 'imp-group' },
+      h('div', { className: 'imp-gh' }, h('label', {}, h('input', { type: 'checkbox', onchange: (e) => its.forEach((it) => ($('imp-cb-' + it.id).checked = e.target.checked)) }), ' ', g + ` (${its.length})`)),
+      ...its.map((it) => h('label', { className: 'imp-row' }, h('input', { type: 'checkbox', id: 'imp-cb-' + it.id, value: it.id }), h('span', { className: 'imp-label', textContent: it.label }), h('span', { className: 'imp-desc', textContent: it.desc || '' }))))))
+  $('imp-cancel').onclick = () => $('imp').close()
+  $('imp-go').onclick = async () => {
+    const ids = [...$('imp-list').querySelectorAll('input[type=checkbox][id^="imp-cb-"]:checked')].map((c) => Number(c.value))
+    if (!ids.length) return toast('Nothing ticked', true)
+    job('import', { where: ['page'], what: 'Importing', detail: `${ids.length} item${ids.length === 1 ? '' : 's'}` })
+    try {
+      const res = await api('/api/imports/run', { ids })
+      $('imp').close()
+      const ok = (res.results || []).filter((x) => x.ok).length
+      toast(`Imported ${ok} of ${ids.length}`)
+      render(res)
+    } catch (e) {
+      toast(e.message, true)
+    } finally {
+      job('import')
+    }
+  }
+  $('imp').showModal()
+}
+
 function drawSkills(s) {
   const mine = s.skills.filter((k) => k.mine)
   const theirs = s.skills.filter((k) => !k.mine)
-  const item = (k) => ({ id: k.name, title: '/' + k.name, sub: k.description, k })
+  const item = (k) => ({ id: k.name, title: '/skill:' + k.name, sub: k.description, k })
+  const install = async () => {
+    const url = $('k-url').value.trim()
+    if (!url) return toast('Enter a GitHub repo or a SKILL.md URL', true)
+    job('kinstall', { where: ['page'], what: 'Installing the skill', detail: url })
+    try {
+      const r = await api('/api/skill/install', { url })
+      $('k-url').value = ''
+      toast(r.message || 'installed')
+      render(r)
+    } catch (e) {
+      toast(e.message, true)
+    } finally {
+      job('kinstall')
+    }
+  }
+  $('k-install').onclick = install
+  $('k-url').onkeydown = (e) => e.key === 'Enter' && install()
+  $('k-import').onclick = openImport
   masterDetail('skills', $('k-items'), $('k-detail'), [{ title: mine.length && theirs.length ? 'Yours' : '', items: mine.map(item) }, { title: 'From projects', items: theirs.map(item) }], (x) => {
-    if (!x) return h('div', { className: 'card' }, h('h2', { textContent: 'No skills yet' }), h('p', { className: 'sub', textContent: 'A skill is a prompt you use again and again, like "review this" or "write the release notes". Make one with + New skill, or bring them from Claude Code and others with /import in HeartCode.' }))
+    if (!x) return h('div', { className: 'card' }, h('h2', { textContent: 'No skills yet' }), h('p', { className: 'sub', textContent: 'A skill is a prompt you use again and again, like "review this" or "write the release notes". Make one with + New skill, install one from GitHub above, or bring them from Claude Code and others with /import in HeartCode.' }))
     const k = x.k
     const f = skillForm(k.name, parseSkill(k.text), { readOnly: !k.mine })
     return h('div', { className: 'card' },
-      h('div', { className: 'row', style: 'justify-content:space-between;align-items:center' }, h('h2', { style: 'margin:0', className: 'mono', textContent: '/' + k.name }), k.mine ? null : h('span', { className: 'tag', textContent: 'from a project: read only' })),
+      h('div', { className: 'row', style: 'justify-content:space-between;align-items:center' }, h('h2', { style: 'margin:0', className: 'mono', textContent: '/skill:' + k.name }), k.mine ? null : h('span', { className: 'tag', textContent: 'from a project: read only' })),
       f.el,
       k.mine ? h('div', { className: 'actions' },
-        h('button', { className: 'primary', textContent: 'Save', onclick: () => saveItem('skills', k.name, '/api/skill', { name: k.name, was: k.name, text: skillText(f.d) }, `saved /${k.name}`) }),
+        h('button', { className: 'primary', textContent: 'Save', onclick: () => saveItem('skills', k.name, '/api/skill', { name: k.name, was: k.name, text: skillText(f.d) }, `saved /skill:${k.name}`) }),
         h('span', { className: 'spacer' }),
-        h('button', { className: 'danger', textContent: 'Delete', onclick: () => confirm(`Delete the skill /${k.name}?`) && saveItem('skills', k.name, '/api/skill/delete', { name: k.name }, `deleted /${k.name}`) })) : null)
+        h('button', { className: 'danger', textContent: 'Delete', onclick: () => confirm(`Delete the skill /skill:${k.name}?`) && saveItem('skills', k.name, '/api/skill/delete', { name: k.name }, `deleted /skill:${k.name}`) })) : null)
   })
   $('n-skills').textContent = s.skills.length || ''
 }
@@ -2212,6 +2379,115 @@ function drawFiles(s) {
       ta,
       h('div', { className: 'actions' }, h('button', { className: 'primary', textContent: `Save ${f.name}`, onclick: () => saveItem('files', f.name, '/api/file', { name: f.name, text: ta.value }, ta.value.trim() ? `saved ${f.name}` : `${f.name} deleted`) })))
   })
+}
+
+// ---- Status bar: visual drag-and-drop editor ----
+let SB_ITEMS = [] // [{ id, label, sample }] from the server
+let sbOn = true // the bar shown at all
+let sbLines = [] // [{ left:[id…], right:[id…] }]
+let sbDrag = null // the chip being dragged: { id, from: 'palette' | { line, side, idx } }
+let sbSaveTimer = null
+const SB_DEFAULT = () => [
+  { left: ['provider', 'model'], right: ['mode', 'thinking', 'images'] },
+  { left: ['ctx', 'tps', 'autocompact'], right: ['permissions', 'worktree', 'cost'] },
+]
+const sbLabel = (id) => (SB_ITEMS.find((i) => i.id === id) || {}).label || id
+const sbSample = (id) => (SB_ITEMS.find((i) => i.id === id) || {}).sample || id
+const sbUsed = () => new Set(sbLines.flatMap((l) => [...l.left, ...l.right]))
+
+function drawStatusBar(s) {
+  if (s.choices?.statusItems) SB_ITEMS = s.choices.statusItems
+  const sb = s.statusBar
+  if (sb === false) { sbOn = false; sbLines = SB_DEFAULT() }
+  else if (Array.isArray(sb)) { sbOn = true; sbLines = sb.map((row) => (Array.isArray(row) ? { left: [...row], right: [] } : { left: [...(row.left || [])], right: [...(row.right || [])] })) }
+  else { sbOn = true; sbLines = SB_DEFAULT() }
+  if (!sbLines.length) sbLines = [{ left: [], right: [] }]
+  put($('sb-switch'), sw({ checked: sbOn, onchange: (e) => { sbOn = e.target.checked; sbRenderAll(); sbSave() } }))
+  $('sb-reset').onclick = () => { sbOn = true; sbLines = SB_DEFAULT(); sbRenderAll(); sbSave() }
+  $('sb-addline').onclick = () => { sbLines.push({ left: [], right: [] }); sbRenderAll(); sbSave() }
+  sbRenderAll()
+}
+
+function sbRenderAll() {
+  $('sb-editor').classList.toggle('sb-off', !sbOn)
+  sbRenderLines()
+  sbRenderPalette()
+  sbRenderPreview()
+}
+
+function sbChip(id, from) {
+  const chip = h('span', {
+    className: 'sb-chip', draggable: true,
+    ondragstart: (e) => { sbDrag = { id, from }; chip.classList.add('sb-dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id) },
+    ondragend: () => { chip.classList.remove('sb-dragging'); sbDrag = null },
+  }, h('span', { textContent: sbLabel(id) }))
+  if (from !== 'palette') chip.append(h('button', { className: 'sb-x', title: 'Remove', textContent: '×', onclick: () => { sbLines[from.line][from.side].splice(from.idx, 1); sbRenderAll(); sbSave() } }))
+  return chip
+}
+
+function sbDropIndex(zone, e) { // where in the zone the drop lands, by the cursor's x
+  const chips = [...zone.querySelectorAll('.sb-chip')]
+  for (let i = 0; i < chips.length; i++) { const r = chips[i].getBoundingClientRect(); if (e.clientX < r.left + r.width / 2) return i }
+  return chips.length
+}
+
+function sbZone(lineIdx, side) {
+  const items = sbLines[lineIdx][side]
+  const zone = h('div', { className: 'sb-zone' }, h('span', { className: 'sb-ztag', textContent: side === 'left' ? 'Left' : 'Right' }),
+    ...(items.length ? items.map((id, i) => sbChip(id, { line: lineIdx, side, idx: i })) : [h('span', { className: 'sb-drop', textContent: 'drop here' })]))
+  zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('sb-over') })
+  zone.addEventListener('dragleave', () => zone.classList.remove('sb-over'))
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault(); zone.classList.remove('sb-over')
+    if (!sbDrag) return
+    let at = sbDropIndex(zone, e)
+    const dest = sbLines[lineIdx][side]
+    if (sbDrag.from !== 'palette') {
+      const src = sbLines[sbDrag.from.line][sbDrag.from.side]
+      src.splice(sbDrag.from.idx, 1) // take it out of where it was
+      if (src === dest && sbDrag.from.idx < at) at-- // same zone, removed before the insert point
+      if (!dest.includes(sbDrag.id)) dest.splice(at, 0, sbDrag.id)
+    } else if (!sbUsed().has(sbDrag.id)) dest.splice(at, 0, sbDrag.id) // from the palette, if not already placed
+    sbDrag = null
+    sbRenderAll(); sbSave()
+  })
+  return zone
+}
+
+function sbRenderLines() {
+  put($('sb-lines'), ...sbLines.map((_, i) => h('div', { className: 'sb-line' },
+    h('span', { className: 'sb-no', textContent: String(i + 1) }),
+    sbZone(i, 'left'), sbZone(i, 'right'),
+    h('button', { className: 'sb-del', title: 'Remove this line', textContent: '🗑', onclick: () => { sbLines.splice(i, 1); if (!sbLines.length) sbLines = [{ left: [], right: [] }]; sbRenderAll(); sbSave() } }))))
+}
+
+function sbRenderPalette() {
+  const used = sbUsed()
+  const pal = $('sb-palette')
+  put(pal, ...SB_ITEMS.map((it) => { const chip = sbChip(it.id, 'palette'); if (used.has(it.id)) chip.classList.add('sb-used'); return chip }))
+  pal.ondragover = (e) => { if (sbDrag && sbDrag.from !== 'palette') e.preventDefault() } // drop a placed chip here to remove it
+  pal.ondrop = (e) => { if (sbDrag && sbDrag.from !== 'palette') { e.preventDefault(); sbLines[sbDrag.from.line][sbDrag.from.side].splice(sbDrag.from.idx, 1); sbDrag = null; sbRenderAll(); sbSave() } }
+}
+
+function sbRenderPreview() {
+  const box = $('sb-preview')
+  if (!sbOn) return put(box, h('span', { className: 'sb-empty', textContent: '(the status bar is off)' }))
+  const lines = sbLines.filter((l) => l.left.length || l.right.length)
+  if (!lines.length) return put(box, h('span', { className: 'sb-empty', textContent: '(no items — the bar will be empty)' }))
+  const sepJoin = (ids) => ids.flatMap((id, i) => [i ? h('span', { className: 'sb-sep', textContent: ' │ ' }) : null, document.createTextNode(sbSample(id))].filter(Boolean))
+  put(box, ...lines.map((l) => (l.right.length
+    ? h('div', { className: 'sb-row' }, h('span', { className: 'sb-grow' }, ...sepJoin(l.left)), h('span', {}, ...sepJoin(l.right)))
+    : h('div', { className: 'sb-row' }, ...sepJoin(l.left)))))
+}
+
+function sbPayload() {
+  if (!sbOn) return false
+  const lines = sbLines.map((l) => ({ left: l.left, right: l.right })).filter((l) => l.left.length || l.right.length)
+  return lines.length ? lines : false
+}
+function sbSave() {
+  clearTimeout(sbSaveTimer)
+  sbSaveTimer = setTimeout(() => api('/api/statusbar', { statusBar: sbPayload() }).catch((e) => toast(e.message, true)), 350)
 }
 
 function render(s) {
@@ -2234,6 +2510,7 @@ function render(s) {
   drawMine(s)
   drawUsing(s)
   drawGeneral(s)
+  drawStatusBar(s)
   drawLogging(s)
   if (REQS) drawReqs()
   drawPrompts(s)

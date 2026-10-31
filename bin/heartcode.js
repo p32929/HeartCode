@@ -7,17 +7,18 @@ import { probe, loadProfile, strategy, describe, profilePath, profileFrom } from
 import { learnFromUsage, LIMIT_MS } from '../src/context.js'
 import { Session, transcript } from '../src/agent.js'
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
-import { UI, c, PERMISSIONS, duration, copyText, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys } from '../src/ui.js'
+import { UI, c, PERMISSIONS, duration, copyText, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width } from '../src/ui.js'
 import { listFiles, runCommand, clip } from '../src/tools.js'
 import { log, LOG_FILE, LOG_DIR, requestLog, useRequestLog, useLogs, pruneLogs, logDays } from '../src/log.js'
 import { prompt, usePromptsFrom, reloadPrompts } from '../src/prompts.js'
 import { newChat, saveChat, listChats, loadChat, restoreFiles, ago, forkChat, exportChat } from '../src/sessions.js'
 import { loadPrices, priceOf, addUsage, money, limitsOf } from '../src/usage.js'
-import { Mcp } from '../src/mcp.js'
+import { Mcp, mcpAuth, loadServers } from '../src/mcp.js'
 import { forget } from '../src/oauth.js'
 import { loadSkills, fillArgs, extraSkillDirs } from '../src/skills.js'
 import { HeadlessUI, runHeadless, toolNames, PERMISSION_MODES } from '../src/headless.js'
-import { findImports } from '../src/importer.js'
+import { findImports, installSkill } from '../src/importer.js'
+import { capabilities } from '../src/capabilities.js'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import { Memory } from '../src/memory.js'
@@ -119,20 +120,52 @@ const SECTIONS = [
     ['/test_model', 'test the model for real (otherwise what it can do comes from models.dev, or your settings)'],
     ['/tidy_memory', 'merge, update and link the memory notes now'],
     ['/import', 'bring commands, skills, MCP servers and memory from other CLIs'],
+    ['/install_skill', 'install a skill from a GitHub repo or a SKILL.md URL (add --project for this folder only)', true],
+    ['/doctor', 'check the outside tools HeartCode features need (voice, browser, git) and what to install'],
+    ['/mcp', 'your MCP servers and whether each needs signing in'],
     ['/login_mcp', 'sign in (again) to a remote MCP server', true],
     ['/compact', 'summarize the conversation to free up context (add what to keep)', true],
     ['/clear_chat', 'forget the conversation'],
     ['/reset', "HeartCode's settings (or also providers, or everything) back to the start; asks for a code first"],
     ['/settings', 'change providers, models, settings, MCP servers, hooks, keys and skills in your browser'],
     ['/help', 'this list'],
-    ['/tab', 'a new tab (Ctrl+T): another conversation beside this one · /tab worktree [name]: in its own git worktree · /tab 2: go to tab 2 (Ctrl+N/P) · Ctrl+Q closes one', true],
-    ['/close_tab', 'close this tab (Ctrl+Q); asks first'],
-    ['/exit', 'quit HeartCode (Ctrl+Q closes just this tab)'],
+    ['/tab', 'a new tab (Alt+T): another conversation beside this one · /tab worktree [name]: in its own git worktree · /tab 2: go to tab 2 (Alt+N/P) · Alt+W closes one', true],
+    ['/close_tab', 'close this tab (Alt+W); asks first'],
+    ['/exit', 'quit HeartCode (Alt+W closes just this tab)'],
   ]],
 ]
 const COMMANDS = SECTIONS.flatMap(([, list]) => list)
 const helpText = (sections) => sections.map(([title, list]) => `  ${c.bold(title)}\n` + list.map(([n, d]) => `  ${c.cyan(n.padEnd(18))} ${d}`).join('\n')).join('\n\n')
 const SLASH = helpText(SECTIONS)
+
+// The keyboard shortcuts, as [keys, what] rows, read from the effective keybindings (keybindings.json
+// can change any of them) plus the fixed ones (Space, Enter, Esc, Shift+Tab, Ctrl+C).
+function keysHelp(keys = {}) {
+  const NAMES = { pageup: 'PgUp', pagedown: 'PgDn', up: '↑', down: '↓', left: '←', right: '→', ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift' }
+  const pretty = (k) => k.split('+').map((p) => NAMES[p] ?? (p.length === 1 ? p.toUpperCase() : p[0].toUpperCase() + p.slice(1))).join('+')
+  const forAct = (a) => Object.entries(keys).filter(([, v]) => v === a).map(([k]) => pretty(k)).join(' / ')
+  const tabs = /(^|,)alt\+[1-9]/.test(Object.keys(keys).join(','))
+  const rows = [
+    ['Space', 'start voice input (when the input box is empty)'],
+    ['Enter', 'send · while it works, queue the message'],
+    ['Option/Shift/Ctrl+Enter', 'new line in the box'],
+    ['Esc', 'stop the task (press twice to confirm)'],
+    ['Esc Esc', 'rewind to an earlier message (at the prompt)'],
+    ['Shift+Tab', 'change what runs without asking (permissions)'],
+    [forAct('new_tab'), 'new tab'],
+    [forAct('close_tab'), 'close this tab'],
+    [forAct('next_tab'), 'next tab'],
+    [forAct('prev_tab'), 'previous tab'],
+    [tabs ? 'Alt+1…9' : '', 'go to tab 1–9'],
+    [forAct('send_first'), 'queue: send the first one now'],
+    [forAct('send_all'), 'queue: send all now'],
+    [forAct('queue_mode'), 'queue: one by one, or all together'],
+    [[forAct('scroll_up'), forAct('scroll_down')].filter(Boolean).join(' / '), 'scroll the conversation a page'],
+    [[forAct('scroll_line_up'), forAct('scroll_line_down')].filter(Boolean).join(' / '), 'scroll a few lines'],
+    ['Ctrl+C', 'stop · twice quits HeartCode'],
+  ].filter(([k]) => k)
+  return rows
+}
 
 const HOWTO = `${c.yellow('No model set up yet.')} Add a provider and choose its models in your browser:
 
@@ -155,6 +188,14 @@ const NEWLINE_KEY = process.env.TERM_PROGRAM === 'Apple_Terminal' ? 'Option+Ente
 const kTokens = (n) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n))
 
 const mask = (k) => (k ? (k.length > 12 ? `${k.slice(0, 4)}…${k.slice(-4)}` : '…') : c.dim('no key'))
+
+// The status bar's default layout (two lines): the model and what it can do, then the run's stats and
+// controls — model and context on the left, abilities and controls pushed to the right. cfg.statusBar
+// overrides it — see App.status for the item names and format.
+const DEFAULT_STATUS = [
+  { left: ['provider', 'model'], right: ['mode', 'thinking', 'images'] },
+  { left: ['ctx', 'tps', 'autocompact'], right: ['permissions', 'worktree', 'cost'] },
+]
 
 class App {
   constructor(cfg, ui, root) {
@@ -528,31 +569,37 @@ class App {
     this.save()
   }
 
-  // Built-in commands, then the skills you can type (a built-in wins on the same name).
+  // Built-in commands (/name), then the skills you can type, namespaced as /skill:name so they're
+  // easy to tell apart from HeartCode's own commands (and can't clash with them).
   commands() {
-    const builtIn = new Set(COMMANDS.map(([n]) => n))
-    const mine = [...this.skills.values()].filter((k) => k.use !== 'model' && !builtIn.has(`/${k.name}`)).map((k) => [`/${k.name}`, k.description, true])
+    const mine = [...this.skills.values()].filter((k) => k.use !== 'model').map((k) => [`/skill:${k.name}`, k.description, true])
     return [...COMMANDS, ...mine]
   }
 
-  // A command: "/name …" with the name of a built-in command or a skill you can type. Anything else
-  // starting with "/" (a path like /Users/me/shot.png) is a message for the model.
+  // A command: a built-in "/name", or a skill "/skill:name". A bare "/name" that matches a skill is
+  // still caught (slash points it to /skill:name). Anything else starting with "/" (a path like
+  // /Users/me/shot.png) is a message for the model.
   isCommand(line) {
+    if (/^\s*\/skill:\S/.test(line)) return true // any /skill:x is a command attempt; slash() says if the skill is unknown
     const name = /^\/([\w-]+)(?=\s|$)/.exec(line)?.[1]
-    return Boolean(name) && (name === 'quit' || this.commands().some(([n]) => n === `/${name}`))
+    if (!name) return false
+    return name === 'quit' || COMMANDS.some(([n]) => n === `/${name}`) || this.skills.has(name)
   }
 
   help() {
     const mine = this.commands().slice(COMMANDS.length)
-    return helpText(mine.length ? [...SECTIONS, ['your skills', mine]] : SECTIONS)
+    const sections = [...SECTIONS]
+    if (mine.length) sections.push(['your skills (type /skill:name)', mine])
+    sections.push(['keyboard', keysHelp(this.ui.keys)])
+    return helpText(sections)
   }
 
-  // "/review focus on tests": the skill's text, arguments filled in, `!command` output added.
+  // "/skill:review focus on tests": the skill's text, arguments filled in, `!command` output added.
   async expandSkill(k, args) {
     let text = fillArgs(k.body, args).replace(/(^|\s)@([\w./-]+)/g, '$1$2') // @file: HeartCode attaches files a message names
     for (const m of [...text.matchAll(/!`([^`]+)`|```!\n([\s\S]*?)```/g)]) {
       const cmd = (m[1] ?? m[2]).trim()
-      const ok = await this.ui.confirm(`Run ${c.bold(cmd)} (from /${k.name})?`, 'command')
+      const ok = await this.ui.confirm(`Run ${c.bold(cmd)} (from /skill:${k.name})?`, 'command')
       const out = ok === true ? (await runCommand(this.root, cmd, { signal: this.signal })).output.trim() : '(not run)'
       log('skill', `/${k.name} ran ${cmd}`)
       text = text.replace(m[0], () => `\n\`\`\`\n$ ${cmd}\n${clip(out, 8000)}\n\`\`\`\n`)
@@ -596,55 +643,66 @@ class App {
     return rank(items, typed).slice(0, 200)
   }
 
-  // The status bar: what's in use, its abilities, and how full the context is.
-  status() {
+  // The status bar. The layout is config-driven (cfg.statusBar): a list of lines, each either a list
+  // of item names (all left-aligned) or { left: [...], right: [...] } to push some to the right edge.
+  // Item names: provider, model, mode, thinking, images, ctx, tps, cost, autocompact, worktree,
+  // permissions. cfg.statusBar === false hides the whole bar. Unknown names and items that don't
+  // apply right now are skipped. `cols` (from the renderer) is used to right-align.
+  status(cols = 100) {
     const { cfg, ui } = this
-    const sep = c.ghost(' │ ')
+    if (cfg.statusBar === false) return '' // turned off: no status bar at all
     if (!cfg.providers[cfg.provider] || !cfg.model) return c.dim('no model · /settings to choose one')
     const rot = this.s?.client.rotation
     const now = this.inUse() // the model list's one in use; never one of a provider that's off
     if (!now) return c.dim('the providers of all your models are off · /settings to switch one on')
-    // provider (providers on) · the model. Auto (rotating your list): "auto (current model) (list
-    // size)". A model you picked (pinned, no rotation): just its name.
     const on = Object.values(cfg.providers).filter((p) => !p.off).length
-    // one model (pinned): just its name. Several chosen for this session: the one in use + "N chosen".
-    // Your whole list (auto): "auto (in use) (N)". ↻ shows the rotation position while rotating.
     const count = this.sessionModels().length
-    // the model answering now; a "↻" before it, in yellow, when it's a fallback (rotated to after one
-    // failed) — so you can see at a glance it isn't the first/preferred one
+    // the model answering now; a yellow "↻" before it when it's a fallback (rotated to after one failed)
     const rotated = rot && rot.at > 0
-    const name = rotated ? `${c.yellow('↻ ' + now.model)}` : c.info(now.model)
+    const name = rotated ? c.yellow('↻ ' + now.model) : c.info(now.model)
     const model =
-      count === 1
-        ? name
-        : cfg.session
-          ? `${name} ${c.faint(`(${count} chosen)`)}`
-          : `${c.muted('auto')} ${c.faint('(')}${name}${c.faint(')')} ${c.faint(`(${count})`)}`
-    // two lines so nothing is crammed: the model and what it can do, then the run's stats and controls
-    const first = [`${c.brand('●')} ${c.muted(now.provider)} ${c.faint(`(${on})`)} ${c.ghost('·')} ${model}`]
-    const second = []
+      count === 1 ? name : cfg.session ? `${name} ${c.faint(`(${count} chosen)`)}` : `${c.muted('auto')} ${c.faint('(')}${name}${c.faint(')')} ${c.faint(`(${count})`)}`
     const key = `${now.provider}/${now.model}`
     if (this.profileKey !== key) [this.profileKey, this.profile] = [key, this.s?.profile ?? loadProfile(this.client(now.provider, now.model))]
     const profile = this.s?.profile ?? this.profile
-    if (profile) {
-      const strat = this.s?.strat ?? strategy(profile, cfg)
-      first.push(c.muted(strat.actions === 'tools' ? 'tools' : 'guided'))
-      if (strat.thinking) first.push(c.think(`thinking${cfg.effort ? ` · ${cfg.effort}` : ''}`) + (ui.showThinking ? '' : c.faint(' (collapsed)')))
-      if (strat.vision) first.push(c.muted('images'))
+    const strat = profile && (this.s?.strat ?? strategy(profile, cfg))
+    // each item, rendered (or null when it doesn't apply)
+    const parts = {
+      provider: `${c.brand('●')} ${c.muted(now.provider)} ${c.faint(`(${on})`)}`,
+      model,
+      mode: strat ? c.muted(strat.actions === 'tools' ? 'tools' : 'guided') : c.dim('not probed yet'),
+      thinking: strat?.thinking ? c.think(`thinking${cfg.effort ? ` · ${cfg.effort}` : ''}`) + (ui.showThinking ? '' : c.faint(' (collapsed)')) : null,
+      images: strat?.vision ? c.muted('images') : null,
+      ctx: null,
+      tps: null,
+      cost: null,
+      autocompact: cfg.autoCompact === false ? c.faint('auto-compact off') : null,
+      worktree: this.worktree ? c.info(`⎇ ${this.worktree.branch}`) : null,
+      permissions: { all: c.green('⏵⏵ all allowed'), commands: c.yellow('ask before commands'), ask: c.yellow('ask before changes'), plan: c.info('⏸ plan mode') }[ui.permission],
+    }
+    if (strat) {
       const used = this.s?.client.lastTokens ?? 0
       const pct = Math.round((used / strat.context) * 100)
       const paint = pct >= 80 ? c.red : pct >= 50 ? c.yellow : c.green
       const guess = strat.contextSure ? '' : '~' // not said by the server: assumed, and growing as bigger requests work
-      second.push(`${c.faint('ctx')} ${paint(`${kTokens(used)}/${guess}${kTokens(strat.context)}`)} ${c.faint(`${pct}%`)}`)
+      parts.ctx = `${c.faint('ctx')} ${paint(`${kTokens(used)}/${guess}${kTokens(strat.context)}`)} ${c.faint(`${pct}%`)}`
       const tps = this.s?.client.tps
-      if (tps) second.push(`${c.muted(String(tps))} ${c.faint('tok/s')}`)
-    } else {
-      first.push(c.dim('not probed yet'))
+      if (tps) parts.tps = `${c.muted(String(tps))} ${c.faint('tok/s')}`
+      if (this.chat.usage?.priced) parts.cost = c.muted(money(this.chat.usage.cost))
     }
-    if (cfg.autoCompact === false) second.push(c.faint('auto-compact off'))
-    if (this.worktree) second.push(c.info(`⎇ ${this.worktree.branch}`))
-    second.push({ all: c.green('⏵⏵ all allowed'), commands: c.yellow('ask before commands'), ask: c.yellow('ask before changes'), plan: c.info('⏸ plan mode') }[ui.permission]) // Shift+Tab changes it
-    return [first.join(sep), second.join(sep)].filter((l) => l.replace(/\x1b\[[0-9;]*m/g, '').trim()).join('\n')
+    const sep = c.ghost(' │ ')
+    const vis = (str) => width(str.replace(/\x1b\[[0-9;]*m/g, ''))
+    const layout = Array.isArray(cfg.statusBar) && cfg.statusBar.length ? cfg.statusBar : DEFAULT_STATUS
+    const line = (row) => {
+      const names = (g) => (g ?? []).map((t) => parts[t]).filter(Boolean).join(sep)
+      const left = names(Array.isArray(row) ? row : row?.left)
+      const right = names(Array.isArray(row) ? null : row?.right)
+      if (!right) return left
+      if (!left) return right
+      const pad = cols - 1 - vis(left) - vis(right) - 1 // the renderer adds a leading space; keep 1 to spare on the right
+      return pad > 0 ? left + ' '.repeat(pad) + right : `${left}${sep}${right}` // too narrow to split: just join
+    }
+    return layout.map(line).filter((l) => l.replace(/\x1b\[[0-9;]*m/g, '').trim()).join('\n')
   }
 
   client(name, model) {
@@ -997,7 +1055,7 @@ function applySettings(apps, cfg, what) {
     const { ui } = app
     const busy = Boolean(ui.busySince || app.working)
     const now = (fn) => (busy ? app.later.push(fn) : fn())
-    if (app.cfg !== cfg) for (const k of ['providers', 'provider', 'model', 'effort', 'theme', 'context', 'autoCompact', 'director', 'format', 'lsp', 'voice', 'rotation']) app.cfg[k] = cfg[k]
+    if (app.cfg !== cfg) for (const k of ['providers', 'provider', 'model', 'effort', 'theme', 'context', 'autoCompact', 'director', 'format', 'lsp', 'voice', 'rotation', 'statusBar']) app.cfg[k] = cfg[k]
     // a model pinned in this CLI (/select_model) is a session choice: a model/order change on the
     // settings page leaves it alone (only /select_model auto here returns it to the list)
     if (what === 'model' && !app.cfg.session) {
@@ -1014,6 +1072,7 @@ function applySettings(apps, cfg, what) {
     }
     if (what === 'provider') app.lists = {} // its list switched on or off, a model added by name
     if (what === 'setting:permissions') ui.setPermission(cfg.permissions)
+    if (what === 'setting:statusBar') ui.render?.() // the status bar's layout changed: redraw it now
     if (what === 'setting:effort' && app.s?.strat.thinking) app.s.client.effort = cfg.effort
     if (what === 'setting:autoCompact' && app.s) app.s.autoCompact = cfg.autoCompact !== false
     if (what === 'setting:format' && app.s) app.s.noFormat = cfg.format === false
@@ -1162,6 +1221,18 @@ async function choose(ui, cmd, arg, title, current) {
   return (await ui.pick(title, ARGS[cmd].map(([label, desc]) => ({ label, desc, current: label === current }))))?.label ?? null
 }
 
+// Fresh sign-in to a remote MCP server: forget the old token, reconnect (opens the browser via
+// app.mcp.onSignIn), list its tools. Used by /login_mcp and the settings page's Sign in button.
+async function signInMcp(app, name, signal) {
+  const sv = app.mcp.get(name)
+  if (!sv?.url) throw new Error(`no remote MCP server "${name}"`)
+  forget(sv.url)
+  sv.stop()
+  Object.assign(sv, { token: null, tools: null })
+  const tools = await sv.listTools(signal)
+  return `signed in to ${name} · ${tools.length} tools`
+}
+
 async function slash(app, line) {
   const [cmd, ...args] = line.slice(1).trim().split(/\s+/)
   const { ui, cfg } = app
@@ -1174,7 +1245,7 @@ async function slash(app, line) {
       if (n > 1) {
         const go = await ui.pick(`Quit HeartCode? ${n} tabs are open`, [
           { label: 'Yes, quit', desc: 'they come back next time you start HeartCode here', yes: true },
-          { label: 'No', desc: 'Ctrl+Q closes just this tab' },
+          { label: 'No', desc: 'Alt+W closes just this tab' },
         ])
         if (!go?.yes) return
       }
@@ -1197,7 +1268,7 @@ async function slash(app, line) {
       return ui.print(`${c.ok('✓')} ${c.muted(`reset: ${it.label.toLowerCase()}`)}${it.level === 'settings' ? '' : c.dim(' · add a provider on /settings')}`)
     }
     case 'settings': {
-      settingsPage ??= startSettings({ cfg, apply: (what) => applySettings(app.tabs ? app.tabs.list.map((t) => t.app) : [app], cfg, what) })
+      settingsPage ??= startSettings({ cfg, root: app.root, onLoginMcp: (name) => signInMcp(app, name, null), apply: (what) => applySettings(app.tabs ? app.tabs.list.map((t) => t.app) : [app], cfg, what) })
       const { url, close } = await settingsPage
       openBrowser(url)
       ui.print(`${c.info('↗')} ${c.bold('settings')} ${c.muted('opened in your browser:')}\n  ${c.faint(url)}`)
@@ -1314,19 +1385,45 @@ async function slash(app, line) {
       if (!s) return
       return s.tidyMemory(app.signal)
     }
+    case 'doctor': {
+      const caps = capabilities(cfg)
+      const rows = caps.map((cp) => {
+        const head = `  ${cp.ok ? c.green('✓') : c.red('✗')} ${c.bold(cp.name)}${cp.ok ? c.dim(' · ready') : c.yellow(' · needs setup')}`
+        return cp.ok ? head : `${head}\n    ${c.faint(`install ${cp.need}`)}`
+      })
+      return ui.print(`${c.bold('External tools HeartCode features use')}\n${rows.join('\n')}`)
+    }
+    case 'mcp': {
+      const all = loadServers(app.root, { includeDisabled: true }) // enabled and off, so off ones are visible
+      const names = Object.keys(all)
+      if (!names.length) return ui.print('No MCP servers. Add one in /settings → MCP servers, or /import from another CLI.')
+      const running = new Set(app.mcp.names)
+      const label = { local: c.dim('local · no sign-in'), in: c.green('signed in'), out: c.yellow('sign-in needed') }
+      const rows = names.map((n) => {
+        const cfg = all[n]
+        const on = running.has(n)
+        const where = cfg.url ?? [cfg.command, ...(cfg.args ?? [])].filter(Boolean).join(' ')
+        const head = on ? `${c.brand('●')} ${c.bold(n.padEnd(16))} ${label[mcpAuth(cfg)]}` : `${c.dim('○')} ${c.dim(n.padEnd(16))} ${c.dim('off')}`
+        return `  ${head}\n    ${c.faint(clip(where, 90))}`
+      })
+      const needs = names.some((n) => running.has(n) && mcpAuth(all[n]) === 'out')
+      const off = names.some((n) => !running.has(n))
+      return ui.print(`${c.bold('MCP servers')}\n${rows.join('\n')}${needs ? `\n  ${c.dim('sign in to a remote one with /login_mcp <name>')}` : ''}${off ? `\n  ${c.dim('turn one on in /settings → MCP servers')}` : ''}`)
+    }
     case 'login_mcp': {
       const remote = app.mcp.names.filter((n) => app.mcp.get(n).url)
-      const name = args[0] ?? (await ui.pick('Sign in to which server?', remote.map((n) => ({ label: n, desc: app.mcp.get(n).url }))))?.label
+      const name = args[0] ?? (await ui.pick('Sign in to which server?', remote.map((n) => ({ label: n, desc: app.mcp.get(n).url, hint: mcpAuth(app.mcp.get(n).cfg) === 'in' ? 'signed in' : 'not signed in' }))))?.label
       if (!name) return remote.length ? undefined : ui.print('No remote MCP servers (ones with a "url") to sign in to.')
-      const sv = app.mcp.get(name)
-      if (!sv?.url) return ui.print(`No remote MCP server "${name}".`)
-      forget(sv.url) // a fresh sign-in
-      sv.stop()
-      Object.assign(sv, { token: null, tools: null })
+      if (!app.mcp.get(name)?.url) return ui.print(`No remote MCP server "${name}".`)
       ui.spinner(`connecting to ${name}`)
-      const tools = await sv.listTools(app.signal)
-      ui.stopSpin()
-      return ui.print(`${c.green('connected')} ${c.bold(name)} · ${tools.length} tools`)
+      try {
+        const msg = await signInMcp(app, name, app.signal)
+        ui.stopSpin()
+        return ui.print(`${c.green('✓')} ${msg}`)
+      } catch (e) {
+        ui.stopSpin()
+        return ui.print(`${c.red('✗')} ${e.message}`)
+      }
     }
     case 'import': {
       const items = findImports(app.root)
@@ -1345,6 +1442,21 @@ async function slash(app, line) {
       log('import', chosen.map((it) => `${it.group}: ${it.label}`))
       return
     }
+    case 'install_skill': {
+      const url = args.find((a) => !a.startsWith('--'))
+      if (!url) return ui.print('Usage: /install_skill <github repo or a SKILL.md url> [--project]')
+      const scope = args.includes('--project') ? 'project' : 'global'
+      ui.spinner(`installing from ${url}`)
+      try {
+        const msg = await installSkill(app.root, url, scope, { signal: app.signal })
+        ui.stopSpin()
+        app.reload('skill')
+        return ui.print(`${c.green('✓')} ${msg}${scope === 'project' ? ' (this folder)' : ''} ${c.dim('· run with /skill:<name>, /help lists them')}`)
+      } catch (e) {
+        ui.stopSpin()
+        return ui.print(`${c.red('✗')} could not install: ${e.message}`)
+      }
+    }
     case 'btw':
       return app.btw(line.trim().replace(/^\/btw\b/, '').trim())
     case 'voice': {
@@ -1359,8 +1471,13 @@ async function slash(app, line) {
   if (!['model_info', 'test_model', 'compact'].includes(cmd)) {
     app.skills = loadSkills(app.root) // edits to skill files apply right away
     if (app.s) app.s.skills = app.skills
-    const k = app.skills.get(cmd)
-    if (k && k.use !== 'model') return runTask(app, await app.expandSkill(k, args.join(' ')), { signal: app.signal })
+    if (cmd.startsWith('skill:')) {
+      const name = cmd.slice(6)
+      const k = app.skills.get(name)
+      if (k && k.use !== 'model') return runTask(app, await app.expandSkill(k, args.join(' ')), { signal: app.signal })
+      return ui.print(`unknown skill /skill:${name} ${c.dim('· /help lists your skills')}`)
+    }
+    if (app.skills.has(cmd)) return ui.print(`${c.dim(`/${cmd} is a skill — run it as`)} ${c.cyan(`/skill:${cmd}`)}`) // bare skill name: point to the namespaced form
     return ui.print(`unknown command /${cmd} ${c.dim('· /help lists them')}`)
   }
   const s = await app.session()
@@ -1424,7 +1541,7 @@ async function repl(app, f = {}) {
     ui.close()
     process.exit(0)
   }
-  // Ctrl+Q, /close_tab: this tab, after asking (working: that stops too); the last one quits
+  // Alt+W, /close_tab: this tab, after asking (working: that stops too); the last one quits
   let closing = false
   app.closeTab = async (working = false) => {
     if (closing) return
@@ -1447,7 +1564,7 @@ async function repl(app, f = {}) {
   ui.onCloseTab = () => {
     if (closing) return
     if (!ui.asking) return app.closeTab(true) // working: asked over the work
-    if (!ui.histOn || ui.menu.pick) return ui.notice('Answer this first, then Ctrl+Q', 2000)
+    if (!ui.histOn || ui.menu.pick) return ui.notice('Answer this first, then Alt+W', 2000)
     ui.submit('/close_tab') // at the prompt: asked in its turn, like a typed /close_tab
   }
   const others = () => (app.tabs?.list.length ?? 1) - 1
@@ -1472,7 +1589,7 @@ async function repl(app, f = {}) {
   const where = home && app.root.startsWith(home) ? '~' + app.root.slice(home.length) : app.root
   ui.header = (cols = 100) => [
     `${c.brand('♥')} ${c.bright(c.bold('HeartCode'))} ${c.faint(VERSION)}  ${c.muted(where.length > cols - 16 ? '…' + where.slice(-(cols - 17)) : where)}`,
-    [['/', 'run a command'], ['@', 'attach a file'], [NEWLINE_KEY, 'add a new line'], ['Esc', 'stop'], ['Shift+Tab', 'change permissions']].map(([k, d]) => `${c.muted(k)} ${c.faint(d)}`).join(c.ghost(' · ')),
+    [['/', 'run a command'], ['@', 'attach a file'], ...(ui.voiceReady?.() ? [['Space', 'talk (voice)']] : []), [NEWLINE_KEY, 'add a new line'], ['Esc', 'stop'], ['Shift+Tab', 'change permissions']].map(([k, d]) => `${c.muted(k)} ${c.faint(d)}`).join(c.ghost(' · ')),
     '',
   ]
   if (!ui.full) ui.print(ui.header().join('\n'))
@@ -1494,6 +1611,7 @@ async function repl(app, f = {}) {
     if (!t) continue
     ctl = new AbortController()
     app.signal = ctl.signal // Esc stops whatever this line started (a task, a probe, …)
+    ui.escArm = 0 // a fresh task: a first Esc from before doesn't count toward stopping this one
     ui.busy() // the spinner stays until this line's work is done
     if (app.isCommand(t)) {
       try {
@@ -1667,7 +1785,7 @@ async function main() {
     const app = new App(cfg, ui, root)
     usePromptsFrom(app.root) // its .heartcode/prompts override the built-in sections
     ui.suggest = (line, cursor) => app.suggest(line, cursor)
-    ui.status = () => app.status()
+    ui.status = (cols) => app.status(cols)
     ui.requestSince = () => app.s?.client.inFlight // the spinner shows how long the model has been answering
     return app
   }
@@ -1678,7 +1796,7 @@ async function main() {
     log('worktree', `working in ${wt.dir} on ${wt.branch}`)
     process.on('exit', () => wt.done || activeUI?.noUser || console.error(c.dim(`worktree kept: ${wt.dir} (branch ${wt.branch})`)))
   }
-  // The full screen: in tabs (the first one is this folder; /tab and Ctrl+T open more).
+  // The full screen: in tabs (the first one is this folder; /tab and Alt+T open more).
   if (!headless && !sub && !positionals.length && process.stdin.isTTY && process.stdout.isTTY) {
     if (f['resume-id'] && !loadChat(f['resume-id'])) throw new Error(`no session ${f['resume-id']}`)
     const saved = readJson(TABS_FILE, {})[root] // before this run's first tab replaces it

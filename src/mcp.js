@@ -17,7 +17,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { HOME, readJson, readConfig, writeJson, VERSION } from './config.js'
 import { log } from './log.js'
-import { savedToken, signIn } from './oauth.js'
+import { savedToken, signIn, hasToken } from './oauth.js'
 
 // Built in; a config entry with the same name changes it, "disabled": true turns it off.
 export const DEFAULT_SERVERS = {
@@ -31,11 +31,20 @@ export const DEFAULT_SERVERS = {
     scratchCwd: true,
     description: 'a Chrome browser: open pages, click, fill forms, read the console and network requests, take screenshots',
   },
+  'computer-use': {
+    command: 'npx',
+    args: ['-y', '@zavora-ai/computer-use-mcp@latest'],
+    // Off until you switch it on (/settings → MCP servers, or /mcp): it controls your whole desktop.
+    // Needs the OS's permission (macOS: Screen Recording + Accessibility for your terminal) and a
+    // vision model that's good at computer use — a weak model won't drive it well.
+    disabled: true,
+    description: 'control your computer like a person — screenshots, mouse, keyboard, clipboard (off by default; needs screen/accessibility permission and a capable vision model)',
+  },
 }
 
 // extra: more configs from the caller (--mcp-config: a file path or JSON text); strict: only those
 // (no built-in or configured servers), like Claude Code's --strict-mcp-config.
-export function loadServers(root, { extra = [], strict = false } = {}) {
+export function loadServers(root, { extra = [], strict = false, includeDisabled = false } = {}) {
   const merged = strict ? {} : structuredClone(DEFAULT_SERVERS) // yours (below) win on a name
   const own = strict ? [] : [path.join(HOME, 'mcp.json'), root && path.join(root, '.heartcode', 'mcp.json')].filter(Boolean).map((f) => readConfig(f, {}))
   const given = extra.map((c) => {
@@ -46,10 +55,19 @@ export function loadServers(root, { extra = [], strict = false } = {}) {
   for (const data of [...own, ...given]) {
     for (const [name, cfg] of Object.entries(data.mcpServers ?? {})) merged[name] = { ...merged[name], ...cfg }
   }
-  return Object.fromEntries(Object.entries(merged).filter(([, cfg]) => (cfg.command || cfg.url) && !cfg.disabled))
+  return Object.fromEntries(Object.entries(merged).filter(([, cfg]) => (cfg.command || cfg.url) && (includeDisabled || !cfg.disabled)))
 }
 
 const expand = (v) => String(v).replace(/\$\{(\w+)\}/g, (m, k) => process.env[k] ?? '')
+
+// A server's sign-in status, for listings: 'local' (a command, no sign-in), 'in' (remote, a token is
+// saved), or 'out' (remote, not signed in — may need it). A server with its own headers/token in the
+// config counts as 'in' (it authenticates itself).
+export function mcpAuth(cfg) {
+  if (!cfg?.url) return 'local'
+  if (cfg.headers && Object.keys(cfg.headers).length) return 'in'
+  return hasToken(expand(cfg.url)) ? 'in' : 'out'
+}
 
 // A server's server-sent events: { event, data }.
 async function* sseEvents(body) {

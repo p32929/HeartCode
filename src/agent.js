@@ -666,7 +666,8 @@ async function runNative(s, task, images, signal) {
   s.uiErrorsPrev = [] // hard errors from the last look: when one is gone next look, it was fixed — learn from it
   s.runFails = new Map() // a command that failed (by its tool) → its error; when the same tool runs clean after an edit, that's a verified fix to learn from (any language, not just web)
   s.edits = 0 // successful file edits so far this message (to tell a real fix from a lucky rerun)
-  let nudged = 0 // reminders sent this message about open todo items or a Stop hook
+  s.acted = false // used a tool this message (so a reply that only promises more is a premature stop)
+  let nudged = 0 // reminders sent this message about open todo items, a premature stop, or a Stop hook
 
   let empty = 0 // replies in a row with neither text nor tool calls
   let looping = 0 // replies cut for going into a loop, this message
@@ -773,6 +774,7 @@ async function runNative(s, task, images, signal) {
       res.content = res.content.slice(0, markup.index).trim()
       s.messages[s.messages.length - 1] = { ...s.messages.at(-1), content: res.content }
     }
+    if (res.toolCalls.length) s.acted = true // did real work this message, for the premature-stop check
     s.onEvent?.({ type: 'assistant', model: `${client.provider}/${client.model}`, content: res.content, reasoning: res.reasoning, toolCalls: res.toolCalls }) // headless output
     if (!res.toolCalls.length && !res.content?.trim()) {
       // Nothing at all (seen after a failed tool call): not an answer. The same request again
@@ -801,7 +803,7 @@ async function runNative(s, task, images, signal) {
         s.messages.push({ role: 'user', content: look })
         continue
       }
-      const more = nudged < 3 && !s.isSub && (await notDone(s, signal, nudged > 0))
+      const more = nudged < 3 && !s.isSub && (await notDone(s, signal, nudged > 0, res.content))
       if (!more) return res.content
       nudged++
       s.messages.push({ role: 'user', content: more })
@@ -1181,11 +1183,22 @@ async function lookAtUi(s, signal) {
 // The model says it's done: is it? Not while its todo list (from this message) has open items, or
 // while a Stop hook says otherwise. Returns what to tell it, or null. Each is asked a few times at
 // most (the caller counts), so a model that can't finish still ends.
-async function notDone(s, signal, again) {
+// The model said it would do something but stopped without doing it ("let me rewrite…", "I'll fix…"):
+// a next action named, then no tool call. Not matched by explanations ("let me explain", "you can run").
+const PROMISED_MORE =
+  /\b(?:let me|i'?ll|i will|i'?m going to|i am going to|i need to|i'?m about to|next,? i'?ll|now,? i'?ll)\b[^.!?\n]{0,70}\b(?:do|make|create|add|fix|write|update|change|implement|build|run|rewrite|replace|edit|install|set ?up|finish|continue|proceed|start|redo|retry|try)\b/i
+
+// Is the task really done, or did the model stop early? Open todo items, or (after it did real work)
+// a reply that only promises more, get one nudge to keep going. Then any Stop hook. null = truly done.
+async function notDone(s, signal, again, reply = '') {
   const open = s.todoTouched && s.ui.permission !== 'plan' ? (s.chat.todos ?? []).filter((t) => t.status !== 'completed') : [] // plan mode: they wait for the approval
   if (open.length) {
     log('task', `stopped with ${open.length} open todo item(s); reminding`)
     return prompt('agent/todo-unfinished', { items: open.map((t) => `- ${t.content}`).join('\n') })
+  }
+  if (s.acted && reply && PROMISED_MORE.test(reply)) {
+    log('task', 'reply names a next step but no tool call followed; nudging to finish')
+    return prompt('agent/stopped-early')
   }
   const hook = await runHooks(s, 'Stop', { stop_hook_active: again }, signal)
   return hook.block ? prompt('agent/hook-stop', { reason: hook.block }) : null

@@ -13,6 +13,9 @@ const FILE = path.join(HOME, 'mcp-auth.json')
 const b64url = (buf) => Buffer.from(buf).toString('base64url')
 const store = () => readJson(FILE, {})
 const keep = (url, entry) => writeJson(FILE, { ...store(), [url]: entry })
+// Whether a sign-in token is already saved for this server's URL (cheap, no network). Doesn't prove
+// the token still works or that the server even needs auth — just whether we've signed in before.
+export const hasToken = (url) => Boolean(store()[url]?.accessToken)
 export const forget = (url) => {
   const all = store()
   delete all[url]

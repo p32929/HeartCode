@@ -5,6 +5,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { HOME, readJson, writeJson } from './config.js'
 import { frontMatter } from './skills.js'
 import { Memory } from './memory.js'
@@ -199,4 +200,102 @@ export function findImports(root, home = os.homedir()) {
   const notes = filesIn(claudeMemory, ['.md']).filter(([n]) => n !== 'MEMORY')
   if (notes.length) add('Claude Code · this project · memory', `${notes.length} memory notes`, 'become HeartCode memory notes for this project', () => importClaudeMemory(root, claudeMemory))
   return items
+}
+
+// Install a skill straight from a GitHub repo or a URL — not another CLI's config. Accepts
+// "user/repo", a github repo URL, a .git URL, or a direct link to a SKILL.md / <name>.md (a
+// one-file skill). Clones (git) or downloads a tarball, finds every SKILL.md, and copies each skill
+// folder into the skills dir (global by default). Returns a short summary; nothing existing is
+// overwritten. scope: "global" (~/.heart/skills) or "project" (.heartcode/skills).
+export async function installSkill(root, source, scope = 'global', { signal } = {}) {
+  source = String(source ?? '').trim()
+  if (!source) throw new Error('give a GitHub repo (user/repo or its URL) or a link to a SKILL.md')
+  const dest = skillsDir(root, scope)
+  fs.mkdirSync(dest, { recursive: true })
+
+  // a single .md file → a one-file skill
+  if (/^https?:\/\/\S+\.md(\?\S*)?$/i.test(source)) {
+    const res = await fetch(source, { signal, redirect: 'follow' })
+    if (!res.ok) throw new Error(`could not download: HTTP ${res.status}`)
+    const text = await res.text()
+    const { meta } = frontMatter(text)
+    if (!meta.description) throw new Error('that .md is not a skill (it needs YAML frontmatter with a description)')
+    const name = safe(meta.name || source.split('/').pop().replace(/\.md.*$/i, '')) || 'skill'
+    if (taken(root, scope, name)) return `${name} is already installed`
+    fs.writeFileSync(path.join(dest, `${name}.md`), text)
+    return `installed skill ${name}`
+  }
+
+  // otherwise a repo
+  const { gitUrl, tarUrl } = repoUrls(source)
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'heart-skill-'))
+  try {
+    await fetchRepo(gitUrl, tarUrl, tmp, signal)
+    const found = findSkillFolders(tmp)
+    if (!found.length) throw new Error('no SKILL.md found in that repo')
+    const done = []
+    for (const { name, dir } of found) {
+      if (taken(root, scope, name)) {
+        done.push(`${name} (already installed)`)
+        continue
+      }
+      fs.cpSync(dir, path.join(dest, name), { recursive: true, filter: (s) => !/[/\\]\.git([/\\]|$)/.test(s) })
+      done.push(name)
+    }
+    return `installed ${done.filter((d) => !d.includes('already')).length} of ${found.length} skill${found.length === 1 ? '' : 's'}: ${done.join(', ')}`
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+}
+
+// "user/repo" or a github link → a clone URL and a codeload tarball URL (for when git isn't around).
+function repoUrls(source) {
+  let m = /github\.com[/:]([^/]+)\/([^/#?]+?)(?:\.git)?(?:[/#?].*)?$/i.exec(source)
+  if (!m && /^[\w.-]+\/[\w.-]+$/.test(source)) m = [, ...source.split('/')]
+  if (m) return { gitUrl: `https://github.com/${m[1]}/${m[2]}.git`, tarUrl: `https://codeload.github.com/${m[1]}/${m[2]}/tar.gz/HEAD` }
+  if (/^https?:\/\/\S+/.test(source) || /\.git$/.test(source)) return { gitUrl: source.replace(/\/$/, ''), tarUrl: null }
+  throw new Error(`can't tell what "${source}" is — give a GitHub repo (user/repo or its URL) or a link to a SKILL.md`)
+}
+
+// Shallow git clone, or download and extract the tarball if git isn't installed.
+async function fetchRepo(gitUrl, tarUrl, into, signal) {
+  const hasGit = spawnSync('git', ['--version'], { stdio: 'ignore' }).status === 0
+  if (hasGit) {
+    const r = spawnSync('git', ['clone', '--depth', '1', gitUrl, into], { encoding: 'utf8', timeout: 120_000 })
+    if (r.status === 0) return
+    if (!tarUrl) throw new Error(`git clone failed: ${(r.stderr || '').trim().slice(0, 200)}`)
+  } else if (!tarUrl) {
+    throw new Error('git is not installed; install git, or give a GitHub repo so the tarball can be downloaded')
+  }
+  const res = await fetch(tarUrl, { signal, redirect: 'follow' })
+  if (!res.ok) throw new Error(`could not download the repo: HTTP ${res.status}`)
+  fs.writeFileSync(path.join(into, '_repo.tgz'), Buffer.from(await res.arrayBuffer()))
+  const r = spawnSync('tar', ['-xzf', '_repo.tgz', '--strip-components=1'], { cwd: into, encoding: 'utf8' })
+  fs.rmSync(path.join(into, '_repo.tgz'), { force: true })
+  if (r.status !== 0) throw new Error(`could not extract the repo: ${(r.stderr || '').trim().slice(0, 200)}`)
+}
+
+// Every SKILL.md in the tree (depth-limited) as { name, dir }; doesn't descend into a skill folder.
+// A skill at the repo root is named from its frontmatter; a nested one from its folder.
+function findSkillFolders(base, depth = 4) {
+  const out = []
+  const walk = (d, left) => {
+    let entries = []
+    try {
+      entries = fs.readdirSync(d, { withFileTypes: true })
+    } catch {
+      return
+    }
+    if (entries.some((e) => e.isFile() && e.name === 'SKILL.md')) {
+      const { meta } = frontMatter(fs.readFileSync(path.join(d, 'SKILL.md'), 'utf8'))
+      const name = safe((d === base ? meta.name : path.basename(d)) || meta.name || path.basename(d)) || 'skill'
+      out.push({ name, dir: d })
+      if (left > 0 && entries.some((e) => e.isDirectory() && e.name === 'skills')) walk(path.join(d, 'skills'), left - 1) // a repo that's one skill plus a skills/ collection
+      return
+    }
+    if (left <= 0) return
+    for (const e of entries) if (e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules') walk(path.join(d, e.name), left - 1)
+  }
+  walk(base, depth)
+  return out
 }

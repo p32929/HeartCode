@@ -9,7 +9,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import os from 'node:os'
 import { HOME, saveConfig, readJson, writeJson, byName, takeIn, whatOf } from './config.js'
-import { DEFAULT_SERVERS } from './mcp.js'
+import { DEFAULT_SERVERS, mcpAuth } from './mcp.js'
 import { sections, BUILTIN_PROMPTS } from './prompts.js'
 import { Client } from './client.js'
 import { clip } from './tools.js'
@@ -17,6 +17,8 @@ import { loadProfile, strategy, profilePath, profileFrom } from './probe.js'
 import { loadPrices, priceOf, limitsOf } from './usage.js'
 import { THEMES, PERMISSIONS } from './ui.js'
 import { loadSkills, frontMatter } from './skills.js'
+import { installSkill, findImports } from './importer.js'
+import { capabilities } from './capabilities.js'
 import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays, logSize, clearLogs } from './log.js'
 
 const PAGE = new URL('./settings.html', import.meta.url)
@@ -24,6 +26,22 @@ const EFFORTS = ['default', 'low', 'medium', 'high']
 const TOGGLES = { autoCompact: 'compact the conversation when it fills 85% of the model\'s context window', director: 'let the model add skills, MCP servers and change settings when asked', format: "run the project's formatter on every file HeartCode writes", lsp: "show the model a language server's errors after each edit" }
 // The Logging page's: both off unless switched on; how much of each request ("full" or "summary")
 const LOG_SWITCHES = ['log', 'logRequests']
+// The status-bar items the visual editor offers (id must match App.status in bin/heartcode.js).
+// `sample` is shown in the page's live preview.
+const STATUS_ITEMS = [
+  { id: 'provider', label: 'Provider', sample: '● openai (2)' },
+  { id: 'model', label: 'Model', sample: 'gpt-5' },
+  { id: 'mode', label: 'Mode', sample: 'tools' },
+  { id: 'thinking', label: 'Thinking', sample: 'thinking' },
+  { id: 'images', label: 'Images', sample: 'images' },
+  { id: 'ctx', label: 'Context used', sample: 'ctx 12k/128k 9%' },
+  { id: 'tps', label: 'Tokens / sec', sample: '48 tok/s' },
+  { id: 'cost', label: 'Cost', sample: '$0.14' },
+  { id: 'autocompact', label: 'Auto-compact off', sample: 'auto-compact off' },
+  { id: 'worktree', label: 'Git worktree', sample: '⎇ feature' },
+  { id: 'permissions', label: 'Permissions', sample: '⏵⏵ all allowed' },
+]
+const STATUS_IDS = new Set(STATUS_ITEMS.map((i) => i.id))
 const DETAILS = ['full', 'summary']
 // Files in ~/.heart the page edits as text: [name, what it is, JSON?]
 const FILES = [
@@ -70,7 +88,7 @@ function mcpServers() {
   const from = Object.fromEntries(Object.keys(DEFAULT_SERVERS).map((n) => [n, 'built in']))
   const all = structuredClone(DEFAULT_SERVERS)
   for (const [n, c] of Object.entries(own)) all[n] = { ...all[n], ...c }
-  return Object.entries(all).map(([name, c]) => ({ name, from: from[name] ?? 'yours', on: !c.disabled, what: c.url ?? [c.command, ...(c.args ?? [])].filter(Boolean).join(' '), description: c.description ?? '' }))
+  return Object.entries(all).map(([name, c]) => ({ name, from: from[name] ?? 'yours', on: !c.disabled, remote: Boolean(c.url), auth: mcpAuth(c), what: c.url ?? [c.command, ...(c.args ?? [])].filter(Boolean).join(' '), description: c.description ?? '' }))
 }
 
 // The model list: #1 is the model (cfg.provider/model), the rest cfg.rotation.then, in order.
@@ -114,7 +132,8 @@ function forgetList(...names) {
   writeJson(LISTS, all)
 }
 
-export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
+export function startSettings({ cfg, apply = () => {}, port = 0, root = process.cwd(), onLoginMcp = null } = {}) {
+  let importCache = [] // the last /api/imports listing, so /api/imports/run can execute by id
   const token = crypto.randomBytes(24).toString('hex')
   const changed = (what) => {
     try {
@@ -341,7 +360,9 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
     settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), ...Object.fromEntries(LOG_SWITCHES.map((k) => [k, cfg[k] === true])), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg) },
     logs: { runs: tilde(path.join(LOGS, 'runs')), requests: tilde(REQUESTS) },
     voice: cfg.voice ? JSON.stringify(cfg.voice, null, 2) : '',
-    choices: { permissions: PERMISSIONS, effort: EFFORTS, theme: Object.keys(THEMES), toggles: TOGGLES },
+    statusBar: cfg.statusBar === undefined ? null : cfg.statusBar, // false (off), a list of lines, or null (default)
+    capabilities: capabilities(cfg), // features that need outside tools, and whether they're here
+    choices: { permissions: PERMISSIONS, effort: EFFORTS, theme: Object.keys(THEMES), toggles: TOGGLES, statusItems: STATUS_ITEMS },
     files: FILES.map(([name, about, json, example]) => ({ name, about, json, example, text: fs.existsSync(path.join(HOME, name)) ? fs.readFileSync(path.join(HOME, name), 'utf8') : '' })),
     skills: [...loadSkills(null).values()].map((s) => ({ name: s.name, description: s.description, use: s.use, mine: s.file.startsWith(skillsDir() + path.sep), text: fs.readFileSync(s.file, 'utf8') })),
     mcp: mcpServers(),
@@ -628,6 +649,20 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
       save('setting:voice')
       return state()
     },
+    // The status bar's layout from the visual editor: false (off), null (back to default), or a list
+    // of lines ({ left:[item ids], right:[item ids] }). Unknown item ids are dropped; empty = off.
+    'POST /api/statusbar': ({ statusBar }) => {
+      const clean = (a) => (Array.isArray(a) ? a.filter((x) => STATUS_IDS.has(x)) : [])
+      if (statusBar === false) cfg.statusBar = false
+      else if (statusBar == null) cfg.statusBar = undefined
+      else if (Array.isArray(statusBar)) {
+        const line = (row) => (Array.isArray(row) ? { left: clean(row), right: [] } : { left: clean(row?.left), right: clean(row?.right) }) // a line is a bare list (all left) or { left, right }
+        const lines = statusBar.map(line).filter((r) => r.left.length || r.right.length)
+        cfg.statusBar = lines.length ? lines : false // every line emptied out: same as off
+      } else throw new Error('statusBar: false, null, or a list of lines')
+      save('setting:statusBar')
+      return state()
+    },
     'POST /api/file': ({ name, text }) => {
       const f = FILES.find(([n]) => n === name)
       if (!f) throw new Error(`not a settings file: ${name}`)
@@ -654,7 +689,9 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
       const servers = (data.mcpServers ??= {})
       if (on) {
         if (servers[name]) delete servers[name].disabled
-        if (servers[name] && !Object.keys(servers[name]).length) delete servers[name] // only the "off" was ours
+        if (DEFAULT_SERVERS[name]?.disabled)
+          servers[name] = { ...(servers[name] ?? {}), disabled: false } // a built-in that's off by default: write an explicit "on" to beat the default
+        else if (servers[name] && !Object.keys(servers[name]).length) delete servers[name] // a default-on server we'd only turned off: back to the default
       } else servers[name] = { ...servers[name], disabled: true }
       writeJson(file, data)
       changed('mcp')
@@ -686,6 +723,13 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
       writeJson(file, data)
       changed('mcp')
       return state()
+    },
+    // Sign in to a remote MCP server — needs the running HeartCode (it opens your browser). Not
+    // available when the page was opened standalone with `heart settings`.
+    'POST /api/mcp/login': async ({ name }) => {
+      if (!onLoginMcp) throw new Error('open the settings from HeartCode (/settings), or sign in there with /login_mcp')
+      const message = await onLoginMcp(String(name ?? ''))
+      return { ...state(), message }
     },
     'POST /api/prompt': ({ id, text }) => {
       const [file, name] = String(id ?? '').split('/')
@@ -719,6 +763,34 @@ export function startSettings({ cfg, apply = () => {}, port = 0 } = {}) {
       if (!removeSkill(name)) throw new Error(`no skill "${name}" of yours`)
       changed('skill')
       return state()
+    },
+    // Install a skill from a GitHub repo or a SKILL.md URL (same as /install_skill); global scope,
+    // since the dashboard isn't tied to a project folder.
+    'POST /api/skill/install': async ({ url }) => {
+      const msg = await installSkill(null, String(url ?? ''), 'global')
+      changed('skill')
+      return { ...state(), message: msg }
+    },
+    // What other coding CLIs have set up that can be brought in (same as /import), listed to pick from.
+    'POST /api/imports': () => {
+      importCache = findImports(root)
+      return { items: importCache.map((it, id) => ({ id, group: it.group, label: it.label, desc: it.desc })) }
+    },
+    // Run the picked imports (by id, from the last listing) and reload.
+    'POST /api/imports/run': ({ ids }) => {
+      const results = []
+      for (const id of Array.isArray(ids) ? ids : []) {
+        const it = importCache[id]
+        if (!it) continue
+        try {
+          results.push({ ok: true, label: it.label, message: it.run() })
+        } catch (e) {
+          results.push({ ok: false, label: it.label, message: e.message })
+        }
+      }
+      changed('skill')
+      changed('mcp')
+      return { ...state(), results }
     },
   }
 

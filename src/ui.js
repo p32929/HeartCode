@@ -110,11 +110,15 @@ setTheme()
 // built-in key off); anything else is sent as typed (a /command or a message). Ctrl+C stays Ctrl+C.
 const CONTROL_KEYS = { '\x1c': 'ctrl+\\', '\x1d': 'ctrl+]', '\x1e': 'ctrl+^', '\x1f': 'ctrl+_' } // no name from readline
 export const keyId = (key, s = '') => CONTROL_KEYS[key.sequence ?? s] ?? [key.ctrl && 'ctrl', key.meta && 'alt', key.shift && 'shift', key.name ?? s].filter(Boolean).join('+').toLowerCase()
-// While it works, Enter queues a message; Ctrl+] stops the answer and sends the first queued one,
-// Ctrl+\ all of them (as one message); Ctrl+_ switches what goes when an answer is done (all or
-// the next one). /voice records (no key unless keybindings.json gives it one); Ctrl+T, Ctrl+Q, Ctrl+N/P (or Ctrl+PgDn/PgUp), Alt+1…9: tabs; Shift+↑↓ and Alt+↑↓
-// scroll the conversation (as PgUp/PgDn and the mouse wheel do). keybindings.json can move them.
-export const DEFAULT_KEYS = { 'ctrl+]': 'send_first', 'ctrl+\\': 'send_all', 'ctrl+_': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'ctrl+t': 'new_tab', 'ctrl+q': 'close_tab', 'ctrl+n': 'next_tab', 'ctrl+p': 'prev_tab', 'ctrl+pagedown': 'next_tab', 'ctrl+pageup': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
+// The built-in keys use Alt/Option, not Ctrl, so they don't clash with the shell and readline (Ctrl+N/P
+// history, Ctrl+T transpose, Ctrl+Q flow-control, Ctrl+\ quit). On macOS Terminal.app, Alt keys need
+// "Use Option as Meta key" on (Settings → Profiles → Keyboard); Ctrl+PgUp/PgDn cycle tabs without it.
+// While it works, Enter queues a message; Alt+S stops the answer and sends the first queued one,
+// Alt+A all of them (as one message); Alt+M switches what goes when an answer is done (all or the
+// next one). /voice records (Space in an empty box, or a key in keybindings.json); Alt+T, Alt+W,
+// Alt+N/P (or Ctrl+PgDn/PgUp), Alt+1…9: tabs; Shift+↑↓ and Alt+↑↓ scroll the conversation (as
+// PgUp/PgDn and the mouse wheel do). keybindings.json can move any of them.
+export const DEFAULT_KEYS = { 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', 'ctrl+pagedown': 'next_tab', 'ctrl+pageup': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
 export function loadKeys(file = path.join(HOME, 'keybindings.json')) {
   let raw = {}
   try {
@@ -885,7 +889,8 @@ export class UI {
     const hiddenBelow = input.rows.length - first - box.length
     const rule = c.ghost('─'.repeat(cols))
     const note = (n, arrow) => c.ghost('── ') + c.faint(`${arrow} ${n} more line${n > 1 ? 's' : ''}`) + c.ghost(` ${'─'.repeat(Math.max(0, cols - 18 - String(n).length))}`)
-    const below = [hiddenBelow ? note(hiddenBelow, '↓') : rule, ...(this.status ? this.status().split('\n').map((l) => fit(' ' + l, cols)) : [])] // the status bar, one line or more
+    const statusText = this.status?.(cols) // the status bar (may be several lines, or '' when turned off)
+    const below = [hiddenBelow ? note(hiddenBelow, '↓') : rule, ...(statusText ? statusText.split('\n').map((l) => fit(' ' + l, cols)) : [])]
     const bottom = []
     if (this.timer && !this.asking) {
       // the spinner on its own line; the timer (and Esc) on the next, so neither line is crammed
@@ -898,7 +903,7 @@ export class UI {
     if (this.ahead.length) {
       const key = (k, d) => `${c.muted(k)} ${c.faint(d)}`
       const sep = c.ghost(' · ')
-      bottom.push(fit(`  ${c.bright(`queued ${this.ahead.length}`)}${sep}${c.faint(`when done: ${this.queueMode === 'one' ? 'one by one' : 'all together'}`)}${sep}${[key('Ctrl+]', 'send first now'), key('Ctrl+\\', 'send all now'), key('Ctrl+_', 'change when done')].join(sep)}`, cols))
+      bottom.push(fit(`  ${c.bright(`queued ${this.ahead.length}`)}${sep}${c.faint(`when done: ${this.queueMode === 'one' ? 'one by one' : 'all together'}`)}${sep}${[key('Alt+S', 'send first now'), key('Alt+A', 'send all now'), key('Alt+M', 'change when done')].join(sep)}`, cols))
       for (const [i, l] of this.ahead.slice(0, 5).entries()) bottom.push(fit(`  ${c.accent(`${i + 1}.`)} ${c.muted(l.replace(/\s+/g, ' '))}`, cols))
       if (this.ahead.length > 5) bottom.push(c.faint(`  … ${this.ahead.length - 5} more`))
     }
@@ -953,6 +958,9 @@ export class UI {
         return this.refreshMenu()
       }
       if (bound) return this.#action(bound, write)
+      // Space in an empty box starts voice straight away — no /voice needed (only when it's set up,
+      // and not in a menu or a mid-task yes/no question, where Space types a space as usual)
+      if (key.name === 'space' && !this.rl.line && !this.menu.pick && !(this.asking && !this.histOn) && this.voiceReady()) return this.#action('voice', write)
       if (!this.asking && !(key.ctrl && key.name === 'c')) return this.#typeAhead(s, key, write)
       if (key.name === 'tab' && key.shift) return this.setPermission(PERMISSIONS[(PERMISSIONS.findIndex(([p]) => p === this.permission) + 1) % PERMISSIONS.length][0])
       // A new line instead of sending: Shift/Ctrl/Alt/Cmd+Enter (arrive as "\n" or ESC+Enter),
@@ -1059,6 +1067,15 @@ export class UI {
   }
 
   // Typing while HeartCode works: the text stays in the box; Enter queues it (shown above the
+  // Esc to stop a running task asks for a second Esc within 2.5s first, so a stray tap doesn't kill
+  // the work. (Flushing the queue with send_first/send_all still stops at once — that's deliberate.)
+  escStop() {
+    if (!this.onEscape) return
+    if (Date.now() - (this.escArm ?? 0) < 2500) return (this.escArm = 0), this.onEscape()
+    this.escArm = Date.now()
+    this.notice('Press Esc again to stop', 2500)
+  }
+
   // input), sent when the answer is done, or at once with send_first / send_all. Esc stops the task.
   #typeAhead(s, key, write) {
     const rl = this.rl
@@ -1066,7 +1083,7 @@ export class UI {
     const it = m.on && m.items[m.sel] // a suggestion is highlighted (commands/@files show while working too)
     if (key.name === 'escape') {
       if (m.on) return (m.off = rl.line), this.#suggestWhileWorking() // first Esc just closes the suggestions
-      return this.onEscape?.()
+      return this.escStop()
     }
     if (key.name === 'tab' && key.shift) return this.setPermission(PERMISSIONS[(PERMISSIONS.findIndex(([p]) => p === this.permission) + 1) % PERMISSIONS.length][0])
     if (key.name === 'pageup' || key.name === 'pagedown') return this.scrollBy(key.name === 'pageup' ? this.page() : -this.page())
@@ -1179,6 +1196,13 @@ export class UI {
   // the input box (where the cursor was), redone about every second with the quickest model; a
   // stretch you pause or finish is done again with the best one. Returns the words, or null (Esc,
   // or it failed: said in a notice); the box is as it was, for the caller to put them in.
+  // Is voice set up and usable (a provider/whisper and its key)? Space-to-talk and the header hint
+  // only show up when it is; otherwise Space types a space as normal.
+  voiceReady() {
+    const { voice = {}, providers = {} } = this.voiceConfig?.() ?? {}
+    return !voiceProblem(voice, providers)
+  }
+
   // voiceConfig() → { voice, providers }: set by the app.
   async dictate() {
     if (this.recording) return null
@@ -1443,7 +1467,7 @@ export class UI {
       this.render() // cursor to the input row
     }
     rl.setPrompt(prompt)
-    rl.prompt()
+    rl.prompt(true) // keep the cursor where it is: text typed while the model worked stays put, cursor and all (rl.prompt() would snap it to 0)
     // put in the box as it is: typed in (rl.write), each line break would be an Enter
     if (initial && rl.terminal && this.full) [rl.line, rl.cursor] = [initial, initial.length]
     else if (initial && rl.terminal) rl.write(initial.replace(/\n/g, ' '))

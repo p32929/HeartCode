@@ -2,6 +2,73 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.27 (2026-10-31)
+
+- A built-in computer-use MCP server (@zavora-ai/computer-use-mcp), off by default: switch it on in
+  /settings → MCP servers (or see it with /mcp) to let a capable vision model control your desktop —
+  screenshots, mouse, keyboard, clipboard. It's off by default because it controls your whole machine
+  and needs the OS's screen/accessibility permission and a model that's good at computer use.
+- /mcp now lists installed-but-off servers too (marked "off"), not only the running ones.
+
+- Features that need an outside tool now say so. The settings page's General tab has an "External
+  tools" card that lists each such feature (voice input, browser preview/UI review, installing skills
+  from GitHub), ticks the ready ones, and grays out the rest with what to install — just the name of
+  what's needed, since how to install it differs by OS. /doctor shows the same in the CLI.
+
+- MCP servers now show whether they need signing in. In the CLI, /mcp lists every server with its
+  status: "local · no sign-in", "signed in", or "sign-in needed". In the settings page, each remote
+  server on the MCP page shows a "signed in" / "sign-in needed" badge and a Sign in button (it opens
+  your browser; available when the page was opened from HeartCode with /settings). Local servers show
+  no sign-in, since they don't need it.
+
+- The settings page's Skills page can install a skill from a GitHub repo or URL (owner/repo, a repo
+  link, or a link to a SKILL.md) — the /install_skill command, now a button and input. Skills show
+  with the /skill: prefix throughout the page.
+- The settings page can import from other coding CLIs (the /import command): "Import from other tools"
+  on the Skills page lists the skills, commands, MCP servers, instructions and memory found in Claude
+  Code, Cursor, Gemini CLI and Codex, grouped with checkboxes, and brings in what you tick.
+
+- /install_skill <github repo or SKILL.md url> installs a skill straight from GitHub (or any URL) —
+  "user/repo", a repo link, a .git URL, or a link to a SKILL.md. It clones (or downloads a tarball)
+  and installs every skill it finds; add --project to keep it to this folder. Run it as /skill:<name>.
+- /help now lists the keyboard shortcuts (voice, tabs, the message queue, scrolling, permissions,
+  stop), read from your effective keybindings.
+
+- Skills are now typed as /skill:name, so they're easy to tell apart from HeartCode's own commands
+  (and can't clash with them). The command menu and /help show the /skill: form; typing a bare
+  /name of a skill points you to /skill:name. Built-in commands (/help, /settings, …) are unchanged.
+- The settings page (/settings) has a visual Status bar editor: drag items into each line, drop some
+  on the right to push them to the edge, add or remove lines, turn the whole bar off, and see a live
+  preview — no editing config.json by hand. Saved changes apply to a running HeartCode right away.
+- Before building, HeartCode now checks what the project already has and reuses it (DRY), keeps code
+  clean with self-explaining names, and adds comments only where something is genuinely non-obvious.
+- Research is remembered per project: HeartCode checks the project's memory before searching, and
+  saves what it learns (a library's API, setup, a design direction, with the source) as a project
+  note, so later sessions reuse it instead of searching again.
+- Esc no longer stops a running task on a single stray tap: it asks for a second Esc within 2.5s
+  first. Flushing the queue (Alt+S / Alt+A) still stops at once.
+- When the model describes a next step but stops without doing it, HeartCode nudges it once to finish
+  the work (alongside the existing nudge for unfinished todo items).
+- The status bar is configurable. "statusBar" in config.json is a list of lines; each line is a list
+  of item names (all left-aligned) or { "left": [...], "right": [...] } to push some to the right
+  edge. Item names: provider, model, mode, thinking, images, ctx, tps, cost, autocompact, worktree,
+  permissions. "statusBar": false hides the whole bar. Left out, it keeps the default two-line
+  layout. Changes to config.json apply live. Example:
+  "statusBar": [["provider", "model"], { "left": ["ctx", "tps"], "right": ["permissions"] }]
+- Text you type while the model is answering keeps its cursor: when the answer finishes, the cursor
+  stays where it was in what you'd typed, instead of jumping to the start of the line.
+- The built-in keyboard shortcuts moved off Ctrl, which collided with the shell and line editing
+  (Ctrl+N/P history, Ctrl+T transpose, Ctrl+Q flow-control, Ctrl+\ quit), onto Alt/Option: tabs are
+  Alt+T (new), Alt+W (close), Alt+N/Alt+P (switch, and Alt+1…9 to jump); the message queue is Alt+S
+  (send first), Alt+A (send all), Alt+M (change when-done). Ctrl+PgUp/PgDn still cycle tabs for
+  terminals without an Option-as-Meta key. Scrolling (Shift+↑↓, Alt+↑↓) is unchanged. On macOS
+  Terminal.app, Alt shortcuts need "Use Option as Meta key" on (Settings → Profiles → Keyboard);
+  keybindings.json can remap any of them.
+- Voice input without the /voice command: when voice is set up, press Space while the input box is
+  empty and it starts listening straight away (Space again to pause, Enter to finish, Esc to cancel).
+  The shortcut is shown in the header hint ("Space talk (voice)"). With text already in the box, or
+  when voice isn't set up, Space types a space as before.
+
 ## 0.1.26 (2026-10-31)
 
 - edit_file can now change a file by line number: give start_line (and end_line for a range) with the

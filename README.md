@@ -28,7 +28,7 @@ tried did what I needed. In short, HeartCode:
 - **Logs each request and its reply** in a file of its own, when you switch logging on, so you
   can see what went wrong.
 - **Takes skills, MCP servers and hooks** in Claude Code's formats; `/import` brings yours over.
-- **Has tabs** (`Ctrl+T`), each with its own conversation, and git worktrees for work kept apart.
+- **Has tabs** (`Alt+T`), each with its own conversation, and git worktrees for work kept apart.
 
 ## How I set it up and use it
 
