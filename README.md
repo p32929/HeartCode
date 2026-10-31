@@ -12,31 +12,47 @@ what you can read.
 ## Why I made it
 
 Not to compete with other coding CLIs. I made it for my own use, because none of the ones I
-tried did what I needed. In short, HeartCode:
+tried did what I needed:
 
-- **Works with any OpenAI-compatible provider**, several at once: OpenRouter, Groq, NVIDIA,
-  Gemini, Ollama, LM Studio, your own proxy…
-- **Keeps a list of models and falls back on its own.** When one hits a rate limit or goes down,
-  the next one in your list answers. Free models run out often; this way the work goes on.
-- **Works with models that can't call tools.** It guides them step by step instead.
-- **Knows each model from [models.dev](https://models.dev)**: its context window, whether it calls
-  tools, thinks or reads images. Nothing is sent to the model to find out.
-- **Learns as it works, per project.** Every web page it reads is kept whole in
-  `.heartcode/research/`, and when a task ends it saves what's worth knowing as notes
-  (`.heartcode/memory/`), drops the junk and removes throwaway files. The next task starts from
-  what's known instead of searching again.
-- **Sends only what's needed.** MCP tools go as names until one is used, old tool output becomes a
-  pointer to its saved file, guides arrive when the task needs them.
-- **Checks its work before calling it done**: a plan first, a run after every change, and a second
-  model reviewing the result against what you asked.
-- **Is set up in a web page** on your own machine (`/settings`), not by editing config files.
-- **Never sends `max_tokens`**, so no provider cuts the reply short by a limit you didn't choose.
-- **Can be used by other tools and AI agents**: `heart -p` runs one task headless, like
-  `claude -p` (see [SKILL.md](SKILL.md)).
-- **Logs each request and its reply** in a file of its own, when you switch logging on, so you
-  can see what went wrong.
+- **No dependencies, so no supply-chain attack.** Coding CLIs run with your files, your keys and
+  your shell. Most pull in hundreds of npm packages, and any one of them, or any package those
+  depend on, can be hijacked and ship malware in an update. HeartCode has none: no
+  `node_modules`, no install scripts, only Node.js and HeartCode's own code. There's nothing for
+  anyone else to poison, and you can read everything you run.
+- **None of the other CLIs I've used did these**, so HeartCode does:
+  - **Rotates through your models on its own, across providers.** Give it a list (free ones
+    included). When one hits a rate limit, goes down or fails, the next answers, from another
+    provider first, and the work goes on. A ↻ in the status bar shows when a fallback is answering.
+  - **Moves to a bigger model instead of forgetting.** When the conversation outgrows a model's
+    context window, it switches to one of your models with room before it summarizes anything away.
+  - **Researches before it builds.** It assumes what it remembers is out of date and reads the
+    current official docs first, not blogs or memory.
+  - **Learns, per project, and keeps it.** Every web page it reads is kept whole in
+    `.heartcode/research/`. When a task ends it saves what's worth knowing as notes
+    (`.heartcode/memory/`), drops the junk and removes throwaway files. A mistake it fixes becomes a
+    lesson it won't repeat. The next task starts from what's known instead of searching again.
+  - **Checks its work before calling it done**: a plan first, a run after every change, and another
+    model reviewing the result against what you asked. Going round in circles hands the work to
+    your next model; only you (Esc) stop it.
+  - **Gets good work out of weak and local models.** Models that can't call tools are guided step
+    by step. Edits by line number save a model that can't repeat text exactly. Each model's
+    abilities come from [models.dev](https://models.dev), so nothing is spent finding out.
+  - **Sends only what's needed.** MCP tools go as names until one is used, old tool output becomes a
+    pointer to its saved file, and guides arrive when the task needs them.
+  - **Tells you on Telegram** when a task finishes, fails or waits for you, so you can walk away.
+  - **Never sends `max_tokens`**, so no provider cuts a reply short by a limit you didn't choose.
+
+### And the rest you'd expect
+
+- **Any OpenAI-compatible provider**, several at once: OpenRouter, Groq, NVIDIA, Gemini, Ollama,
+  LM Studio, your own proxy…
+- **Set up in a web page** on your own machine (`/settings`), not by editing config files.
+- **Usable by other tools and AI agents**: `heart -p` runs one task headless, like `claude -p`
+  (see [SKILL.md](SKILL.md)).
+- **Logs each request and its reply** in a file of its own when you switch logging on, so you can
+  see what went wrong.
 - **Takes skills, MCP servers and hooks** in Claude Code's formats; `/import` brings yours over.
-- **Has tabs** (`Alt+T`), each with its own conversation, and git worktrees for work kept apart.
+- **Tabs** (`Alt+T`), each with its own conversation, and git worktrees for work kept apart.
 
 ## How I set it up and use it
 
