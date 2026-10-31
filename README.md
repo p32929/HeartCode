@@ -1,3 +1,5 @@
+
+
 # HeartCode
 
 A coding agent for your terminal that works with any OpenAI-compatible model.
@@ -7,7 +9,7 @@ behind your back: only Node.js (20 or newer) and HeartCode's own code. What you 
 what you can read.
 
 <!-- image: HeartCode in the terminal, answering a message -->
-![HeartCode in the terminal](https://res.cloudinary.com/m0jnrul4/image/upload/v1793165332/Screenshot_2026-10-28_at_9.28.26_AM.png)
+![HeartCode in the terminal](https://res.cloudinary.com/m0jnrul4/image/upload/v1793485425/Screenshot_2026-11-01_at_2.23.35_AM.png)
 
 ## Why I made it
 
@@ -86,34 +88,52 @@ heart
 ### 3. Open the settings page
 
 Type `/settings`. The settings page opens in your browser. It runs on your machine only
-(127.0.0.1, with a secret key in its link).
+(127.0.0.1, with a secret key in its link). A running HeartCode picks up what you change right
+away.
 
 <!-- image: the settings page -->
-![The settings page](https://res.cloudinary.com/m0jnrul4/image/upload/v1793165673/Dark_HeartCode_Models_Dashboard.png)
+![The settings page](https://res.cloudinary.com/m0jnrul4/image/upload/v1793485584/8396c407-f5f8-48af-a242-0b5cbc1c0331.png)
 
-### 4. Providers & models
+The sidebar, in four groups:
+
+- **Models**: *Your list* (the models HeartCode uses, in order) and *Providers* (where they
+  come from).
+- **General**: *Settings* (what it may do without asking, terminal colors, features, thinking
+  effort, voice input, and which outside tools are ready) and *Status bar* (drag and drop what the
+  bottom lines show, with a live preview). **Notifications**: Telegram.
+- **Skills**, **MCP servers** and **System prompt**: what HeartCode can do and how it's told.
+- **Advanced**: *Logs* (requests and runs) and *Files* (the rest of the settings, as files).
+
+### 4. Add a provider and pick models
+
+On **Models → Providers**:
+
+![The settings page](https://res.cloudinary.com/m0jnrul4/image/upload/v1793485944/HeartCode-Settings-11-01-2026_02_28_AM_1.png)
 
 1. **Add a provider**: its name, base URL and API key. Pick one of the presets to fill in the URL.
 2. **Choose the models to use**: click a model to add it to your list. I use the free models.
 
-### 5. Your models
+### 5. Put your list in order
+
+On **Models → Your list**:
 
 1. **Sort them by context and abilities.** Click the *Abilities* column, then *Context*: the
    models that can do the most, with the biggest context window, come first. Click
-   **Use this order** to save it.
+   **Save order** to keep it.
 2. **Rearrange a bit more.** Drag a row to move it. #1 is the one HeartCode uses; the others are
    its fallbacks, tried in order.
+3. **Test them** (optional): **Test all** sends each a short message and shows which really answer.
 
 If a model says *not found* in models.dev, **Retry** looks it up again, or **Set up** tells
 HeartCode what it can do.
 
-<!-- image: Your models, sorted -->
-![Your models](https://res.cloudinary.com/m0jnrul4/image/upload/v1793165634/HeartCode-Settings-10-28-2026_09_33_AM.png)
+### 6. Optional: notifications and logs
 
-### 6. Turn on logging (optional)
-
-On the **Logging** page: a log of each run, and each request with its reply, in files of their
-own. Logs older than 30 days are deleted (you can change that).
+- **Notifications**: a Telegram message when a task finishes, fails or waits for you. Make a bot
+  with [@BotFather](https://t.me/BotFather), paste its token, press Start in the bot, and
+  HeartCode finds your chat.
+- **Advanced → Logs**: a log of each run, and each request with its reply, in files of their own.
+  Logs older than 30 days are deleted (you can change that).
 
 ### 7. Back to HeartCode
 
@@ -125,7 +145,7 @@ Your changes are already in.
 **Turn off** is selected: press Enter. The page stops and HeartCode is yours again.
 
 <!-- image: the "settings page is on" dialog -->
-![The settings dialog](https://res.cloudinary.com/m0jnrul4/image/upload/v1793165735/Screenshot_2026-10-28_at_9.35.28_AM.png)
+![The settings dialog](https://res.cloudinary.com/m0jnrul4/image/upload/v1793486060/Screenshot_2026-11-01_at_2.34.15_AM.png)
 
 ### 9. Send "Hi" as a test
 
