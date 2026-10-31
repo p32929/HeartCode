@@ -885,15 +885,14 @@ export class UI {
     const hiddenBelow = input.rows.length - first - box.length
     const rule = c.ghost('─'.repeat(cols))
     const note = (n, arrow) => c.ghost('── ') + c.faint(`${arrow} ${n} more line${n > 1 ? 's' : ''}`) + c.ghost(` ${'─'.repeat(Math.max(0, cols - 18 - String(n).length))}`)
-    const below = [hiddenBelow ? note(hiddenBelow, '↓') : rule, ...(this.status ? [fit(' ' + this.status(), cols)] : [])] // under the input
+    const below = [hiddenBelow ? note(hiddenBelow, '↓') : rule, ...(this.status ? this.status().split('\n').map((l) => fit(' ' + l, cols)) : [])] // the status bar, one line or more
     const bottom = []
     if (this.timer && !this.asking) {
-      // how long it's been at this message, and (while waiting on the model) since this request was sent
+      // the spinner on its own line; the timer (and Esc) on the next, so neither line is crammed
       const request = this.requestSince?.()
       const timer = this.busySince ? `responding ${duration(this.worked())}${request ? ` · waiting for model ${duration(Date.now() - request)}` : ''} · Esc to stop` : ''
-      const retrying = this.beforeRetry !== undefined // the label is the retry message: its own line, timer below
-      bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(this.#label())}${retrying || !timer ? '' : c.faint(` · ${timer}`)}`, cols))
-      if (retrying && timer) bottom.push(fit(`  ${c.faint(timer)}`, cols))
+      bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(this.#label())}`, cols))
+      if (timer) bottom.push(fit(`  ${c.faint(timer)}`, cols))
     }
     if (this.scroll) bottom.push(c.dim(`  ↓ ${this.scroll} more lines below · scroll down, Shift+↓ or PgDn`))
     if (this.ahead.length) {

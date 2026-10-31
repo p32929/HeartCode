@@ -2,6 +2,18 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.25 (2026-10-31)
+
+- The model(s) you choose for a folder with /select_model are remembered per folder, in
+  .heartcode/models.json, and restored when you open that folder again; auto stays auto (the file
+  is removed). A -m model on the command line still wins for that run.
+- The status bar and the working spinner use two lines instead of cramming everything onto one: the
+  status shows the model and what it can do on one line, the run's stats and controls on the next;
+  the spinner shows what it's doing, with the elapsed time and Esc on the line below.
+- When a chosen set or auto rotates to a fallback (the model answering now isn't your first/preferred
+  one, because it failed), the status bar marks that model with a yellow "↻" so you can see at a
+  glance it came after rotating. No rotation, or back on the first model: no marker.
+
 ## 0.1.24 (2026-10-31)
 
 - A pinned model (one picked with /select_model, or -m) is now used by the helpers it spawns too:

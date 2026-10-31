@@ -168,6 +168,23 @@ class App {
     this.director = new Director(this) // the manage tool: skills, MCP servers and settings by asking
     this.later = [] // setting changes that wait until the current message is done
     this.failures = {} // "provider model" → failed requests this session (engine: onFail)
+    this.loadProjectModels() // the model(s) you last chose for this folder (.heartcode/models.json)
+  }
+
+  // Per folder: the model set you picked with /select_model, remembered in .heartcode/models.json and
+  // restored when you open this folder again. Absent/empty means auto (your whole list). A -m model
+  // from the command line (cfg.session already set) wins and isn't overwritten.
+  loadProjectModels() {
+    if (this.cfg.session) return
+    const saved = readJson(path.join(this.root, '.heartcode', 'models.json'), null)
+    const valid = (saved?.session ?? []).filter((t) => t?.provider && t?.model && this.cfg.providers[t.provider])
+    if (valid.length) this.cfg.session = valid
+  }
+
+  saveProjectModels() {
+    const file = path.join(this.root, '.heartcode', 'models.json')
+    if (this.cfg.session?.length) writeJson(file, { session: this.cfg.session.map((t) => ({ provider: t.provider, model: t.model })) })
+    else fs.rmSync(file, { force: true }) // auto: forget the folder's choice
   }
 
   newMcp() {
@@ -593,39 +610,42 @@ class App {
     // one model (pinned): just its name. Several chosen for this session: the one in use + "N chosen".
     // Your whole list (auto): "auto (in use) (N)". ↻ shows the rotation position while rotating.
     const count = this.sessionModels().length
-    const spin = rot ? c.faint(` ↻ ${rot.at + 1}/${rot.list.length}`) : ''
+    // the model answering now; a "↻" before it, in yellow, when it's a fallback (rotated to after one
+    // failed) — so you can see at a glance it isn't the first/preferred one
+    const rotated = rot && rot.at > 0
+    const name = rotated ? `${c.yellow('↻ ' + now.model)}` : c.info(now.model)
     const model =
       count === 1
-        ? c.info(now.model)
+        ? name
         : cfg.session
-          ? `${c.info(now.model)} ${c.faint(`(${count} chosen)`)}${spin}`
-          : `${c.muted('auto')} ${c.faint('(')}${c.info(now.model)}${c.faint(')')} ${c.faint(`(${count})`)}${spin}`
-    const parts = [`${c.brand('●')} ${c.muted(now.provider)} ${c.faint(`(${on})`)} ${c.ghost('·')} ${model}`]
+          ? `${name} ${c.faint(`(${count} chosen)`)}`
+          : `${c.muted('auto')} ${c.faint('(')}${name}${c.faint(')')} ${c.faint(`(${count})`)}`
+    // two lines so nothing is crammed: the model and what it can do, then the run's stats and controls
+    const first = [`${c.brand('●')} ${c.muted(now.provider)} ${c.faint(`(${on})`)} ${c.ghost('·')} ${model}`]
+    const second = []
     const key = `${now.provider}/${now.model}`
     if (this.profileKey !== key) [this.profileKey, this.profile] = [key, this.s?.profile ?? loadProfile(this.client(now.provider, now.model))]
     const profile = this.s?.profile ?? this.profile
     if (profile) {
       const strat = this.s?.strat ?? strategy(profile, cfg)
-      parts.push(c.muted(strat.actions === 'tools' ? 'tools' : 'guided'))
-      if (strat.thinking) parts.push(c.think(`thinking${cfg.effort ? ` · ${cfg.effort}` : ''}`) + (ui.showThinking ? '' : c.faint(' (collapsed)')))
-      if (strat.vision) parts.push(c.muted('images'))
+      first.push(c.muted(strat.actions === 'tools' ? 'tools' : 'guided'))
+      if (strat.thinking) first.push(c.think(`thinking${cfg.effort ? ` · ${cfg.effort}` : ''}`) + (ui.showThinking ? '' : c.faint(' (collapsed)')))
+      if (strat.vision) first.push(c.muted('images'))
       const used = this.s?.client.lastTokens ?? 0
       const pct = Math.round((used / strat.context) * 100)
       const paint = pct >= 80 ? c.red : pct >= 50 ? c.yellow : c.green
       const guess = strat.contextSure ? '' : '~' // not said by the server: assumed, and growing as bigger requests work
-      parts.push(`${c.faint('ctx')} ${paint(`${kTokens(used)}/${guess}${kTokens(strat.context)}`)} ${c.faint(`${pct}%`)}`)
+      second.push(`${c.faint('ctx')} ${paint(`${kTokens(used)}/${guess}${kTokens(strat.context)}`)} ${c.faint(`${pct}%`)}`)
       const tps = this.s?.client.tps
-      if (tps) parts.push(`${c.muted(String(tps))} ${c.faint('tok/s')}`)
-      if (this.chat.usage?.priced) parts.push(c.muted(money(this.chat.usage.cost)))
+      if (tps) second.push(`${c.muted(String(tps))} ${c.faint('tok/s')}`)
+      if (this.chat.usage?.priced) second.push(c.muted(money(this.chat.usage.cost)))
     } else {
-      parts.push(c.dim('not probed yet'))
+      first.push(c.dim('not probed yet'))
     }
-    if (cfg.autoCompact === false) parts.push(c.faint('auto-compact off'))
-    if (this.worktree) parts.push(c.info(`⎇ ${this.worktree.branch}`))
-
-    const perm = { all: c.green('⏵⏵ all allowed'), commands: c.yellow('ask before commands'), ask: c.yellow('ask before changes'), plan: c.info('⏸ plan mode') }[ui.permission]
-    parts.push(perm) // Shift+Tab changes it (see the header)
-    return parts.join(sep)
+    if (cfg.autoCompact === false) second.push(c.faint('auto-compact off'))
+    if (this.worktree) second.push(c.info(`⎇ ${this.worktree.branch}`))
+    second.push({ all: c.green('⏵⏵ all allowed'), commands: c.yellow('ask before commands'), ask: c.yellow('ask before changes'), plan: c.info('⏸ plan mode') }[ui.permission]) // Shift+Tab changes it
+    return [first.join(sep), second.join(sep)].filter((l) => l.replace(/\x1b\[[0-9;]*m/g, '').trim()).join('\n')
   }
 
   client(name, model) {
@@ -771,20 +791,23 @@ class App {
     return cfg.session.filter((t) => cfg.providers[t.provider] && (all || !cfg.providers[t.provider].off) && t.model && !seen.has(`${t.provider}/${t.model}`) && seen.add(`${t.provider}/${t.model}`))
   }
 
-  // Use a chosen set of models for this session (session-local, not saved): one pins it (no
-  // rotation), several rotate among just those. The saved ranking (settings page / auto) is untouched.
+  // Use a chosen set of models for this session: one pins it (no rotation), several rotate among
+  // just those. Remembered for this folder (.heartcode/models.json); the saved ranking is untouched.
   async setSession(list) {
     const { cfg } = this
-    cfg.session = list // only here; cfg.provider/model stay your global #1, so your whole list and the picker are unchanged
+    cfg.session = list // the global #1 (cfg.provider/model) stays, so your whole list and the picker are unchanged
+    this.saveProjectModels()
     this.s = null
-    this.ui.print(list.length === 1 ? `${c.green('using')} ${c.cyan(list[0].model)} ${c.dim('· pinned for this session')}` : `${c.green(`using ${list.length} models this session`)}: ${c.cyan(list.map((t) => t.model).join(', '))}`)
+    this.ui.print(list.length === 1 ? `${c.green('using')} ${c.cyan(list[0].model)} ${c.dim('· pinned for this folder')}` : `${c.green(`using ${list.length} models for this folder`)}: ${c.cyan(list.map((t) => t.model).join(', '))}`)
     await this.session()
   }
 
-  // Back to auto: your whole list again (#1, then the next when one fails), following the saved ranking.
+  // Back to auto: your whole list again (#1, then the next when one fails), following the saved
+  // ranking. The folder's remembered choice is cleared.
   async auto() {
     const { cfg } = this
-    delete cfg.session // back to your whole list (cfg.provider/model + the ranking)
+    delete cfg.session
+    this.saveProjectModels()
     this.s = null
     this.ui.print(`${c.green('using')} ${c.dim('auto')} ${c.cyan(`(${this.myModels().length} models)`)}`)
     await this.session()
