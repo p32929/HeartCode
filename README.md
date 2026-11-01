@@ -124,8 +124,9 @@ On **Models → Providers**:
 On **Models → Your list**:
 
 1. **Sort them by context and abilities.** Click the *Abilities* column, then *Context*: the
-   models that can do the most, with the biggest context window, come first. Click
-   **Save order** to keep it.
+   models that can do the most come first, the biggest context window first among those (each
+   column clicked breaks the ties of the ones before; click one again to reverse it, a third time to
+   drop it). Click **Save order** to keep it.
 2. **Rearrange a bit more.** Drag a row to move it. #1 is the one HeartCode uses; the others are
    its fallbacks, tried in order.
 3. **Test them** (optional): **Test all** sends each a short message and shows which really answer.

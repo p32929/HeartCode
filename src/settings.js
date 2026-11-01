@@ -127,7 +127,7 @@ const LIST_V = 2 // how a saved list was read (2: airforce's cents, Cloudflare's
 // The page's own choices (sorts, folded providers, the provider ranking): kept here, not in the
 // browser, whose storage is per address (a new port each time)
 const PREFS = path.join(HOME, 'settings-page.json')
-const PREF_KEYS = ['catSort', 'freeOnly', 'folded', 'sort', 'rank']
+const PREF_KEYS = ['catSort', 'freeOnly', 'folded', 'sort', 'sorts', 'rank']
 function forgetList(...names) {
   const all = readJson(LISTS, {})
   if (!names.some((n) => n in all)) return
@@ -386,6 +386,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     'POST /api/prefs': ({ key, value }) => {
       if (!PREF_KEYS.includes(key)) throw new Error(`no such choice: ${key}`)
       writeJson(PREFS, { ...readJson(PREFS, {}), [key]: value })
+      shown = JSON.stringify(state()) // the page's own choice: not sent back to it as a change (a second redraw)
       return {}
     },
     'POST /api/clear-logs': () => ({ gone: clearLogs(), size: logSize() }),

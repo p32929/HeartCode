@@ -473,6 +473,10 @@
   .setting .t span { display: block; margin-top: 2px; color: var(--muted); font-size: 13px; line-height: 1.45; text-wrap: pretty; }
   .setting select, .setting input { flex: none; width: 240px; }
   .settings-col .card.wide { grid-column: 1 / -1; }
+  /* a sort being applied: its header spins, the table dims */
+  #mt.sorting { opacity: .55; transition: opacity .1s; pointer-events: none; }
+  button.sorting::after { content: ''; display: inline-block; width: 9px; height: 9px; margin-left: 6px; vertical-align: -1px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; }
+  .sort-live { color: var(--warn); }
   .test-wait { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
   .test-wait input { width: 64px; height: 28px; padding: 2px 8px; font-size: 12.5px; text-align: right; }
   .ws-url { display: flex; gap: 8px; margin-top: 10px; }
@@ -1000,6 +1004,7 @@ function job(id, state) {
 }
 // a panel's place for them: made empty, filled now and kept up to date by job()
 const jobSlot = (where) => fillSlot(h('div', { className: 'job-slot', 'data-where': where }))
+let tableJobs = null // the Your models table's (made once, put back in each time the table is drawn)
 function fillSlot(slot) {
   const mine = [...JOBS.values()].filter((j) => j.where.includes(slot.dataset.where))
   for (const el of [...slot.children]) if (!mine.some((j) => j.id === el.dataset.job)) el.remove()
@@ -1019,7 +1024,13 @@ function fillSlot(slot) {
     stop.hidden = !j.stop
     stop.textContent = j.stopping ? 'Stopping…' : 'Stop'
     stop.disabled = Boolean(j.stopping)
-    stop.onclick = () => (j.stop(), job(j.id, { stopping: true }))
+    // at the press, not the release: a stop that's wanted now (and the keyboard's Enter/Space still click)
+    const halt = (e) => {
+      e.preventDefault()
+      if (!JOBS.get(j.id)?.stopping) j.stop(), job(j.id, { stopping: true })
+    }
+    stop.onpointerdown = halt
+    stop.onclick = halt
     el.querySelector('.bar').classList.toggle('unknown', !known)
     el.querySelector('.bar i').style.width = known ? `${Math.round((100 * (j.done ?? 0)) / j.total)}%` : ''
   }
@@ -1414,7 +1425,27 @@ function showTried(t) {
   if (!TRIES[keyOf(t)]?.going) mineSoon() // a result: the counts by result (and a sort by it) change
 }
 let mineFrame = 0
-const mineSoon = () => (mineFrame ||= requestAnimationFrame(() => ((mineFrame = 0), S && drawMine(S))))
+// While tests run, results come many a second: the table is drawn again at most every 400 ms (drawn
+// every frame, its buttons were replaced between a click's press and release, and the click was lost)
+// And never while the mouse button is down: a click's press and release then land on the same button.
+let mineLast = 0
+let pressed = false
+let drawAfterPress = false
+addEventListener('pointerdown', () => (pressed = true), true)
+for (const ev of ['pointerup', 'pointercancel']) addEventListener(ev, () => {
+  pressed = false
+  if (drawAfterPress) (drawAfterPress = false), setTimeout(mineSoon, 0) // after the click it finishes
+}, true)
+const mineSoon = () => {
+  if (mineFrame) return
+  const later = testingAll ? Math.max(0, mineLast + 400 - Date.now()) : 0
+  mineFrame = setTimeout(() => requestAnimationFrame(() => {
+    mineFrame = 0
+    if (pressed) return (drawAfterPress = true) // drawn once it's let go
+    mineLast = Date.now()
+    S && drawMine(S)
+  }), later)
+}
 // Tests run on the settings server (closing this page doesn't stop them; their results are kept
 // there for next time): this page asks for them and shows what the server says as it goes.
 async function tryModel(t) {
@@ -1926,19 +1957,23 @@ function buildCatalog(s) {
 // --- Your models page: the list as a table; sorted by several columns at once (each a tie-break
 // for the ones before it), the sort kept in this browser ---
 const can = (t) => ({ tools: t.tested ? t.tested.mode === 'tools' : t.known?.tools !== false, thinking: Boolean(t.tested ? t.tested.thinking : t.known?.thinking), images: Boolean(t.tested ? t.tested.vision : t.known?.images) })
-// how: text (A to Z first), cheap (lowest first), else most first
+// Every column sorts by the value it shows: up (↑) smallest first, down (↓) largest first. first: the
+// direction of the first click (the useful one). get: the value; null when there's none (no price, no
+// context, no time because it failed or wasn't tested): last, either way; missing: their order then.
+// words: what each direction means, for the "Sorted by" line.
 const COLS = {
-  model: { label: 'Model', how: 'text', get: (t) => t.model },
-  provider: { label: 'Provider', how: 'rank', get: (t) => RANKED.get(t.provider) }, // by your ranking of the providers
-  context: { label: 'Context', get: (t) => t.tested?.context ?? t.known?.context ?? 0 },
-  abilities: { label: 'Abilities', get: (t) => Object.values(can(t)).filter(Boolean).length },
-  tools: { label: 'Tools', get: (t) => can(t).tools },
-  thinking: { label: 'Thinking', get: (t) => can(t).thinking },
-  images: { label: 'Images', get: (t) => can(t).images },
-  input: { label: 'In $/M', how: 'cheap', get: (t) => t.price?.input ?? null },
-  output: { label: 'Out $/M', how: 'cheap', get: (t) => t.price?.output ?? null },
-  // tested and working first, the fastest answer first (its seconds); not tested; not working
-  works: { label: 'Works?', get: (t) => { const r = TRIES[keyOf(t)]; return !r || r.going ? 1 : r.ok ? 2 + 1 / (1 + (r.ms ?? 0) / 1000) : 0 } },
+  model: { label: 'Model', first: 'up', get: (t) => t.model, words: ['A→Z', 'Z→A'] },
+  // a provider's priority: your ranking's first is the highest
+  provider: { label: 'Provider', first: 'down', get: (t) => -(RANKED.get(t.provider) ?? 1e6), words: ['your ranking, reversed', 'your ranking'] },
+  context: { label: 'Context', first: 'down', get: (t) => t.tested?.context ?? t.known?.context ?? null, words: ['smallest first', 'biggest first'] },
+  abilities: { label: 'Abilities', first: 'down', get: (t) => Object.values(can(t)).filter(Boolean).length, words: ['fewest first', 'most first'] },
+  tools: { label: 'Tools', first: 'down', get: (t) => can(t).tools, words: ['without first', 'with first'] },
+  thinking: { label: 'Thinking', first: 'down', get: (t) => can(t).thinking, words: ['without first', 'with first'] },
+  images: { label: 'Images', first: 'down', get: (t) => can(t).images, words: ['without first', 'with first'] },
+  input: { label: 'In $/M', first: 'up', get: (t) => t.price?.input ?? null, words: ['cheapest first', 'priciest first'] },
+  output: { label: 'Out $/M', first: 'up', get: (t) => t.price?.output ?? null, words: ['cheapest first', 'priciest first'] },
+  // its test's time (seconds, as shown); failed or not tested: no time, at the end (not tested before failed)
+  works: { label: 'Works?', first: 'up', get: (t) => { const r = TRIES[keyOf(t)]; return r?.ok && !r.going ? r.ms ?? 0 : null }, missing: (t) => { const r = TRIES[keyOf(t)]; return !r || r.going ? 0 : 1 }, words: ['fastest first', 'slowest first'] },
 }
 let SORT = []
 // your ranking of the providers, best first (kept: savePref); a provider not ranked yet comes after, A to Z
@@ -1969,20 +2004,28 @@ $('pr-save').onclick = () => {
   RANK = [...list, ...RANK.filter((n) => !list.includes(n))] // providers not in your list now keep their place for later
   savePref('rank', RANK)
   $('pr').close()
-  setSort(SORT.some((x) => x.key === 'provider') ? SORT : [{ key: 'provider', dir: 'up' }, ...SORT]) // sorted by it now
+  setSort(SORT.some((x) => x.key === 'provider') ? SORT : [{ key: 'provider', dir: 'down' }, ...SORT]) // sorted by it now
 }
-const firstDir = (key) => (COLS[key].how ? 'up' : 'down') // up: A to Z, low to high
+const firstDir = (key) => COLS[key].first // up: A to Z, low to high
 function setSort(next) {
   SORT = next
-  savePref('sort', SORT)
+  savePref('sorts', SORT)
   drawMine(S)
 }
-// a column's header: first click adds it (after those already sorted by), the second flips it, the third drops it
-function clickSort(key) {
+// A column's header: the first click adds it (after the ones already sorted by, to break their ties),
+// the second flips it, the third drops it. Until the new order is drawn, the header spins and the table
+// dims (the next frame: the click shows at once).
+function clickSort(key, btn) {
   const at = SORT.find((x) => x.key === key)
-  if (!at) return setSort([...SORT, { key, dir: firstDir(key) }])
-  if (at.dir === firstDir(key)) return setSort(SORT.map((x) => (x === at ? { key, dir: at.dir === 'up' ? 'down' : 'up' } : x)))
-  setSort(SORT.filter((x) => x !== at))
+  const next = !at ? [...SORT, { key, dir: firstDir(key) }]
+    : at.dir === firstDir(key) ? SORT.map((x) => (x === at ? { key, dir: at.dir === 'up' ? 'down' : 'up' } : x))
+    : SORT.filter((x) => x !== at)
+  btn?.classList.add('sorting')
+  $('mt')?.classList.add('sorting')
+  requestAnimationFrame(() => setTimeout(() => {
+    setSort(next)
+    $('mt')?.classList.remove('sorting')
+  }, 0))
 }
 let RANKED = new Map() // provider → its place in the ranking, for one sort
 function sorted(order) {
@@ -1990,15 +2033,16 @@ function sorted(order) {
   const cmp = (a, b, { key, dir }) => {
     let x = COLS[key].get(a)
     let y = COLS[key].get(b)
+    if (x == null && y == null) return (COLS[key].missing?.(a) ?? 0) - (COLS[key].missing?.(b) ?? 0)
     if (x === y) return 0
-    if (x == null) return 1 // unknown (no price): last, either way
+    if (x == null) return 1 // none (no price, no time): last, either way
     if (y == null) return -1
     const r = typeof x === 'string' ? byName(x, y) : Number(x) - Number(y)
     return dir === 'up' ? r : -r
   }
   return order.map((t, i) => ({ t, i })).sort((a, b) => SORT.reduce((r, s) => r || cmp(a.t, b.t, s), 0) || a.i - b.i).map((x) => x.t)
 }
-const dirText = (key, dir) => (key === 'provider' ? (dir === 'up' ? 'your ranking' : 'your ranking, reversed') : key === 'works' ? (dir === 'down' ? 'working first, fastest first' : 'not working first') : COLS[key].how === 'text' ? (dir === 'up' ? 'A→Z' : 'Z→A') : COLS[key].how === 'cheap' ? (dir === 'up' ? 'cheapest first' : 'priciest first') : dir === 'down' ? 'most first' : 'least first')
+const dirText = (key, dir) => COLS[key].words[dir === 'up' ? 0 : 1] + (key === 'works' ? ' (then not tested, then not working)' : '')
 // The models ticked on the Your models page ("provider/model"), to remove several at once; the last
 // one ticked, so a Shift+click ticks the ones between
 const PICKED = new Set()
@@ -2030,7 +2074,7 @@ function drawMine(s) {
   // the order you see, saved as yours; the sort then goes (your own order from here on: drag on)
   const keep = (list, moved) => {
     SORT = []
-    savePref('sort', SORT)
+    savePref('sorts', SORT)
     return saveOrder(withOff(list), list[0] !== order[0] ? `${moved ? '' : 'order saved: '}HeartCode now uses ${list[0].provider} · ${list[0].model}` : 'order saved')
   }
   // a row dragged (in the order shown, sorted or not)
@@ -2043,7 +2087,7 @@ function drawMine(s) {
   }
   const head = (key, num) => {
     const at = SORT.findIndex((x) => x.key === key)
-    return h('button', { type: 'button', className: (at >= 0 ? 'on ' : '') + (num ? 'num' : ''), title: `sort by ${COLS[key].label.toLowerCase()}`, onclick: () => clickSort(key) },
+    return h('button', { type: 'button', className: (at >= 0 ? 'on ' : '') + (num ? 'num' : ''), title: `sort by ${COLS[key].label.toLowerCase()} too (after the ones already sorted by) · click again: reversed · again: not by it`, onclick: (e) => clickSort(key, e.currentTarget) },
       COLS[key].label, at >= 0 ? ` ${SORT[at].dir === 'up' ? '↑' : '↓'}${SORT.length > 1 ? at + 1 : ''}` : '')
   }
   const table = order.length ? h('ol', { className: 'mtable' + (order.length < 2 ? '' : ' drag') }) : null
@@ -2062,7 +2106,8 @@ function drawMine(s) {
     h('div', { className: 'mt-top' },
       h('div', { className: 'sorts' }, SORT.length
         ? ['Sorted by ', SORT.map(({ key, dir }, k) => h('span', { className: 'chip' }, `${k + 1}. ${COLS[key].label}: ${dirText(key, dir)}`, h('button', { type: 'button', textContent: '✕', 'aria-label': `stop sorting by ${COLS[key].label}`, onclick: () => setSort(SORT.filter((x) => x.key !== key)) })))]
-        : order.length > 1 ? 'Your order: #1 first, the next when one fails.' : ''),
+        : order.length > 1 ? 'Your order: #1 first, the next when one fails.' : '',
+        testingAll && SORT.some((x) => x.key === 'works') ? h('span', { className: 'sort-live' }, ' · tests still running: the order moves as their results come in') : null),
       PICKED.size ? h('button', { className: 'small danger', textContent: `Remove ${PICKED.size} selected`, onclick: removePicked }) : null,
       PICKED.size ? h('button', { className: 'small', textContent: `Test ${PICKED.size} selected`, disabled: testingAll, onclick: () => tryAll(order.filter((t) => PICKED.has(keyOf(t)))) }) : null,
       PICKED.size ? h('button', { className: 'small', textContent: 'Clear selection', onclick: () => (PICKED.clear(), drawMine(S)) }) : null,
@@ -2093,7 +2138,7 @@ function drawMine(s) {
       h('span', { className: 'hint', textContent: s.rotation.on === 'retries' ? 'A rate limit or outage: that model is tried again that many times first; any other error moves on at once.' : "Any error moves on at once, to another provider's model first." })) : null,
     order.length
       ? h('div', { className: 'mt-scroll' }, h('div', { className: 'mt' },
-          jobSlot('table'),
+          (tableJobs ??= jobSlot('table')), // the same one every time: its Stop button isn't replaced under the mouse
           byOutcome.length ? h('div', { className: 'mt-outcomes' }, h('span', { textContent: 'Test results', title: 'click one to select those models; ↻ tests them again' }), byOutcome) : null,
           h('div', { className: 'mt-h' }, h('span'),
             h('input', { type: 'checkbox', checked: all, indeterminate: PICKED.size > 0 && !all, title: all ? 'select none' : 'select all', 'aria-label': 'select all', onchange: () => (all ? PICKED.clear() : view.forEach((t) => PICKED.add(keyOf(t))), (lastPicked = null), drawMine(S)) }),
@@ -2764,7 +2809,8 @@ function render(s) {
     $('free-only').checked = freeOnly
     FOLDED.clear()
     for (const n of Array.isArray(p.folded) ? p.folded : []) FOLDED.add(n)
-    SORT = Array.isArray(p.sort) ? p.sort.filter((x) => COLS[x?.key]) : []
+    const flip = (x) => (['provider', 'works'].includes(x.key) ? { ...x, dir: x.dir === 'up' ? 'down' : 'up' } : x) // an older page's sort: these two ran the other way
+    SORT = Array.isArray(p.sorts) ? p.sorts.filter((x) => COLS[x?.key]) : Array.isArray(p.sort) ? p.sort.filter((x) => COLS[x?.key]).map(flip) : []
     RANK = Array.isArray(p.rank) ? p.rank.filter((x) => typeof x === 'string') : []
   }
   S = s

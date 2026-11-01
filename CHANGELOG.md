@@ -2,6 +2,21 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.35 (2026-11-02)
+
+- Settings page, Your list: every column sorts by the value it shows, ↑ smallest first and ↓
+  largest first, the first click the useful way (Model A→Z, Provider your ranking, Context and
+  Abilities most first, Tools/Thinking/Images with first, prices cheapest first, Works? fastest
+  first). Works? sorts by the test's time; failed and untested models (no time), unknown prices and
+  contexts are last either way (untested before failed). Clicks still stack sorts (each breaks the
+  ties of the ones before). A sort kept from before is converted.
+- A sort redraws the table once (it was redrawn again half a second later, when the page's own
+  saved sort came back from the server as a change); the header spins until the new order is drawn,
+  and while tests run the sort line says the order moves as results come in.
+- Stop (and every button in the table) works at the first click while tests run: the table was
+  redrawn at every result, replacing buttons between a click's press and release. Now it's redrawn
+  at most every 400 ms, never while the mouse button is down, Stop keeps its place and acts on press.
+
 ## 0.1.34 (2026-11-02)
 
 - Model tests on the settings page (Test all, Test selected, a row's Test and Hello) wait 10
