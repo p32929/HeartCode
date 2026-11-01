@@ -739,10 +739,13 @@ export class UI {
     const blank = c.brand('│') + ' '.repeat(W) + c.brand('│')
     for (let i = 0; i < PY; i++) out += row(1 + i, blank)
     for (let i = 0; i < h; i++) out += row(1 + PY + i, c.brand('│') + ' '.repeat(PX) + pad(lines[i] ?? '', w) + ' '.repeat(PX) + c.brand('│'))
+    // what's in it can be selected (copied), all but its last line (the keys)
+    const last = lines.findLastIndex((l) => String(l ?? '').trim())
+    for (let i = 0; i < Math.min(h, last); i++) this.regions.set(y + 1 + PY + i, { x: x + 1 + PX, text: fit(lines[i] ?? '', w).replace(/\x1b\[[0-9;]*m/g, '').trimEnd() })
     for (let i = 0; i < PY; i++) out += row(1 + PY + h + i, blank)
     out += row(2 + 2 * PY + h - 1, c.brand('╰' + '─'.repeat(W) + '╯'))
     const cur = d.cursor?.(w)
-    return out + (cur ? `\x1b[${y + 1 + PY + cur.row};${x + 1 + PX + Math.min(cur.col, w - 1)}H\x1b[?25h` : '\x1b[?25l')
+    return [out, cur ? `\x1b[${y + 1 + PY + cur.row};${x + 1 + PX + Math.min(cur.col, w - 1)}H\x1b[?25h` : '\x1b[?25l']
   }
 
   // The question being asked, as a dialog: its title; what's typed (the filter, or the answer) with the
@@ -916,25 +919,57 @@ export class UI {
 
   // The mouse: the wheel scrolls the conversation; dragging selects in it, copied when let go
   // (the terminal can't select itself while HeartCode takes the mouse). A click or a key clears it.
+  // The mouse: the wheel scrolls (a dialog's own text, else the conversation); dragging selects, copied
+  // when let go: in the conversation (it stays selected as it scrolls), in a dialog, the header's
+  // folder, the input box or the status bar; a double click copies the word under it (an address, a
+  // path, a model's name). The terminal can't select itself while HeartCode takes the mouse
+  // (Shift+drag, or Option+drag on macOS, still lets it). A click or a key clears a selection.
   #mouse(b, x, y, up) {
     if (!this.full) return
-    if (b & 64) return (b & 0xc3) === 64 || (b & 0xc3) === 65 ? this.scrollBy(b & 1 ? -3 : 3) : undefined // 64 up, 65 down
-    if ((b & 3) !== 0 && !up) return // the left button only (a release says 3 in some terminals)
-    if (this.dialog) {
-      // the wheel scrolls it; a click inside goes to it, outside closes it
-      const d = this.dialogAt
-      if (b & 64) return (b & 0xc3) === 64 || (b & 0xc3) === 65 ? (this.dialog.key?.({ name: b & 1 ? 'down' : 'up', wheel: true }), this.render()) : undefined
-      if ((b & 32) || up || !d) return
-      if (x < d.x || y < d.y || x > d.x + d.W + 1 || y > d.y + d.H + 1) return this.setDialog(null) // outside it
-      return this.dialog.click?.(x - d.cx, y - d.cy), this.render()
+    const modal = Boolean(this.dialog || (this.asking && !this.histOn && this.rl))
+    if (b & 64) {
+      if ((b & 0xc3) !== 64 && (b & 0xc3) !== 65) return
+      if (this.dialog) return this.dialog.key?.({ name: b & 1 ? 'down' : 'up', wheel: true }), this.render()
+      return this.scrollBy(b & 1 ? -3 : 3) // 64 up, 65 down
     }
-    if (!(b & 32) && !up && y <= 3 && this.onTabClick) return this.onTabClick(x - 1) // the tab bar's 3 rows
-
+    if ((b & 3) !== 0 && !up) return // the left button only (a release says 3 in some terminals)
+    const press = !(b & 32) && !up
+    if (press) {
+      const twice = this.lastClick && Date.now() - this.lastClick.t < 450 && this.lastClick.x === x && this.lastClick.y === y
+      this.lastClick = { t: Date.now(), x, y }
+      if (twice) return this.#copyWord(x, y)
+      this.sel = null
+      this.ssel = null
+      this.flash = null
+      const d = this.dialogAt
+      if (modal && d && (x < d.x || y < d.y || x > d.x + d.W + 1 || y > d.y + d.H + 1)) return this.dialog ? this.setDialog(null) : this.render() // outside a dialog: closed (a question stays)
+      if (!modal && y <= 3 && this.onTabClick) return this.onTabClick(x - 1) // the tab bar's 3 rows
+      if (modal || this.regions?.has(y)) {
+        // a dialog, the header, the input, the status bar: a screen selection (a click without a drag: the dialog's own)
+        this.ssel = { a: { x, y }, b: { x, y }, moved: false, rows: this.regions, inDialog: modal }
+        return this.render()
+      }
+    }
+    if (this.ssel) {
+      const sel = this.ssel
+      if (x !== sel.b.x || y !== sel.b.y) Object.assign(sel, { b: { x, y }, moved: true })
+      if (up) {
+        this.ssel = null
+        const text = sel.moved && this.#selectedRows(sel).map((r) => r.text.trimEnd()).join('\n').trim()
+        if (text) this.#copied(text)
+        else if (sel.inDialog && this.dialog && this.dialogAt) this.dialog.click?.(x - this.dialogAt.cx, y - this.dialogAt.cy)
+        else if (sel.inDialog) return this.render()
+        if (text) this.flash = sel // left lit a moment, so you see what was copied
+        if (text) setTimeout(() => this.flash === sel && ((this.flash = null), this.render()), 700).unref?.()
+      }
+      return this.render()
+    }
+    if (modal) return
     const v = this.viewAt
     if (!v) return
     const r = Math.min(Math.max(y - 1 - v.first, 0), v.avail - 1) // a drag past the edge stops at it
     const at = { row: v.top + Math.min(r, Math.max(0, v.count - 1)), col: x - 1 }
-    if (!(b & 32) && !up) {
+    if (press) {
       // a press: starts a selection, inside the conversation only
       this.sel = y - 1 >= v.first && y - 1 < v.first + v.count ? { a: at, b: at, moved: false } : null
       return this.render()
@@ -944,8 +979,37 @@ export class UI {
     if (up) {
       const text = this.sel.moved && this.#selected()
       if (!text) this.sel = null
-      else this.notice(`copied ${text.length} character${text.length === 1 ? '' : 's'}${copyText(text) === 'osc' ? ' (through the terminal)' : ''}`)
+      else this.#copied(text)
     }
+    this.render()
+  }
+  #copied(text) {
+    this.notice(`copied ${text.length} character${text.length === 1 ? '' : 's'}${copyText(text) === 'osc' ? ' (through the terminal)' : ''}`)
+  }
+  // A double click: the word under it (no spaces; quotes and brackets around it left out), copied.
+  #copyWord(x, y) {
+    this.sel = null
+    let row = this.regions?.get(y)
+    const v = this.viewAt
+    if (!row && v && !this.dialog && y - 1 >= v.first && y - 1 < v.first + v.count) row = { x: 1, text: (this.#rows(this.out.columns || 80)[v.top + y - 1 - v.first] ?? '').replace(/\x1b\[[0-9;]*m/g, '') }
+    if (!row) return
+    const cells = [] // [char, its column]
+    let col = row.x
+    for (const ch of row.text) cells.push([ch, col]), (col += width(ch))
+    const at = cells.findIndex(([, cx], i) => x >= cx && x < (cells[i + 1]?.[1] ?? cx + 1))
+    if (at === -1 || /\s/.test(cells[at][0])) return
+    let s = at
+    let e = at
+    while (s > 0 && !/\s/.test(cells[s - 1][0])) s--
+    while (e < cells.length - 1 && !/\s/.test(cells[e + 1][0])) e++
+    while (s < e && /["'`(\[{<]/.test(cells[s][0])) s++
+    while (e > s && /["'`)\]}>,;:.!?]/.test(cells[e][0]) && !/^https?:\/\/\S+\/$/.test(cells.slice(s, e + 1).map((c) => c[0]).join(''))) e--
+    let word = cells.slice(s, e + 1).map((c) => c[0]).join('')
+    if (row.path && /[\\/~…]/.test(word)) word = row.path // the folder in the header: all of it, not what fits
+    this.#copied(word)
+    const sel = { a: { x: cells[s][1], y }, b: { x: cells[e][1], y }, rows: new Map([[y, row]]) }
+    this.flash = sel
+    setTimeout(() => this.flash === sel && ((this.flash = null), this.render()), 700).unref?.()
     this.render()
   }
   #selRange() {
@@ -1098,11 +1162,49 @@ export class UI {
     }
     box.forEach((line, i) => (s += `\x1b[${inputTop + i};1H${row(line)}`))
     below.forEach((line, i) => (s += `\x1b[${inputTop + inputRows + i};1H${row(line)}`))
-    if (this.dialog) s += this.#drawDialog(cols, rows, { title: this.dialog.title, fill: this.dialog.fill, lines: (w, h) => this.dialog.draw(w, h) }) // over everything, the cursor hidden
-    else if (asked) s += this.#drawDialog(cols, rows, this.#question()) // a question: its cursor in the box
-    else if (this.asking || typing) s += `\x1b[${inputTop + input.cur.row - first};${input.cur.col + 1}H\x1b[?25h`
-    else s += `\x1b[${inputTop};1H`
-    out.write(s)
+    // what can be selected besides the conversation (screen rows from 1): the header's first line (the
+    // project's folder), the input box, the status bar; with a dialog open, only what's in it
+    const plain = (t) => String(t ?? '').replace(/\x1b\[[0-9;]*m/g, '')
+    const tabRows = this.tabBar?.(cols)?.length ?? 0
+    this.regions = new Map()
+    if (this.header && head[tabRows] !== undefined) this.regions.set(tabRows + 1, { x: 1, text: plain(head[tabRows]), path: this.folder }) // path: the whole folder (shown cut when long)
+    box.forEach((line, i) => this.regions.set(inputTop + i, { x: 1, text: plain(line) }))
+    below.slice(1).forEach((line, i) => this.regions.set(inputTop + inputRows + 1 + i, { x: 1, text: plain(line) }))
+    let cursor
+    if (this.dialog || asked) {
+      this.regions = new Map()
+      const [box, cur] = this.#drawDialog(cols, rows, this.dialog ? { title: this.dialog.title, fill: this.dialog.fill, lines: (w, h) => this.dialog.draw(w, h) } : this.#question())
+      s += box
+      cursor = cur // a question: its cursor in the box; else hidden
+    } else {
+      this.dialogAt = null
+      cursor = this.asking || typing ? `\x1b[${inputTop + input.cur.row - first};${input.cur.col + 1}H\x1b[?25h` : `\x1b[${inputTop};1H`
+    }
+    out.write(s + this.#screenSelection() + cursor)
+  }
+
+  // A selection outside the conversation (in a dialog, the header, the input, the status bar), or a
+  // word just double-clicked: drawn reversed over what's there.
+  #screenSelection() {
+    const sel = this.ssel ?? this.flash
+    if (!sel) return ''
+    let out = ''
+    for (const { y, x, text } of this.#selectedRows(sel)) out += `\x1b[${y};${x}H\x1b[7m${text}\x1b[27m`
+    return out
+  }
+  // The rows a screen selection covers: [{ y, x, text }] (x: where the selected part starts).
+  #selectedRows(sel) {
+    const [a, b] = sel.a.y < sel.b.y || (sel.a.y === sel.b.y && sel.a.x <= sel.b.x) ? [sel.a, sel.b] : [sel.b, sel.a]
+    const out = []
+    for (let y = a.y; y <= b.y; y++) {
+      const r = sel.rows?.get(y) ?? this.regions?.get(y)
+      if (!r) continue
+      const end = r.x + width(r.text) // just past its last cell
+      const from = Math.max(r.x, y === a.y ? a.x : r.x)
+      const to = Math.min(end, y === b.y ? b.x + 1 : end)
+      if (to > from) out.push({ y, x: from, text: sliceCols(r.text, from - r.x, to - r.x) })
+    }
+    return out
   }
 
 
@@ -1115,7 +1217,7 @@ export class UI {
     this.ttyWrite = write
     rl._ttyWrite = (s, key = {}) => {
       if (!this.full) return write(s, key)
-      if (this.sel) (this.sel = null), this.render() // a key ends a selection
+      if (this.sel || this.ssel) (this.sel = this.ssel = null), this.render() // a key ends a selection
       const bound = !(key.ctrl && key.name === 'c') && this.keys[keyId(key, s)] // ~/.heart/keybindings.json
       // a dialog: its keys, all of them; Esc (or its own key) closes it; Ctrl+C still stops and quits
       if (this.dialog && !(key.ctrl && key.name === 'c')) {

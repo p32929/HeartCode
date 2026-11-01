@@ -2,6 +2,18 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.33 (2026-11-01)
+
+- Text you may need can be selected and copied, not only the conversation: drag to select (copied
+  when you let go), double-click to copy a word (an address, a path, a model's name). Inside a
+  dialog (the settings page's address, /help, /context, /diff, the background logs, a permission's
+  command, the choices), the header's folder (a double click copies the whole path, also when it's
+  shown cut), the input box and the status bar. Not the tab bar, the borders or the key hints. A
+  plain click in a dialog still does its job (a tab in the background logs). /help lists it, and
+  Shift+drag (Option+drag on macOS) for the terminal's own selection.
+- Windows: the browser opens through Windows' URL handler (rundll32 url.dll,FileProtocolHandler)
+  instead of `cmd /c start`, for /settings and an MCP server's sign-in page.
+
 ## 0.1.32 (2026-11-01)
 
 - Dialogs: pickers (`/select_model`, `/resume`, `/rewind`, `/export`…), permission questions, typed

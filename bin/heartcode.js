@@ -173,6 +173,9 @@ function keysHelp(keys = {}) {
     [[forAct('scroll_up'), forAct('scroll_down')].filter(Boolean).join(' / '), 'scroll the conversation a page'],
     [[forAct('scroll_line_up'), forAct('scroll_line_down')].filter(Boolean).join(' / '), 'scroll a few lines'],
     ['Ctrl+C', 'stop · twice quits HeartCode'],
+    ['Drag', 'select and copy: the conversation, a dialog, the folder, the input, the status bar'],
+    ['Double-click', 'copy the word under it (an address, a path, a model)'],
+    [process.platform === 'darwin' ? 'Option+drag' : 'Shift+drag', "the terminal's own selection, past HeartCode's"],
   ].filter(([k]) => k)
   return rows
 }
@@ -244,7 +247,7 @@ class App {
     if (!this.ui.noUser)
       mcp.onSignIn = (name, url) => {
         this.ui.print(`${c.info('↗')} ${c.bold(name)} ${c.muted('needs you to sign in; opening your browser…')}\n  ${c.faint(url)}`)
-        const [cmd, ...args] = process.platform === 'darwin' ? ['open', url] : process.platform === 'win32' ? ['cmd', '/c', 'start', '', url] : ['xdg-open', url]
+        const [cmd, ...args] = process.platform === 'darwin' ? ['open', url] : process.platform === 'win32' ? ['rundll32', 'url.dll,FileProtocolHandler', url] : ['xdg-open', url]
         spawnSync(cmd, args, { stdio: 'ignore' })
         this.ui.spinner(`waiting for you to sign in to ${name} in the browser · Esc to stop`)
       }
@@ -1164,9 +1167,11 @@ function useModel(app, { provider, model }) {
 // The settings page (/settings): on while its dialog is (one at a time).
 let settingsPage = null
 
+// The browser, with a page. Windows: its URL handler (cmd's start mangles a URL whose arguments
+// it reads as its own, and wants a quoted empty title first).
 function openBrowser(url) {
   if (process.env.HEART_NO_BROWSER) return
-  const [cmd, ...args] = process.platform === 'darwin' ? ['open', url] : process.platform === 'win32' ? ['cmd', '/c', 'start', '', url] : ['xdg-open', url]
+  const [cmd, ...args] = process.platform === 'darwin' ? ['open', url] : process.platform === 'win32' ? ['rundll32', 'url.dll,FileProtocolHandler', url] : ['xdg-open', url]
   spawnSync(cmd, args, { stdio: 'ignore' })
 }
 
@@ -1781,6 +1786,7 @@ async function repl(app, f = {}) {
   // Pinned to the top of the screen; /clear_chat and scrolling leave it alone.
   const home = process.env.HOME
   const where = home && app.root.startsWith(home) ? '~' + app.root.slice(home.length) : app.root
+  ui.folder = app.root // what a double click on the header's folder copies
   ui.header = (cols = 100) => [
     `${c.brand('♥')} ${c.bright(c.bold('HeartCode'))} ${c.faint(VERSION)}  ${c.muted(where.length > cols - 16 ? '…' + where.slice(-(cols - 17)) : where)}`,
     [['/', 'run a command'], ['@', 'attach a file'], ...(ui.voiceReady?.() ? [['Space', 'talk (voice)']] : []), [NEWLINE_KEY, 'add a new line'], ['Esc', 'stop'], ['Shift+Tab', 'change permissions']].map(([k, d]) => `${c.muted(k)} ${c.faint(d)}`).join(c.ghost(' · ')),
