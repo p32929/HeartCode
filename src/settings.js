@@ -20,6 +20,7 @@ import { loadSkills, frontMatter } from './skills.js'
 import { installSkill, findImports } from './importer.js'
 import { capabilities } from './capabilities.js'
 import { connect, sendTelegram, tokenHint, tgReady, EVENTS } from './telegram.js'
+import { searchSettings, testSearxng, ENGINE_NAMES } from './web.js'
 import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays, logSize, clearLogs } from './log.js'
 
 const PAGE = new URL('./settings.html', import.meta.url)
@@ -40,6 +41,7 @@ const STATUS_ITEMS = [
   { id: 'cost', label: 'Cost', sample: '$0.14' },
   { id: 'autocompact', label: 'Auto-compact off', sample: 'auto-compact off' },
   { id: 'worktree', label: 'Git worktree', sample: '⎇ feature' },
+  { id: 'background', label: 'Background commands', sample: '⚙ 2 running' },
   { id: 'permissions', label: 'Permissions', sample: '⏵⏵ all allowed' },
 ]
 const STATUS_IDS = new Set(STATUS_ITEMS.map((i) => i.id))
@@ -364,6 +366,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     statusBar: cfg.statusBar === undefined ? null : cfg.statusBar, // false (off), a list of lines, or null (default)
     // Telegram notifications: never the token itself, only a hint of it
     telegram: (({ token, bot, chatName, chatId, on, events } = {}) => ({ hint: tokenHint(token), bot: bot ?? null, chatName: chatName ?? null, connected: Boolean(token && chatId), on: on !== false, events: Object.fromEntries(Object.keys(EVENTS).map((k) => [k, events?.[k] !== false])), names: EVENTS }))(cfg.telegram),
+    search: { ...(({ searxng, order, off }) => ({ searxng, order, off }))(searchSettings()), names: ENGINE_NAMES }, // web search: your SearXNG, the engines' order and switches
     capabilities: capabilities(cfg), // features that need outside tools, and whether they're here
     choices: { permissions: PERMISSIONS, effort: EFFORTS, theme: Object.keys(THEMES), toggles: TOGGLES, statusItems: STATUS_ITEMS },
     files: FILES.map(([name, about, json, example]) => ({ name, about, json, example, text: fs.existsSync(path.join(HOME, name)) ? fs.readFileSync(path.join(HOME, name), 'utf8') : '' })),
@@ -688,6 +691,38 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       cfg.telegram = undefined
       save('setting:telegram')
       return state()
+    },
+    // Web search: your own SearXNG's address ('' removes it), the engines' order, the ones switched off.
+    'POST /api/search': ({ searxng, order, off }) => {
+      const now = searchSettings()
+      const next = { searxng: now.searxng || undefined, order: now.order, off: now.off }
+      if (searxng !== undefined) {
+        let u = String(searxng ?? '').trim()
+        if (u && !/^https?:\/\//i.test(u)) u = `https://${u}`
+        if (u) {
+          try {
+            if (!new URL(u).hostname) throw new Error()
+          } catch {
+            throw new Error(`"${searxng}" is not an address`)
+          }
+        }
+        next.searxng = u ? u.replace(/\/?$/, '/') : undefined
+      }
+      const names = Object.keys(ENGINE_NAMES)
+      if (Array.isArray(order)) next.order = [...order.filter((n) => names.includes(n)), ...names.filter((n) => !order.includes(n))]
+      if (Array.isArray(off)) next.off = off.filter((n) => names.includes(n))
+      cfg.search = next
+      save('setting:search')
+      return state()
+    },
+    'POST /api/search/test': async ({ searxng }) => {
+      const u = String(searxng ?? '').trim() || searchSettings().searxng
+      if (!u) throw new Error('type your SearXNG address first')
+      const n = await testSearxng(/^https?:\/\//i.test(u) ? u : `https://${u}`).catch((e) => {
+        throw new Error(`${u} didn't answer a search: ${e.cause?.code || e.message}`)
+      })
+      if (!n) throw new Error(`${u} answered, with no results (is it a SearXNG? are its engines on?)`)
+      return { results: n }
     },
     'POST /api/statusbar': ({ statusBar }) => {
       const clean = (a) => (Array.isArray(a) ? a.filter((x) => STATUS_IDS.has(x)) : [])

@@ -156,7 +156,7 @@ Instructions from the user (follow them):
 ## command-timeout
 
 <!-- Added to a command's result when it ran too long and was stopped. {{root}}: the project folder. -->
-(It ran for more than 2 minutes and was stopped. Searching the whole disk or home folder is the usual cause: the project is {{root}}; search inside it, with the search tool. If it's a server or a watcher, run it in the background with its output to a file.)
+(It ran for more than 2 minutes and was stopped. Searching the whole disk or home folder is the usual cause: the project is {{root}}; search inside it, with the search tool. If it's a server or a watcher, run it again with background: true.)
 
 ## command-too-wide
 
@@ -196,7 +196,26 @@ Create a file, or overwrite one with its full content. With append: true, add to
 
 ## tool-run_command
 
-Run a shell command in the project folder; returns the exit code and output.
+Run a shell command in the project folder; returns the exit code and output. A command that keeps running (a dev server, a watcher, a long build): set background true; it answers after a few seconds with its id and first output, and keeps running (the background tool reads it later).
+
+## tool-background
+
+<!-- The background tool: commands started with run_command background true. -->
+Commands started with run_command background true. action "output": what one printed since you last looked (id; the newest if left out). "list": all of them, running or exited. "stop": stop one (id). Stop what you started once you no longer need it.
+
+## background-started
+
+<!-- run_command's result for a command started in the background. {{id}}, {{running}}, {{code}} (when it exited), {{output}}: what it printed so far, {{file}}: its whole output. -->
+{{#if running}}Started in the background as #{{id}}; it is still running.{{else}}Started as #{{id}}, but it has already exited with {{code}}.{{/if}} Its output so far:
+{{output}}
+(All of it goes to {{file}}. background action "output" shows what's new, "stop" stops it.)
+
+## background-ended
+
+<!-- Told to the model at its next step when commands it started in the background have ended. {{jobs}}: one line each. -->
+(Background commands that have ended since your last step:
+{{jobs}}
+background action "output" shows what each printed last.)
 
 ## tool-mcp
 

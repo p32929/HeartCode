@@ -204,7 +204,13 @@ Unless you pass `--no-memory`, a run keeps what it learns in the project it work
 git) and `.heartcode/memory/` (notes). Notes and pages that match a task come with it next time,
 so later runs research less. After a task that read the web, ran commands or made files, a
 wrap-up request saves notes, keeps or deletes the pages it read, and removes throwaway files and
-empty folders the task made (a test script, a debug log).
+empty folders the task made (a test script, a debug log). It runs after the answer: the
+`result` (or the printed answer) comes first, and `heart -p` exits once the wrap-up is done (a few
+seconds more).
+
+A command that keeps running (a dev server, a watcher) is started with `run_command` and
+`background: true`; the `background` tool reads its new output, lists such commands and stops one.
+Whatever is still running is stopped when HeartCode exits.
 
 Before a task that changed files ends, another of the user's models (the same one when only one is
 used) reviews the work against the request in a request of its own; a NO sends it back to fix.

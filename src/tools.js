@@ -17,6 +17,7 @@ import { runHooks } from './hooks.js'
 import { parsePatch, applyChunks } from './patch.js'
 import { formatFile } from './format.js'
 import { diagnose, lspTool, findCommand } from './lsp.js'
+import { startJob, newOutput, listJobs, getJob, stopJob, jobLine } from './background.js'
 
 const IGNORE = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage', '.venv', 'venv', '__pycache__', 'target', '.cache', '.DS_Store'])
 
@@ -271,7 +272,7 @@ export function runCommand(root, cmd, { signal, timeout = 120_000, stdin, env, s
       clearTimeout(timer)
       signal?.removeEventListener('abort', stop)
       if (kill(0) && code !== 'interrupted' && code !== 'timeout') {
-        note += '\n(Processes this command left running in the background were stopped: run_command cannot keep a server running.)'
+        note += '\n(Processes this command left running in the background were stopped. To keep a server or watcher running, run it with background: true.)'
       }
       kill('SIGTERM')
       setTimeout(() => kill('SIGKILL'), 2000).unref()
@@ -396,8 +397,8 @@ export function searchesOutside(cmd, root) {
     })
 }
 
-export async function runConfirmed(s, cmd, signal) {
-  s.ui.step('run', cmd)
+export async function runConfirmed(s, cmd, signal, background = false) {
+  s.ui.step(background ? 'run in background' : 'run', cmd)
   if (s.ui.permission === 'plan' && !readOnlyCommand(cmd)) {
     s.ui.result('not run: plan mode')
     return prompt('agent/plan-refused-command')
@@ -409,6 +410,11 @@ export async function runConfirmed(s, cmd, signal) {
   }
   const ok = s.ui.permission === 'plan' ? true : await s.ui.confirm(`Run ${c.bold(cmd)}?`, 'command') // plan mode: only read-only ones get here
   if (ok !== true) return `The user declined to run this command.${typeof ok === 'string' ? ' User feedback: ' + ok : ''}`
+  if (background) {
+    const { job, output } = await startJob(s.root, cmd)
+    s.ui.result(job.exited ? `exited with ${job.code}` : `running in the background as #${job.id}`)
+    return prompt('agent/background-started', { id: job.id, running: !job.exited, code: job.code, output: output.trim() || '(nothing yet)', file: job.file })
+  }
   const before = snapshot(s)
   s.ui.spinner(`running ${cmd}`)
   const t0 = Date.now()
@@ -419,6 +425,22 @@ export async function runConfirmed(s, cmd, signal) {
   const changed = changesSince(s, before)
   const why = code === 'timeout' ? `\n${prompt('agent/command-timeout', { root: s.root })}` : ''
   return `exit code ${code}\n${tail(output, 4000) || '(no output)'}${changed ? `\nFiles this command changed: ${changed}` : ''}${why}`
+}
+
+// The background tool: what a command started with background: true printed since the last look,
+// the list of them, or stop one.
+function backgroundTool(s, a) {
+  const mine = listJobs(s.root)
+  if (a.action === 'list') return mine.length ? mine.map(jobLine).join('\n') : 'No background commands.'
+  const job = getJob(a.id ?? mine.at(-1)?.id)
+  if (!job || job.root !== s.root) return `error: no background command #${a.id}. ${mine.length ? `They are: ${mine.map((j) => `#${j.id} ${j.command}`).join(', ')}` : 'None are running.'}`
+  if (a.action === 'stop') {
+    const was = stopJob(job)
+    s.ui.result(was ? `stopped #${job.id}` : `#${job.id} had already exited`)
+    return was ? `Stopped #${job.id} (${job.command}).` : `#${job.id} had already exited with ${job.code}.`
+  }
+  const out = newOutput(job)
+  return `${jobLine(job)}\n${out.trim() ? `New output since the last look:\n${out}` : '(no new output since the last look)'}`
 }
 
 // Files a shell command changes are tracked like HeartCode's own edits: shown as diffs, kept for
@@ -497,7 +519,8 @@ export const TOOL_DEFS = [
   // One edit per call: a list of edits per call measured 2–6 malformed calls per benchmark run vs 0.
   { name: 'edit_file', description: prompt('agent/tool-edit_file'), parameters: obj({ path: str, search: str, replace: str, start_line: int, end_line: int }, ['path', 'replace']) },
   { name: 'write_file', description: prompt('agent/tool-write_file'), parameters: obj({ path: str, content: str, append: { type: 'boolean' } }, ['path', 'content']) },
-  { name: 'run_command', description: prompt('agent/tool-run_command'), parameters: obj({ command: str }, ['command']) },
+  { name: 'run_command', description: prompt('agent/tool-run_command'), parameters: obj({ command: str, background: { type: 'boolean' } }, ['command']) },
+  { name: 'background', description: prompt('agent/tool-background'), parameters: obj({ action: { type: 'string', enum: ['output', 'list', 'stop'] }, id: int }, ['action']) },
   { name: 'todo', description: prompt('agent/tool-todo'), parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] } }, ['content', 'status']) } }, ['todos']) },
   { name: 'web_search', description: prompt('agent/tool-web_search'), parameters: obj({ query: str, fresh: { type: 'boolean' } }, ['query']) },
   { name: 'web_fetch', description: prompt('agent/tool-web_fetch'), parameters: obj({ url: str, look_for: str, start: int }, ['url']) },
@@ -1159,7 +1182,9 @@ async function tool(name, args, s, signal, id) {
       }
       case 'run_command':
         if (/^\s*apply_patch\b[\s\S]*\*\*\* Begin Patch/.test(String(args.command ?? ''))) return await applyPatch(s, args.command) // apply_patch <<'EOF' … as Codex runs it
-        return (await runConfirmed(s, String(args.command ?? ''), signal)) + outsideNote(root, String(args.command ?? ''))
+        return (await runConfirmed(s, String(args.command ?? ''), signal, args.background === true || args.background === 'true')) + outsideNote(root, String(args.command ?? ''))
+      case 'background':
+        return backgroundTool(s, args)
       case 'apply_patch':
         return await applyPatch(s, args.input ?? args.patch ?? args.command ?? '')
       case 'mcp':

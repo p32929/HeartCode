@@ -16,7 +16,7 @@ import { clip, TOOL_DEFS, extraTools, loadMcpTools, mcpName, failed as toolFaile
 import { allowed } from './agent.js'
 
 // Claude Code's tool names → HeartCode's (for --allowedTools / --disallowedTools).
-const CLAUDE_TOOLS = { Read: 'read_file', Grep: 'search', Glob: 'list_files', LS: 'list_files', Edit: 'edit_file', MultiEdit: 'edit_file', Write: 'write_file', NotebookEdit: 'edit_file', Bash: 'run_command' }
+const CLAUDE_TOOLS = { Read: 'read_file', Grep: 'search', Glob: 'list_files', LS: 'list_files', Edit: 'edit_file', MultiEdit: 'edit_file', Write: 'write_file', NotebookEdit: 'edit_file', Bash: 'run_command', BashOutput: 'background', KillShell: 'background', KillBash: 'background' }
 export function toolNames(list) {
   const names = list.flatMap((x) => String(x).split(/[,\s]+/)).filter(Boolean).map((t) => t.replace(/\(.*$/, '')) // ponytail: "Bash(git:*)" allows every command, not just git
   return new Set(names.map((t) => CLAUDE_TOOLS[t] ?? t)) // mcp__server__tool and mcp__server as they are (tools.js allowed)
@@ -180,6 +180,7 @@ export async function runHeadless(app, opts) {
     } else if (out === 'json') emit(result)
     else if (error) process.stderr.write(`heartcode: ${error}\n`)
     else process.stdout.write(answer.trim() + '\n')
+    await s.wrapping // the wrap-up (notes, research, cleanup) after the result is out, before it exits
     return !error
   }
 

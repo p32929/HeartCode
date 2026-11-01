@@ -86,9 +86,10 @@
   .using .k { color: var(--faint); display: block; }
   .using b { display: block; font-family: var(--mono); font-size: 12.5px; font-weight: 600; word-break: break-all; margin: 3px 0 2px; color: var(--text); }
   .using a { font-weight: 600; }
-  .theme-pick { display: flex; margin-top: 10px; height: 34px; }
-  .theme-pick label { flex: 1; justify-content: center; font-size: 12.5px; }
-  .using:empty + .theme-pick { margin-top: auto; }
+  /* light or dark: one button at the top right of the page */
+  .theme-btn { position: absolute; top: 18px; right: 22px; z-index: 5; width: 38px; height: 38px; padding: 0; display: grid; place-items: center; border-radius: 50%; color: var(--muted); }
+  .theme-btn:hover { color: var(--text); }
+  .theme-btn svg { width: 18px; height: 18px; }
   main { padding: 36px 44px 72px; width: 100%; max-width: 1640px; min-width: 0; }
   .page { display: none; }
   .page.on { display: block; animation: page-in .22s ease-out; }
@@ -471,6 +472,24 @@
   .setting .t b { display: block; font-weight: 600; }
   .setting .t span { display: block; margin-top: 2px; color: var(--muted); font-size: 13px; line-height: 1.45; text-wrap: pretty; }
   .setting select, .setting input { flex: none; width: 240px; }
+  .settings-col .card.wide { grid-column: 1 / -1; }
+  .ws-url { display: flex; gap: 8px; margin-top: 10px; }
+  .ws-url input { flex: 1; min-width: 0; }
+  .ws-addr { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .ws-addr code { font: 12.5px/1.4 var(--mono, ui-monospace, Menlo, monospace); color: var(--text); background: var(--panel-2, color-mix(in srgb, var(--muted) 12%, transparent)); padding: 3px 8px; border-radius: 6px; word-break: break-all; }
+  .ws-row.mine { align-items: flex-start; }
+  .ws-row.mine .n, .ws-row.mine .mv, .ws-row.mine > .sw { margin-top: 2px; }
+  .ws-list { margin-top: 6px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .ws-row { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .ws-row:last-child { border-bottom: 0; }
+  .ws-row .n { width: 22px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+  .ws-row .t { flex: 1; min-width: 0; }
+  .ws-row .t b { font-weight: 600; }
+  .ws-row .t span { display: block; color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+  .ws-row.off .t > b, .ws-row.off .t > span, .ws-row.off .n { opacity: .5; } /* not the address box in it */
+  .ws-row .mv { display: flex; gap: 4px; }
+  .ws-row .mv button { width: 30px; padding: 4px 0; }
+  @media (max-width: 640px) { .ws-url { flex-wrap: wrap; } .ws-url input { flex-basis: 100%; } }
   .choice { position: relative; border: 1px solid var(--line-strong); border-radius: 12px; padding: 13px 15px; cursor: pointer; background: var(--panel); transition: border-color .15s, box-shadow .15s, background .15s; }
   .choice:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line-strong)); }
   .choice.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 60%, var(--panel)); }
@@ -522,14 +541,14 @@
     .md { grid-template-columns: 280px minmax(0, 1fr); }
   }
   @media (max-width: 860px) {
-    .app { grid-template-columns: minmax(0, 1fr); }
+    .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; } /* the bar on top keeps its height; the page gets the rest */
     aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 16px 8px; }
     .brand { padding: 0 0 8px; }
     nav { display: flex; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
     nav a { flex: none; margin: 0; }
     nav a.on::before { display: none; } /* a strip of tabs: the highlighted one is enough */
     nav a .count, .using, .nav-group { display: none; }
-    .theme-pick { margin: 6px 0 4px; max-width: 280px; }
+    .theme-btn { top: 10px; right: 12px; }
     main { padding: 20px 16px 60px; }
     .steps { grid-template-columns: 1fr; }
     .choices, .choices.three { grid-template-columns: 1fr; }
@@ -610,9 +629,6 @@
       <a href="#logging" data-page="logging" data-tabs="logging files"><span class="ic">▤</span> Advanced <span class="count" id="n-failed"></span></a>
     </nav>
     <div class="using" id="using"></div>
-    <div class="seg theme-pick" id="theme-pick" role="radiogroup" aria-label="Light or dark">
-      <label><input type="radio" name="theme-pick" value="system">System</label><label><input type="radio" name="theme-pick" value="light">Light</label><label><input type="radio" name="theme-pick" value="dark">Dark</label>
-    </div>
   </aside>
 
   <main>
@@ -763,6 +779,11 @@
           <h2>External tools</h2>
           <p class="sub">Some features need a tool on your machine. Ready ones are ticked; the rest say what to install.</p>
           <div id="g-caps"></div>
+        </div>
+        <div class="card wide">
+          <h2>Web search</h2>
+          <p class="sub">The engines HeartCode searches with, in this order: it asks the first one, and the next only when that one hasn't found enough, fails, or takes over 3 seconds. None needs a key.</p>
+          <div class="ws-list" id="ws-order"></div>
         </div>
       </div>
     </section>
@@ -919,22 +940,32 @@
     <div class="actions"><button id="pr-cancel" type="button">Cancel</button><button class="primary" id="pr-save" type="button">Save</button></div>
   </form>
 </dialog>
+<button type="button" class="theme-btn" id="theme-btn"></button>
 <div id="toast" role="status"></div>
 <div id="tip" role="tooltip"></div>
 <script>
 const token = new URLSearchParams(location.search).get('t')
-// Light, dark, or as the system is set: kept in this browser (the one thing the page keeps itself)
+// Light or dark: the button at the top right switches; as the system is set until it's pressed. Kept in
+// this browser (the one thing the page keeps itself).
 {
-  const pick = document.getElementById('theme-pick')
-  const now = () => document.documentElement.dataset.theme || 'system'
-  const show = () => pick.querySelectorAll('label').forEach((l) => { const i = l.querySelector('input'); i.checked = i.value === now(); l.classList.toggle('on', i.checked) })
-  pick.addEventListener('change', (e) => {
-    const v = e.target.value
-    if (v === 'system') delete document.documentElement.dataset.theme
-    else document.documentElement.dataset.theme = v
-    try { v === 'system' ? localStorage.removeItem('heart-theme') : localStorage.setItem('heart-theme', v) } catch {}
+  const btn = document.getElementById('theme-btn')
+  const system = matchMedia('(prefers-color-scheme: dark)')
+  const now = () => document.documentElement.dataset.theme || (system.matches ? 'dark' : 'light')
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>'
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/></svg>'
+  const show = () => {
+    const dark = now() === 'dark'
+    btn.innerHTML = dark ? SUN : MOON
+    btn.title = dark ? 'Light theme' : 'Dark theme'
+    btn.setAttribute('aria-label', btn.title)
+  }
+  btn.addEventListener('click', () => {
+    const v = now() === 'dark' ? 'light' : 'dark'
+    document.documentElement.dataset.theme = v
+    try { localStorage.setItem('heart-theme', v) } catch {}
     show()
   })
+  system.addEventListener('change', show)
   show()
 }
 const $ = (id) => document.getElementById(id)
@@ -1022,6 +1053,7 @@ const DOING = {
   '/api/mcp/login': 'Signing in — your browser will open',
   '/api/telegram/connect': 'Checking the token with Telegram',
   '/api/telegram/test': 'Sending a test message',
+  '/api/search/test': 'Trying a search on your SearXNG',
   '/api/models-dev': null, // its own strip
 }
 let acting = 0
@@ -2132,6 +2164,7 @@ function drawGeneral(s) {
     h('div', { className: 't' }, h('b', { textContent: TOGGLE_INFO[k] ?? k }), h('span', { textContent: d[0].toUpperCase() + d.slice(1) })),
     sw({ checked: s.settings[k], onchange: (e) => act('/api/setting', { name: k, value: e.target.checked }, `${TOGGLE_INFO[k] ?? k}: ${e.target.checked ? 'on' : 'off'}`) }))))
   drawVoice(s)
+  drawSearch(s)
   put($('g-caps'), ...(s.capabilities || []).map((c) =>
     h('div', { className: 'cap' + (c.ok ? '' : ' cap-off') },
       h('div', { className: 'cap-h' }, h('span', { className: 'cap-mark', textContent: c.ok ? '✓' : '✗' }), h('b', { textContent: c.name }), h('span', { className: c.ok ? 'tag ok' : 'tag need', textContent: c.ok ? 'ready' : 'needs setup' })),
@@ -2173,6 +2206,71 @@ $('v-src').onchange = (e) => {
 }
 $('v-model').onchange = () => saveVoice('voice model saved')
 $('v-lang').onchange = () => saveVoice('voice language saved')
+
+// Web search: the engines in the order they're asked (↑↓), each switchable. Your own SearXNG's address
+// is typed in its own row: a box with Test and Add while there's none (or Change was pressed), else the
+// address with Change, Test and Remove.
+const ENGINE_INFO = {
+  searxng: 'Your own instance: private, and no other site\'s limits. Its JSON API is used when it has it on.',
+  searx: 'Many engines at once, through public instances from searx.space. Broad; some instances are busy.',
+  duckduckgo: 'Broad results from its HTML page. Blocked on some networks.',
+  mwmbl: 'An open, non-profit index of its own. Fast; smaller than the big engines.',
+  stackoverflow: 'Questions and answers: for errors and how-to. Up to 3 results.',
+  npm: 'Packages: for libraries and tools. Up to 3 results.',
+  github: 'Repositories: for projects and examples. Up to 3 results.',
+}
+const wsInput = h('input', { type: 'text', placeholder: 'http://192.168.1.10:8888 or https://search.example.com', spellcheck: false, autocomplete: 'off', 'aria-label': 'Your SearXNG address' })
+let wsEditing = false
+const wsCancel = () => ((wsEditing = false), wsInput.blur(), drawSearch(S))
+const wsSave = async (url) => {
+  const r = await act('/api/search', { searxng: url }, url.trim() ? 'your SearXNG saved: it is asked first' : 'your SearXNG removed')
+  if (r) (wsEditing = false), wsInput.blur(), S && drawSearch(S)
+}
+const wsTest = async (url) => {
+  const r = await act('/api/search/test', { searxng: url })
+  if (r) toast(`it works: ${r.results} results for a test search`)
+}
+wsInput.onkeydown = (e) => {
+  if (e.key === 'Enter') wsSave(wsInput.value) // a block: an on… handler returning false would cancel every other key (typing, pasting)
+  if (e.key === 'Escape' && S?.search?.searxng) wsCancel()
+}
+function drawSearch(s) {
+  if (document.activeElement === wsInput) return // typing there: left alone (a redraw would take the box away)
+  const w = s.search ?? { order: [], off: [], names: {} }
+  const save = (order, off, what) => act('/api/search', { order, off }, what)
+  const btn = (text, onclick, cls = 'small') => h('button', { className: cls, type: 'button', textContent: text, onclick })
+  put($('ws-order'), ...w.order.map((n, i) => {
+    const mine = n === 'searxng'
+    const none = mine && !w.searxng
+    const on = !w.off.includes(n) && !none
+    const move = (d) => {
+      const o = [...w.order]
+      ;[o[i], o[i + d]] = [o[i + d], o[i]]
+      save(o, w.off, `${w.names[n]}: moved ${d < 0 ? 'up' : 'down'}`)
+    }
+    let extra = null
+    if (mine && (none || wsEditing)) {
+      if (!wsEditing) wsInput.value = ''
+      extra = h('div', { className: 'ws-url' }, wsInput, btn('Test', () => wsTest(wsInput.value), ''), btn(none ? 'Add' : 'Save', () => wsSave(wsInput.value), 'primary'), none ? null : btn('Cancel', wsCancel, ''))
+    } else if (mine) {
+      extra = h('div', { className: 'ws-addr' }, h('code', { textContent: w.searxng }),
+        btn('Change', () => ((wsEditing = true), (wsInput.value = w.searxng), drawSearch(S), wsInput.focus())),
+        btn('Test', () => wsTest(w.searxng)),
+        btn('Remove', () => wsSave('')))
+    }
+    return h('div', { className: 'ws-row' + (on ? '' : ' off') + (mine ? ' mine' : '') },
+      h('span', { className: 'n', textContent: on ? `${w.order.filter((x, j) => j <= i && !w.off.includes(x) && !(x === 'searxng' && !w.searxng)).length}` : '–' }),
+      h('div', { className: 't' }, h('b', { textContent: w.names[n] ?? n }), h('span', { textContent: ENGINE_INFO[n] ?? '' }), extra),
+      h('div', { className: 'mv' },
+        btn('↑', () => move(-1)),
+        btn('↓', () => move(1))),
+      sw({ checked: on, disabled: none, 'aria-label': `Use ${w.names[n]}`, onchange: (e) => save(w.order, e.target.checked ? w.off.filter((x) => x !== n) : [...w.off, n], `${w.names[n]}: ${e.target.checked ? 'on' : 'off'}`) }))
+  }))
+  // ↑ on the first and ↓ on the last can't move
+  const rows = [...$('ws-order').children]
+  rows[0]?.querySelector('.mv button').setAttribute('disabled', '')
+  rows.at(-1)?.querySelectorAll('.mv button')[1]?.setAttribute('disabled', '')
+}
 
 // --- Notifications: Telegram set up in three steps (a bot from @BotFather, its token, Start in the
 // bot), then on/off, a test, and which events send one ---
@@ -2501,7 +2599,9 @@ function drawSkills(s) {
     }
   }
   $('k-install').onclick = install
-  $('k-url').onkeydown = (e) => e.key === 'Enter' && install()
+  $('k-url').onkeydown = (e) => {
+    if (e.key === 'Enter') install()
+  }
   $('k-import').onclick = openImport
   masterDetail('skills', $('k-items'), $('k-detail'), [{ title: mine.length && theirs.length ? 'Yours' : '', items: mine.map(item) }, { title: 'From projects', items: theirs.map(item) }], (x) => {
     if (!x) return h('div', { className: 'card' }, h('h2', { textContent: 'No skills yet' }), h('p', { className: 'sub', textContent: 'A skill is a prompt you use again and again, like "review this" or "write the release notes". Make one with + New skill, install one from GitHub above, or bring them from Claude Code and others with /import in HeartCode.' }))
@@ -2543,7 +2643,7 @@ let sbDrag = null // the chip being dragged: { id, from: 'palette' | { line, sid
 let sbSaveTimer = null
 const SB_DEFAULT = () => [
   { left: ['provider', 'model'], right: ['mode', 'thinking', 'images'] },
-  { left: ['ctx', 'tps', 'autocompact'], right: ['permissions', 'worktree', 'cost'] },
+  { left: ['ctx', 'tps', 'autocompact'], right: ['background', 'permissions', 'worktree', 'cost'] },
 ]
 const sbLabel = (id) => (SB_ITEMS.find((i) => i.id === id) || {}).label || id
 const sbSample = (id) => (SB_ITEMS.find((i) => i.id === id) || {}).sample || id

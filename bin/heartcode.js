@@ -5,7 +5,8 @@ import { Client } from '../src/client.js'
 import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, AUTO_MODEL, isAuto, parseModel, takeIn, whatOf, VERSION } from '../src/config.js'
 import { probe, loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
 import { learnFromUsage, LIMIT_MS } from '../src/context.js'
-import { Session, transcript } from '../src/agent.js'
+import { Session, transcript, contextReport } from '../src/agent.js'
+import { listJobs, getJob, stopJob, removeJob, runningJobs, tailLines, ago as ranFor } from '../src/background.js'
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
 import { UI, c, PERMISSIONS, duration, copyText, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width } from '../src/ui.js'
 import { listFiles, runCommand, clip } from '../src/tools.js'
@@ -117,6 +118,8 @@ const SECTIONS = [
     ['/init', 'look at the project and write AGENTS.md: its commands, conventions and layout'],
     ['/btw', 'ask something on the side, also while it works; the answer stays out of the conversation', true],
     ['/cost', 'tokens used and what they cost, this session'],
+    ['/context', "what's in the context now: system prompt, tools, messages, tool results, and the biggest pieces"],
+    ['/background', 'commands running in the background (servers, watchers): their logs live, a tab each (Alt+B) · /background stop [id] · /background files', true],
     ['/model_info', 'what the model can do and how HeartCode uses it'],
     ['/test_model', 'test the model for real (otherwise what it can do comes from models.dev, or your settings)'],
     ['/tidy_memory', 'merge, update and link the memory notes now'],
@@ -135,10 +138,12 @@ const SECTIONS = [
     ['/exit', 'quit HeartCode (Alt+W closes just this tab)'],
   ]],
 ]
-const COMMANDS = SECTIONS.flatMap(([, list]) => list)
+const byName = (a, b) => a[0].localeCompare(b[0])
+for (const [, list] of SECTIONS) list.sort(byName) // alphabetical, in /help and in the "/" menu
+const COMMANDS = SECTIONS.flatMap(([, list]) => list).sort(byName)
 // Typed while a task works, these run at once, beside it: they leave the conversation alone. The
 // others (/compact, /rewind, /resume, /init…) wait in the queue until it's done.
-const RIGHT_AWAY = new Set(['help', 'cost', 'model_info', 'diff', 'copy', 'mcp', 'doctor', 'toggle_thinking', 'btw', 'rename', 'export', 'tab', 'close_tab', 'exit', 'quit', 'settings', 'login_mcp', 'install_skill', 'import', 'voice', 'select_model'])
+const RIGHT_AWAY = new Set(['help', 'cost', 'context', 'background', 'model_info', 'diff', 'copy', 'mcp', 'doctor', 'toggle_thinking', 'btw', 'rename', 'export', 'tab', 'close_tab', 'exit', 'quit', 'settings', 'login_mcp', 'install_skill', 'import', 'voice', 'select_model'])
 const helpText = (sections) => sections.map(([title, list]) => `  ${c.bold(title)}\n` + list.map(([n, d]) => `  ${c.cyan(n.padEnd(18))} ${d}`).join('\n')).join('\n\n')
 const SLASH = helpText(SECTIONS)
 
@@ -156,6 +161,7 @@ function keysHelp(keys = {}) {
     ['Esc', 'stop the task (press twice to confirm)'],
     ['Esc Esc', 'rewind to an earlier message (at the prompt)'],
     ['Shift+Tab', 'change what runs without asking (permissions)'],
+    [forAct('background_log'), "the background commands' logs in a dialog, a tab each (←/→ switch, ↑/↓ scroll, K twice stops one, Esc closes)"],
     [forAct('new_tab'), 'new tab'],
     [forAct('close_tab'), 'close this tab'],
     [forAct('next_tab'), 'next tab'],
@@ -198,7 +204,7 @@ const mask = (k) => (k ? (k.length > 12 ? `${k.slice(0, 4)}…${k.slice(-4)}` : 
 // overrides it — see App.status for the item names and format.
 const DEFAULT_STATUS = [
   { left: ['provider', 'model'], right: ['mode', 'thinking', 'images'] },
-  { left: ['ctx', 'tps', 'autocompact'], right: ['permissions', 'worktree', 'cost'] },
+  { left: ['ctx', 'tps', 'autocompact'], right: ['background', 'permissions', 'worktree', 'cost'] },
 ]
 
 class App {
@@ -223,7 +229,7 @@ class App {
     if (this.cfg.session) return
     const saved = readJson(path.join(this.root, '.heartcode', 'models.json'), null)
     const valid = (saved?.session ?? []).filter((t) => t?.provider && t?.model && this.cfg.providers[t.provider])
-    if (valid.length) this.cfg.session = valid
+    if (valid.length) [this.cfg.session, this.folderModels] = [valid, true]
   }
 
   saveProjectModels() {
@@ -576,7 +582,7 @@ class App {
   // Built-in commands (/name), then the skills you can type, namespaced as /skill:name so they're
   // easy to tell apart from HeartCode's own commands (and can't clash with them).
   commands() {
-    const mine = [...this.skills.values()].filter((k) => k.use !== 'model').map((k) => [`/skill:${k.name}`, k.description, true])
+    const mine = [...this.skills.values()].filter((k) => k.use !== 'model').map((k) => [`/skill:${k.name}`, k.description, true]).sort(byName)
     return [...COMMANDS, ...mine]
   }
 
@@ -682,6 +688,7 @@ class App {
       cost: null,
       autocompact: cfg.autoCompact === false ? c.faint('auto-compact off') : null,
       worktree: this.worktree ? c.info(`⎇ ${this.worktree.branch}`) : null,
+      background: runningJobs(this.root).length ? c.info(`⚙ ${runningJobs(this.root).length} running`) + c.faint(' Alt+B') : null,
       permissions: { all: c.green('⏵⏵ all allowed'), commands: c.yellow('ask before commands'), ask: c.yellow('ask before changes'), plan: c.info('⏸ plan mode') }[ui.permission],
     }
     if (strat) {
@@ -696,7 +703,9 @@ class App {
     }
     const sep = c.ghost(' │ ')
     const vis = (str) => width(str.replace(/\x1b\[[0-9;]*m/g, ''))
-    const layout = Array.isArray(cfg.statusBar) && cfg.statusBar.length ? cfg.statusBar : DEFAULT_STATUS
+    let layout = Array.isArray(cfg.statusBar) && cfg.statusBar.length ? cfg.statusBar : DEFAULT_STATUS
+    // commands running in the background are shown also on a bar laid out before there was this item
+    if (parts.background && !JSON.stringify(layout).includes('"background"')) layout = [...layout.slice(0, -1), ...layout.slice(-1).map((row) => (Array.isArray(row) ? { left: row, right: ['background'] } : { ...row, right: ['background', ...(row.right ?? [])] }))]
     const line = (row) => {
       const names = (g) => (g ?? []).map((t) => parts[t]).filter(Boolean).join(sep)
       const left = names(Array.isArray(row) ? row : row?.left)
@@ -863,6 +872,97 @@ class App {
     return cfg.session.filter((t) => cfg.providers[t.provider] && (all || !cfg.providers[t.provider].off) && t.model && !seen.has(`${t.provider}/${t.model}`) && seen.add(`${t.provider}/${t.model}`))
   }
 
+  // Alt+B, /background: the background commands' logs in a dialog, one at a time with a tab each.
+  // ←/→ (or a click on a tab): another one; ↑/↓, PgUp/PgDn, the wheel: back in its log (End: the
+  // newest again); K twice: stop it and close its tab; Esc or Alt+B: closed.
+  toggleJobs(on = !this.jobsShown) {
+    const { ui } = this
+    if (!on) return ui.setDialog(null)
+    this.jobsShown = true
+    const ERROR = /\b(error|errors|failed|fail|exception|traceback|panic|fatal)\b/i
+    const jobs = () => listJobs(this.root)
+    const current = () => jobs().find((j) => j.id === this.jobTab) ?? jobs().findLast((j) => !j.exited) ?? jobs().at(-1)
+    let spots = [] // where each tab is on its row: { from, to, id }
+    let back = 0 // lines scrolled back from the newest (0: following it)
+    let page = 10
+    let armed = 0 // K pressed once, when
+    let said = '' // a line for the footer (K's question)
+    const go = (d) => {
+      const all = jobs()
+      if (!all.length) return
+      this.jobTab = all[(all.indexOf(current()) + d + all.length) % all.length].id
+      back = 0
+    }
+    const kill = () => {
+      const job = current()
+      if (!job) return
+      if (Date.now() - armed > 2500) return (armed = Date.now()), (said = `Press K again to ${job.exited ? 'close' : 'stop and close'} #${job.id}`)
+      armed = 0
+      said = ''
+      const all = jobs()
+      const next = all[all.indexOf(job) + 1] ?? all[all.indexOf(job) - 1]
+      removeJob(job)
+      ui.print(c.dim(`${job.exited ? 'closed' : 'stopped'} #${job.id} ${clip(job.command, 80)}`))
+      if (!next) return this.toggleJobs(false)
+      this.jobTab = next.id
+      back = 0
+    }
+    ui.setDialog({
+      title: 'Background commands',
+      toggle: 'background_log', // Alt+B closes it too
+      close: () => (this.jobsShown = false),
+      key: (key) => {
+        if (key.name !== 'k') (armed = 0), (said = '')
+        if (key.name === 'left' || key.name === 'right') return go(key.name === 'left' ? -1 : 1)
+        if (key.name === 'up' || key.name === 'down') return (back = Math.max(0, back + (key.name === 'up' ? (key.wheel ? 3 : 1) : key.wheel ? -3 : -1)))
+        if (key.name === 'pageup' || key.name === 'pagedown') return (back = Math.max(0, back + (key.name === 'pageup' ? page : -page)))
+        if (key.name === 'end') return (back = 0)
+        if (key.name === 'home') return (back = 1e6)
+        if (key.name === 'k' && !key.ctrl && !key.meta) return kill()
+      },
+      click: (col, row) => {
+        const hit = row === 0 && spots.find((t) => col >= t.from && col < t.to)
+        if (hit) (this.jobTab = hit.id), (back = 0)
+      },
+      draw: (w, h) => {
+        const all = jobs()
+        if (!all.length) return ['', `  ${c.faint('Nothing runs in the background. The model starts servers and watchers there.')}`, '', `  ${c.faint('Esc close')}`]
+        const job = current()
+        this.jobTab = job.id
+        // the tabs, scrolled so the one shown is on screen
+        const label = (j) => ` ${j.exited ? '○' : '●'} #${j.id} ${clip(j.command.replace(/\s+/g, ' '), 18)} `
+        let first = 0
+        while (first < all.indexOf(job) && all.slice(first, all.indexOf(job) + 1).reduce((n, j) => n + width(label(j)) + 1, 0) > w - 2) first++
+        spots = []
+        let x = 1
+        let bar = ' '
+        for (const j of all.slice(first)) {
+          const lw = width(label(j))
+          if (x + lw > w - 2) break
+          spots.push({ from: x, to: x + lw, id: j.id })
+          bar += (j === job ? `\x1b[7m${c.brand(c.bold(label(j)))}\x1b[27m` : j.exited ? c.faint(label(j)) : c.muted(label(j))) + ' '
+          x += lw + 1
+        }
+        const hidden = all.length - spots.length
+        page = Math.max(1, h - 6)
+        const n = h - 5 // tabs, a rule, the command, (the log), a rule, the keys
+        const lines = tailLines(job, n + back + 2000) // enough to scroll back through
+        back = Math.min(back, Math.max(0, lines.length - n))
+        const shown = lines.slice(Math.max(0, lines.length - n - back), lines.length - back)
+        const state = job.exited ? c.yellow(`exited with ${job.code}`) : c.green('running')
+        const where = back ? c.yellow(` · ${back} line${back > 1 ? 's' : ''} back (End: the newest)`) : ''
+        return [
+          bar + (hidden ? c.faint(` +${hidden} more`) : ''),
+          c.ghost('─'.repeat(w)),
+          ` ${c.bold(clip(job.command, w - 40))} ${c.faint('·')} ${state} ${c.faint(`· ${ranFor(job)}`)}${where}`,
+          ...Array.from({ length: n }, (_, i) => (shown.length ? (shown[i] === undefined ? '' : ` ${ERROR.test(shown[i]) ? c.red(shown[i]) : c.muted(shown[i])}`) : i ? '' : ` ${c.faint('(no output yet)')}`)),
+          c.ghost('─'.repeat(w)),
+          ` ${said ? c.yellow(said) : c.faint(`${all.length > 1 ? '←/→ another one · ' : ''}↑/↓ PgUp/PgDn scroll · K ${job.exited ? 'close' : 'stop'} it · Esc close`)}`,
+        ]
+      },
+    })
+  }
+
   // Use a chosen set of models for this session: one pins it (no rotation), several rotate among
   // just those. Remembered for this folder (.heartcode/models.json); the saved ranking is untouched.
   // later: chosen while a task works; it goes on with its models, yours from the next message.
@@ -908,8 +1008,11 @@ class App {
     const key = (t) => `${t.provider}/${t.model}`
     const chosen = new Set((cfg.session ?? mine).map(key)) // pre-ticked: this session's set, or all (auto)
     const items = mine.map((t) => ({ label: t.model, t, checked: chosen.has(key(t)), desc: this.modelDesc(t, mine.indexOf(t)) }))
-    const picked = await ui.pick('Models for this session — tick several to rotate, one to pin (all = auto)', items, { filter, multi: true })
+    // first, standing alone: back to auto (Enter on it, whatever is ticked)
+    const auto = { label: 'auto', only: true, auto: true, desc: `your whole list, in its order (${mine.length} models)${cfg.session ? ' · forgets what this folder picked' : ' · in use'}` }
+    const picked = await ui.pick('Models for this session — tick several to rotate, one to pin, or auto', [auto, ...items], { filter, multi: true })
     if (!picked) return
+    if (picked.some((it) => it.auto)) return cfg.session ? this.auto(later) : ui.print(c.dim('already on auto'))
     const list = picked.map((it) => it.t)
     return list.length >= mine.length ? this.auto(later) : this.setSession(list, later)
   }
@@ -1279,6 +1382,10 @@ async function slash(app, line, working = false) {
         ])
         if (!go?.yes) return
       }
+      if (!working && app.s?.wrapping) {
+        ui.spinner('keeping what the last task learned · Ctrl+C to quit now')
+        await app.s.wrapping
+      }
       return 'exit'
     }
     case 'reset': {
@@ -1308,7 +1415,7 @@ async function slash(app, line, working = false) {
       if (!working) ui.idle()
       if (app.tabs) app.tabs.locked = true
       try {
-        await ui.pick(`${c.info('↗')} ${c.bold('The settings page is on')}`, [{ label: 'Turn off', desc: 'stops the page and gives HeartCode back' }], { fixed: true })
+        await ui.pick('The settings page is on', [{ label: 'Turn off', desc: 'stops the page and gives HeartCode back' }], { fixed: true, body: `It's open in your browser:\n${url}\n\nWhat you change there applies right away.` })
       } finally {
         if (app.tabs) app.tabs.locked = false
         close()
@@ -1328,7 +1435,7 @@ async function slash(app, line, working = false) {
       return ui.print(`${c.cyan('/tab')} ${c.faint('a new tab ·')} ${c.cyan('/tab worktree')} ${c.muted('[name]')} ${c.faint('a new tab in its own git worktree ·')} ${c.cyan('/tab')} ${c.muted('<1–' + tabs.list.length + '>')} ${c.faint('go to that tab')}`)
     }
     case 'help':
-      return ui.print(app.help())
+      return ui.showText('Commands and keys', app.help())
     case 'select_model':
       return app.pickModel(args, working)
     case 'rename': {
@@ -1366,16 +1473,18 @@ async function slash(app, line, working = false) {
       const files = [...first.keys()].filter((f) => !want || f.includes(want)).sort()
       if (!files.length) return ui.print(want ? `No changes to ${want} in this session.` : 'No changes in this session yet.')
       let shown = 0
+      const out = []
       for (const rel of files) {
         const abs = path.join(app.root, rel)
         const now = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null
         const was = first.get(rel)
         if (was === now) continue
         shown++
-        if (was === null || now === null) ui.print(`${c.bold(rel)} ${was === null ? c.green('(new)') : c.red('(deleted)')}`)
-        if (now !== null) ui.print(renderDiff(diffLines(was ?? '', now), rel, undefined, 3, 400))
+        if (was === null || now === null) out.push(`${c.bold(rel)} ${was === null ? c.green('(new)') : c.red('(deleted)')}`)
+        if (now !== null) out.push(renderDiff(diffLines(was ?? '', now), rel, undefined, 3, 400))
       }
-      return ui.print(c.dim(shown ? `${shown} file${shown > 1 ? 's' : ''} changed in this session${files.length > shown ? ` (${files.length - shown} back as they were)` : ''}` : 'every file HeartCode changed is back as it was'))
+      out.push(c.dim(shown ? `${shown} file${shown > 1 ? 's' : ''} changed in this session${files.length > shown ? ` (${files.length - shown} back as they were)` : ''}` : 'every file HeartCode changed is back as it was'))
+      return ui.showText(want ? `Changes to ${want}` : 'Changes in this session', out.join('\n'))
     }
     case 'init': {
       const has = (f) => fs.existsSync(path.join(app.root, f))
@@ -1389,15 +1498,54 @@ async function slash(app, line, working = false) {
       const how = copyText(answer)
       return ui.print(c.dim(`copied the last answer (${answer.split('\n').length} lines)${how === 'osc' ? ' through the terminal' : ''}`))
     }
+    case 'background': {
+      const jobs = listJobs(app.root)
+      const label = (j) => `#${j.id} ${clip(j.command, 70)}`
+      if (args[0] === 'off' || args[0] === 'hide') return app.toggleJobs(false)
+      if (args[0] === 'stop') {
+        const j = args[1] ? getJob(args[1]) : null
+        const running = jobs.filter((x) => !x.exited)
+        if (!j && !running.length) return ui.print(c.dim('Nothing is running in the background.'))
+        const pick = j ? { j } : await ui.pick('Stop which one?', running.map((x) => ({ label: label(x), desc: `running · ${ranFor(x)}`, j: x })))
+        if (!pick?.j) return
+        return ui.print(stopJob(pick.j) ? `${c.ok('✓')} stopped ${label(pick.j)}` : c.dim(`#${pick.j.id} had already exited`))
+      }
+      if (args[0] === 'files') return jobs.length ? ui.showText('Background logs', jobs.map((j) => `${label(j)}\n  ${c.faint(j.file)}`).join('\n')) : ui.print(c.dim('No background commands yet.'))
+      if (getJob(args[0])) app.jobTab = getJob(args[0]).id // /background 2: its tab
+      return app.toggleJobs(true) // their logs, live, a tab each
+    }
+    case 'context': {
+      const s = app.s
+      if (!s?.messages?.length) return ui.print('Nothing in the context yet: it fills with your first message.')
+      const r = contextReport(s)
+      const share = (n) => (r.window ? `${Math.round((n / r.window) * 100)}%` : '')
+      const bar = (n) => c.brand('█'.repeat(r.window ? Math.round((n / r.window) * 40) : 0) || (n ? '▏' : ''))
+      const row = (name, n, note = '') => `  ${name.padEnd(20)} ${kTokens(n).padStart(6)} ${c.faint(share(n).padStart(4))}  ${bar(n)}${note ? ` ${c.faint(note)}` : ''}`
+      const free = Math.max(0, r.compactAt - r.total)
+      ui.showText(
+        'Context',
+        [
+          `${c.muted(`~${kTokens(r.total)} of ${kTokens(r.window)} (${share(r.total)}) · ${s.client.model}`)}${r.counted ? c.faint(` · the last request, as the server counted it: ${kTokens(r.counted)}`) : ''}`,
+          ...r.parts.filter((p) => p.tokens).map((p) => row(p.name, p.tokens, p.note)),
+          `  ${'room left'.padEnd(20)} ${kTokens(free).padStart(6)} ${c.faint(share(free).padStart(4))}  ${c.faint(`before it summarizes, at 85% (${kTokens(r.compactAt)}) — or moves to a model with more room`)}`,
+          '',
+          c.bold('Biggest pieces'),
+          ...r.biggest.map((b) => `  ${kTokens(b.tokens).padStart(6)}  ${b.what} ${c.faint(b.ago ? `· ${b.ago} message${b.ago > 1 ? 's' : ''} ago` : '· the newest')}`),
+          c.faint('  /compact summarizes it (add what to keep); older tool results become pointers to their files on their own'),
+        ].join('\n'),
+      )
+      return
+    }
     case 'cost': {
       const u = app.chat.usage
       if (!u?.requests) return ui.print('Nothing used yet in this session.')
       const price = app.s?.client.price?.()
-      ui.print(`${c.bold('tokens')}  ${kTokens(u.input)} in${u.cached ? ` (${kTokens(u.cached)} from the cache)` : ''} · ${kTokens(u.output)} out · ${u.requests} request${u.requests > 1 ? 's' : ''}`)
-      return ui.print(
-        u.priced
-          ? `${c.bold('cost')}    ${money(u.cost)}${price ? c.faint(`  (${app.inUse()?.model}: $${price.input ?? 0} in / $${price.output ?? 0} out per million tokens, from models.dev)`) : ''}`
-          : c.faint(`cost: not known for ${app.inUse()?.model ?? 'this model'} (models.dev doesn't list it; local and subscription models have none)`),
+      return ui.showText(
+        'Cost',
+        `${c.bold('tokens')}  ${kTokens(u.input)} in${u.cached ? ` (${kTokens(u.cached)} from the cache)` : ''} · ${kTokens(u.output)} out · ${u.requests} request${u.requests > 1 ? 's' : ''}\n` +
+          (u.priced
+            ? `${c.bold('cost')}    ${money(u.cost)}${price ? c.faint(`  (${app.inUse()?.model}: $${price.input ?? 0} in / $${price.output ?? 0} out per million tokens, from models.dev)`) : ''}`
+            : c.faint(`cost: not known for ${app.inUse()?.model ?? 'this model'} (models.dev doesn't list it; local and subscription models have none)`)),
       )
     }
     case 'clear_chat': // a new session; the old one stays in /resume
@@ -1422,7 +1570,7 @@ async function slash(app, line, working = false) {
         const head = `  ${cp.ok ? c.green('✓') : c.red('✗')} ${c.bold(cp.name)}${cp.ok ? c.dim(' · ready') : c.yellow(' · needs setup')}`
         return cp.ok ? head : `${head}\n    ${c.faint(`install ${cp.need}`)}`
       })
-      return ui.print(`${c.bold('External tools HeartCode features use')}\n${rows.join('\n')}`)
+      return ui.showText('External tools HeartCode features use', rows.join('\n'))
     }
     case 'mcp': {
       const all = loadServers(app.root, { includeDisabled: true }) // enabled and off, so off ones are visible
@@ -1439,7 +1587,7 @@ async function slash(app, line, working = false) {
       })
       const needs = names.some((n) => running.has(n) && mcpAuth(all[n]) === 'out')
       const off = names.some((n) => !running.has(n))
-      return ui.print(`${c.bold('MCP servers')}\n${rows.join('\n')}${needs ? `\n  ${c.dim('sign in to a remote one with /login_mcp <name>')}` : ''}${off ? `\n  ${c.dim('turn one on in /settings → MCP servers')}` : ''}`)
+      return ui.showText('MCP servers', `${rows.join('\n')}${needs ? `\n  ${c.dim('sign in to a remote one with /login_mcp <name>')}` : ''}${off ? `\n  ${c.dim('turn one on in /settings → MCP servers')}` : ''}`)
     }
     case 'login_mcp': {
       const remote = app.mcp.names.filter((n) => app.mcp.get(n).url)
@@ -1522,7 +1670,7 @@ async function slash(app, line, working = false) {
       return app.save()
     }
     case 'model_info':
-      return ui.print(`${c.cyan(s.client.model)}\n${describe(s.profile, s.strat)}`)
+      return ui.showText(s.client.model, describe(s.profile, s.strat))
     case 'test_model': {
       const tested = await getProfile(app.client(s.client.provider, s.client.model), ui, true, app.signal) // tested on a fresh connection (requests not fitted to what it was thought to do), and saved
       s.reset()
@@ -1565,6 +1713,7 @@ async function repl(app, f = {}) {
   let ctl = null
   ui.onEscape = () => ctl?.abort()
   // a command typed while it works: run now, beside the task, if it leaves the conversation alone
+  ui.onPanel = () => app.toggleJobs() // Alt+B: the background commands' logs, side by side, live
   ui.onNow = (line) => {
     if (!RIGHT_AWAY.has(/^\/([\w-]+)/.exec(line)?.[1]) || !app.isCommand(line)) return false
     slash(app, line, true)
@@ -1647,6 +1796,8 @@ async function repl(app, f = {}) {
   if (f['resume-id']) await app.resume(loadChat(f['resume-id']))
   else if (f.resume) await app.resume()
   if (f.model) useModel(app, f.model) // a continued tab's own model
+  // models this folder picked earlier (/select_model): said, with the way back to your whole list
+  if (app.folderModels && cfg.session?.length) ui.print(`${c.muted('this folder uses')} ${c.cyan(cfg.session.map((t) => t.model).join(', '))} ${c.faint(`(picked earlier) · ${c.cyan('/select_model auto')} for your whole list again`)}`)
   app.tabs?.onChange?.() // the conversation it opened with
   for (;;) {
     const line = await ui.ask(` ${c.magenta('♥')} `, { suggest: true, initial: app.nextInput, history: true })

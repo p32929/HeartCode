@@ -31,7 +31,8 @@ tried did what I needed:
     current official docs first, not blogs or memory.
   - **Learns, per project, and keeps it.** Every web page it reads is kept whole in
     `.heartcode/research/`. When a task ends it saves what's worth knowing as notes
-    (`.heartcode/memory/`), drops the junk and removes throwaway files. A mistake it fixes becomes a
+    (`.heartcode/memory/`), drops the junk and removes throwaway files, in the background, while
+    you go on. A mistake it fixes becomes a
     lesson it won't repeat. The next task starts from what's known instead of searching again.
   - **Checks its work before calling it done**: a plan first, a run after every change, and another
     model reviewing the result against what you asked. Going round in circles hands the work to
@@ -55,6 +56,11 @@ tried did what I needed:
   see what went wrong.
 - **Takes skills, MCP servers and hooks** in Claude Code's formats; `/import` brings yours over.
 - **Tabs** (`Alt+T`), each with its own conversation, and git worktrees for work kept apart.
+- **Servers and watchers in the background**: the model starts one and goes on working, reads its
+  output when it needs to, and stops it. `Alt+B` (or `/background`) shows their logs live above the input,
+  a tab each (←/→ or a click switches), while you work; nothing outlives HeartCode.
+- **`/context`**: what fills the context window, part by part (system prompt, tools, messages, tool
+  results) and the biggest single pieces.
 
 ## How I set it up and use it
 
@@ -99,7 +105,7 @@ The sidebar, in four groups:
 - **Models**: *Your list* (the models HeartCode uses, in order) and *Providers* (where they
   come from).
 - **General**: *Settings* (what it may do without asking, terminal colors, features, thinking
-  effort, voice input, and which outside tools are ready) and *Status bar* (drag and drop what the
+  effort, voice input, web search: your own SearXNG and the engines' order, and which outside tools are ready) and *Status bar* (drag and drop what the
   bottom lines show, with a live preview). **Notifications**: Telegram.
 - **Skills**, **MCP servers** and **System prompt**: what HeartCode can do and how it's told.
 - **Advanced**: *Logs* (requests and runs) and *Files* (the rest of the settings, as files).
@@ -157,7 +163,9 @@ Use HeartCode like any other coding agent: ask it to read, change, run and fix t
 project. `/` shows every command, `Shift+Tab` changes what it may do without asking, `Esc` stops
 it, and `heart --help` lists everything else. While it works, commands that leave the conversation
 alone (`/help`, `/cost`, `/diff`, `/select_model`, `/settings`, `/tab`, `/exit`…) run at once; the
-ones that change it (`/compact`, `/rewind`, `/resume`…) wait until it's done.
+ones that change it (`/compact`, `/rewind`, `/resume`…) wait until it's done. Pickers, questions and what
+commands show (`/help`, `/context`, `/diff`…) open in a dialog over the conversation; `Esc`
+closes it.
 
 ## License
 

@@ -2,6 +2,38 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.32 (2026-11-01)
+
+- Dialogs: pickers (`/select_model`, `/resume`, `/rewind`, `/export`…), permission questions, typed
+  questions (`/rename`, "what should it do instead?") and what commands show (`/help`, `/context`,
+  `/cost`, `/diff`, `/mcp`, `/doctor`, `/model_info`) open in a box over the conversation: 70% of
+  the width, as tall as what's in it (70% at most), everything behind dimmed. A short list is
+  cards (name, description under it); a permission shows what it's about (this task's last lines)
+  above the choices; long text scrolls. Esc closes any of them; a question the model asks closes
+  an open dialog so it can be answered.
+- Commands that run in the background: `run_command` with `background: true` (a dev server, a
+  watcher) answers after a few seconds and keeps it running; the `background` tool reads its new
+  output, lists them, stops one; the model hears when one exits. `⚙ 1 running` in the status bar;
+  `Alt+B` (or `/background`) shows their logs live in a dialog, a tab each (←/→, a click), ↑/↓ and
+  PgUp/PgDn scroll, K twice stops one and closes its tab. Everything still running is stopped when
+  HeartCode exits. Alt+B only acts in an empty box (Option+← sends the same keys: the word jump).
+- `/context`: what fills the context window, part by part (system prompt, tools, your messages,
+  notes, replies, tool results whole and as pointers), the room left, and the biggest pieces.
+- The wrap-up after a task (notes, research pages kept or dropped, throwaway files removed) runs
+  after the answer is back, beside what you do next, on a connection of its own; it keeps a file a
+  new message may use. `heart -p` prints the result first and exits once it's done; `/exit` waits
+  for it.
+- Web search: your own SearXNG (settings page → General → Web search: its address in its own row,
+  with Test), and the engines in the order you set (↑/↓, each switchable). They're asked in that
+  order: the next only when one hasn't found enough, failed or took over 3 s; the rest aren't asked
+  once there's enough. A SearXNG's JSON API is used when it's on there.
+- `/select_model` has an "auto" row (back to your whole list, forgetting this folder's choice), and
+  a folder that picked its own models says so at start.
+- `/` commands in alphabetical order (the `/` menu and `/help`).
+- Settings page: one light/dark button at the top right instead of the switch in the sidebar; on a
+  phone, the top bar no longer grows taller than its tabs. Typing and pasting in the SearXNG and
+  skill-URL boxes work (an Enter handler cancelled every other key).
+
 ## 0.1.31 (2026-11-01)
 
 - Commands typed while HeartCode works run at once instead of waiting in the queue, when they leave

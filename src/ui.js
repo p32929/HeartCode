@@ -118,7 +118,7 @@ export const keyId = (key, s = '') => CONTROL_KEYS[key.sequence ?? s] ?? [key.ct
 // next one). /voice records (Space in an empty box, or a key in keybindings.json); Alt+T, Alt+W,
 // Alt+N/P (or Ctrl+PgDn/PgUp), Alt+1…9: tabs; Shift+↑↓ and Alt+↑↓ scroll the conversation (as
 // PgUp/PgDn and the mouse wheel do). keybindings.json can move any of them.
-export const DEFAULT_KEYS = { 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', 'ctrl+pagedown': 'next_tab', 'ctrl+pageup': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
+export const DEFAULT_KEYS = { 'alt+b': 'background_log', 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', 'ctrl+pagedown': 'next_tab', 'ctrl+pageup': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
 export function loadKeys(file = path.join(HOME, 'keybindings.json')) {
   let raw = {}
   try {
@@ -664,6 +664,154 @@ export class UI {
     this.scroll = 0
     this.asking = false
     this.frame = 0
+    this.dialog = null // a box over the screen (the background commands' logs)
+  }
+
+  // A dialog: a box in the middle, 70% of the screen each way, the conversation going on around it;
+  // drawn again twice a second while it's open. { title, draw(w, h) → lines, key?(key), click?(col, row),
+  // close?(), toggle?: the key action that closes it too }. While it's open every key is its own (Ctrl+C
+  // aside); Esc, or a click outside it, closes it.
+  setDialog(dialog) {
+    const was = this.dialog
+    this.dialog = dialog
+    clearInterval(this.dialogTimer)
+    this.dialogTimer = dialog ? setInterval(() => this.render(), 500) : null
+    this.dialogTimer?.unref()
+    if (was && was !== dialog) was.close?.()
+    this.render()
+  }
+  // Text to read (a command's answer: /help, /context, /diff…) in a dialog: ↑/↓, PgUp/PgDn, Home/End
+  // and the wheel scroll it, Esc closes it. Without the full screen: printed.
+  showText(title, text) {
+    if (!this.full) return this.print(text)
+    const all = String(text).split('\n')
+    let top = 0
+    let page = 10
+    let total = 0
+    this.setDialog({
+      title,
+      key: (key) => {
+        const by = { up: key.wheel ? -3 : -1, down: key.wheel ? 3 : 1, pageup: -page, pagedown: page, home: -1e9, end: 1e9 }[key.name]
+        if (by) top = Math.max(0, Math.min(top + by, total - page))
+      },
+      draw: (w, h) => {
+        const rows = all.flatMap((l) => wrapAnsi(l, w))
+        total = rows.length
+        page = h - 2
+        top = Math.max(0, Math.min(top, total - page))
+        const shown = rows.slice(top, top + page)
+        const where = total > page ? `${top + 1}–${Math.min(total, top + page)} of ${total} lines · ↑/↓ PgUp/PgDn scroll · ` : ''
+        return [...shown, '', c.faint(`${where}Esc close`)]
+      },
+    })
+  }
+
+  // where it is: { x, y, w, h } (screen cells, from 0; the inside, without the border)
+  #dialogBox(cols, rows) {
+    const w = Math.max(30, Math.floor(cols * 0.7))
+    const h = Math.max(8, Math.floor(rows * 0.7))
+    return { x: Math.floor((cols - w) / 2) + 1, y: Math.floor((rows - h) / 2) + 1, w: Math.min(w, cols) - 2, h: Math.min(h, rows) - 2 }
+  }
+  // d: { title, lines(w, h) → lines (at most h), fill?: always 70% tall too (a log), cursor?(w) →
+  // { row, col } in the lines (else hidden) }. The box is 70% of the screen wide, as tall as what's in
+  // it (70% at most), in the middle, with a margin inside.
+  #drawDialog(cols, rows, d) {
+    const PX = 2 // the margin inside: columns each side
+    const PY = 1 // and rows above and below
+    const max = this.#dialogBox(cols, rows)
+    const name = String(d.title ?? '')
+    const iwMax = max.w - 2 * PX
+    const w = iwMax
+    const lines = d.lines(w, max.h - 2 * PY).slice(0, max.h - 2 * PY)
+    const h = d.fill ? max.h - 2 * PY : lines.length
+    const W = w + 2 * PX
+    const x = Math.floor((cols - W - 2) / 2) + 1
+    const y = Math.floor((rows - h - 2 * PY - 2) / 2) + 1
+    this.dialogAt = { x, y, W, H: h + 2 * PY, cx: x + 1 + PX, cy: y + 1 + PY } // for the mouse (screen cells, from 1)
+    const paint = (t) => (background ? `${background}${t.replace(/\x1b\[(0|49)?m/g, (m) => m + background)}\x1b[0m` : `${t}\x1b[0m`)
+    const pad = (t, n) => {
+      const cut = fit(t, n)
+      return cut + ' '.repeat(Math.max(0, n - width(cut.replace(/\x1b\[[0-9;]*m/g, ''))))
+    }
+    const title = name ? ` ${width(name) > W - 6 ? `${fit(name, W - 7)}…` : name} ` : '' // too long: cut (a question shows all of it inside)
+    const row = (i, t) => `\x1b[${y + i};${x}H${paint(t)}`
+    let out = row(0, c.brand('╭─') + c.bold(title) + c.brand('─'.repeat(Math.max(0, W - width(title) - 1)) + '╮'))
+    const blank = c.brand('│') + ' '.repeat(W) + c.brand('│')
+    for (let i = 0; i < PY; i++) out += row(1 + i, blank)
+    for (let i = 0; i < h; i++) out += row(1 + PY + i, c.brand('│') + ' '.repeat(PX) + pad(lines[i] ?? '', w) + ' '.repeat(PX) + c.brand('│'))
+    for (let i = 0; i < PY; i++) out += row(1 + PY + h + i, blank)
+    out += row(2 + 2 * PY + h - 1, c.brand('╰' + '─'.repeat(W) + '╯'))
+    const cur = d.cursor?.(w)
+    return out + (cur ? `\x1b[${y + 1 + PY + cur.row};${x + 1 + PX + Math.min(cur.col, w - 1)}H\x1b[?25h` : '\x1b[?25l')
+  }
+
+  // The question being asked, as a dialog: its title; what's typed (the filter, or the answer) with the
+  // cursor; a picker's choices. A short list (a few, one to choose) is shown as cards: the name, its
+  // description under it. A permission (confirm) shows what just happened (the change or command it
+  // asks about) above the choices. A picker's body (pick's option): a few lines saying what's going on.
+  #question() {
+    const rl = this.rl
+    const m = this.menu
+    const plain = (t) => String(t ?? '').replace(/\x1b\[[0-9;]*m/g, '')
+    const title = plain(rl._prompt).replace(/\s*›?\s*$/, '').replace(/:\s*$/, '').trim()
+    const field = (w) => {
+      const pre = '› '
+      const room = w - pre.length - 1
+      const from = Math.max(0, rl.cursor - room)
+      return { text: c.brand(pre) + c.bright(rl.line.slice(from, from + room)), col: pre.length + rl.cursor - from }
+    }
+    const padTo = (t, n) => t + ' '.repeat(Math.max(0, n - width(plain(t))))
+    const pick = m.pick
+    const choices = pick ? m.items.filter((x) => !x.header) : []
+    const cards = pick && !pick.multi && pick.items.length <= 6 && !m.items.some((x) => x.header)
+    const body = pick?.body ? String(pick.body).split('\n') : []
+    const hint = pick ? (pick.fixed ? '↑↓ move · Enter choose · Esc close' : pick.multi ? '↑↓ move · Space tick · Ctrl+A all · Ctrl+N none · Enter take · Esc cancel · type to filter' : `↑↓ move · Enter choose · Esc cancel${cards ? '' : ' · type to filter'}`) : 'Enter send · Esc cancel'
+    let at = 0
+    const long = (w) => width(title) > w // too long for the border: all of it inside too
+    return {
+      title: title.length > 200 ? title.slice(0, 200) : title,
+      cursor: (w) => (pick?.fixed || (cards && pick) ? null : { row: at, col: field(w).col }),
+      lines: (w, h) => {
+        const head = long(w) ? [...wrapAnsi(c.bold(title), w).map((l) => l), ''] : []
+        const text = body.flatMap((l) => wrapAnsi(/^https?:\/\/\S+$/.test(l.trim()) ? c.info(l) : c.muted(l), w)) // an address in its link color
+        const intro = [...head, ...text, ...(text.length ? [''] : [])]
+        if (!pick) {
+          const recent = this.askAbout ? this.#recent(w, Math.min(8, h - intro.length - 5)) : []
+          const top = [...recent, ...(recent.length ? [c.ghost('─'.repeat(w)), ''] : []), ...intro]
+          at = top.length
+          return [...top, field(w).text, '', c.faint(hint)]
+        }
+        let list
+        if (cards) {
+          list = choices.length
+            ? choices.flatMap((x, i) => {
+                const on = m.items[m.sel] === x
+                const name = on ? `${c.brand('❯')} ${c.bright(c.bold(x.item.label))}` : `  ${c.text(x.item.label)}`
+                const desc = x.item.desc ? (on ? `  ${c.muted(x.item.desc)}` : `  ${c.faint(x.item.desc)}`) : null
+                const rows = [name, ...(desc ? [desc] : [])].map((r) => (on ? c.select(padTo(r, w)) : r))
+                return i < choices.length - 1 && choices.some((y) => y.item.desc) ? [...rows, ''] : rows // a gap between cards that have two lines
+              })
+            : [c.faint(`nothing matches "${rl.line}"`)]
+        }
+        const filter = pick.fixed || cards ? [] : [field(w).text, c.ghost('─'.repeat(w))]
+        const room = h - intro.length - filter.length - 2
+        if (!cards) list = m.items.length ? this.#menuLines(w, Math.max(1, Math.min(room - (m.items.length > room ? 1 : 0), m.items.length))).slice(1) : [c.faint(`nothing matches "${rl.line}"`)]
+        const recent = this.askAbout ? this.#recent(w, Math.min(8, room - list.length - 1)) : []
+        const top = [...recent, ...(recent.length ? [c.ghost('─'.repeat(w)), ''] : []), ...intro]
+        at = top.length
+        return [...top, ...filter, ...list, '', c.faint(hint)]
+      },
+    }
+  }
+
+  // The last `n` rows of this task's output at width w (what a question in the middle of the work is about).
+  #recent(w, n) {
+    if (n <= 0) return []
+    const out = []
+    const from = Math.max(0, (this.inputMark ?? 0) + 1) // this task's: from after your message
+    for (let i = this.log.length - 1; i >= from && out.length < n; i--) out.unshift(...wrapAnsi(this.log[i], w))
+    while (out.length && !out[0].trim()) out.shift()
+    return out.slice(-n)
   }
 
   // One model reply: thinking (dim, its own block) kept apart from the answer.
@@ -772,7 +920,16 @@ export class UI {
     if (!this.full) return
     if (b & 64) return (b & 0xc3) === 64 || (b & 0xc3) === 65 ? this.scrollBy(b & 1 ? -3 : 3) : undefined // 64 up, 65 down
     if ((b & 3) !== 0 && !up) return // the left button only (a release says 3 in some terminals)
+    if (this.dialog) {
+      // the wheel scrolls it; a click inside goes to it, outside closes it
+      const d = this.dialogAt
+      if (b & 64) return (b & 0xc3) === 64 || (b & 0xc3) === 65 ? (this.dialog.key?.({ name: b & 1 ? 'down' : 'up', wheel: true }), this.render()) : undefined
+      if ((b & 32) || up || !d) return
+      if (x < d.x || y < d.y || x > d.x + d.W + 1 || y > d.y + d.H + 1) return this.setDialog(null) // outside it
+      return this.dialog.click?.(x - d.cx, y - d.cy), this.render()
+    }
     if (!(b & 32) && !up && y <= 3 && this.onTabClick) return this.onTabClick(x - 1) // the tab bar's 3 rows
+
     const v = this.viewAt
     if (!v) return
     const r = Math.min(Math.max(y - 1 - v.first, 0), v.avail - 1) // a drag past the edge stops at it
@@ -881,9 +1038,12 @@ export class UI {
     const { out, rl, menu } = this
     const rows = out.rows || 24
     const cols = out.columns || 80
+    // A question (a picker, a permission, something to type) is a dialog over the screen; the input
+    // box behind it stays as it was.
+    const asked = this.asking && !this.histOn && rl
     // The input box: the rows around the cursor, at most INPUT_ROWS; the rules count the rest.
     const typing = !this.asking && rl && this.mainPrompt // working: what's typed meanwhile shows in the box
-    const input = this.asking || typing ? layoutInput(this.asking ? rl._prompt : this.mainPrompt, rl.line, rl.cursor, cols) : { rows: [''], cur: { row: 0, col: 0 } }
+    const input = asked ? layoutInput(this.mainPrompt ?? ' ', '', 0, cols) : this.asking || typing ? layoutInput(this.asking ? rl._prompt : this.mainPrompt, rl.line, rl.cursor, cols) : { rows: [''], cur: { row: 0, col: 0 } }
     const first = Math.max(0, Math.min(input.cur.row - INPUT_ROWS + 1, input.rows.length - INPUT_ROWS))
     const box = input.rows.slice(first, first + INPUT_ROWS)
     const inputRows = box.length
@@ -909,7 +1069,7 @@ export class UI {
       if (this.ahead.length > 5) bottom.push(c.faint(`  … ${this.ahead.length - 5} more`))
     }
     if (this.noticeText) bottom.push(fit(`${c.warn('!')} ${c.muted(this.noticeText)}`, cols))
-    if (menu.on) bottom.push(...this.#menuLines(cols))
+    if (menu.on && !asked) bottom.push(...this.#menuLines(cols))
     bottom.push(first ? note(first, '↑') : rule)
     const head = [...(this.tabBar?.(cols) ?? []), ...(this.header?.(cols) ?? [])].map((l) => fit(l, cols))
     const inputTop = rows - below.length - inputRows + 1 // first row of the input
@@ -924,8 +1084,13 @@ export class UI {
       for (let i = Math.max(0, s.row - top); i <= Math.min(view.length - 1, e.row - top); i++) view[i] = highlight(view[i], top + i === s.row ? s.col : 0, top + i === e.row ? e.col + 1 : Infinity)
     }
     // a theme with a background: every row painted with it (a style ending its own background goes back to it)
-    const row = background ? (line) => `${background}${line.replace(/\x1b\[(0|49)?m/g, (m) => m + background)}\x1b[K\x1b[0m` : (line) => `${line}\x1b[0m\x1b[K`
+    let row = background ? (line) => `${background}${line.replace(/\x1b\[(0|49)?m/g, (m) => m + background)}\x1b[K\x1b[0m` : (line) => `${line}\x1b[0m\x1b[K`
     let s = '\x1b[?25l'
+    // a dialog open: everything behind it dimmed
+    if (this.dialog || asked) {
+      const plainRow = row
+      row = (line) => plainRow(`\x1b[2m${line.replace(/\x1b\[(0|22)?m/g, (m) => m + '\x1b[2m')}`)
+    }
     for (let r = 0; r < inputTop - 1; r++) {
       const i = r - head.length
       const line = i < 0 ? head[r] : i < avail ? (view[i] ?? '') : bottom[i - avail]
@@ -933,7 +1098,9 @@ export class UI {
     }
     box.forEach((line, i) => (s += `\x1b[${inputTop + i};1H${row(line)}`))
     below.forEach((line, i) => (s += `\x1b[${inputTop + inputRows + i};1H${row(line)}`))
-    if (this.asking || typing) s += `\x1b[${inputTop + input.cur.row - first};${input.cur.col + 1}H\x1b[?25h`
+    if (this.dialog) s += this.#drawDialog(cols, rows, { title: this.dialog.title, fill: this.dialog.fill, lines: (w, h) => this.dialog.draw(w, h) }) // over everything, the cursor hidden
+    else if (asked) s += this.#drawDialog(cols, rows, this.#question()) // a question: its cursor in the box
+    else if (this.asking || typing) s += `\x1b[${inputTop + input.cur.row - first};${input.cur.col + 1}H\x1b[?25h`
     else s += `\x1b[${inputTop};1H`
     out.write(s)
   }
@@ -950,14 +1117,22 @@ export class UI {
       if (!this.full) return write(s, key)
       if (this.sel) (this.sel = null), this.render() // a key ends a selection
       const bound = !(key.ctrl && key.name === 'c') && this.keys[keyId(key, s)] // ~/.heart/keybindings.json
+      // a dialog: its keys, all of them; Esc (or its own key) closes it; Ctrl+C still stops and quits
+      if (this.dialog && !(key.ctrl && key.name === 'c')) {
+        if (key.name === 'escape' || (bound && bound === this.dialog.toggle)) return this.setDialog(null)
+        return this.dialog.key?.(key, s), this.render()
+      }
       if (this.recording) return this.recording.key(key, bound) // voice: Space, Enter, Esc; the rest waits
       // a fixed dialog (pick(…, { fixed })): only its keys, nothing typed and no shortcuts
       if (this.menu.pick?.fixed && !['up', 'down', 'return', 'escape'].includes(key.name) && !(key.ctrl && key.name === 'c')) return
       // In a multi-select: Ctrl+A ticks all, Ctrl+N unticks all (before tab shortcuts claim Ctrl+N)
       if (this.menu.pick?.multi && key.ctrl && (key.name === 'a' || key.name === 'n')) {
-        for (const x of this.menu.pick.items) x.checked = key.name === 'a'
+        for (const x of this.menu.pick.items) if (!x.only) x.checked = key.name === 'a'
         return this.refreshMenu()
       }
+      // Option+← sends what Alt+B does in many terminals (Esc b): with text in the box, it's the word jump
+      if (bound === 'background_log' && this.rl.line) return write(s, key)
+
       if (bound) return this.#action(bound, write)
       // Space in an empty box starts voice straight away — no /voice needed (only when it's set up,
       // and not in a menu or a mid-task yes/no question, where Space types a space as usual)
@@ -1015,13 +1190,13 @@ export class UI {
       if (m.pick) {
         if (key.name === 'up' || key.name === 'down') return this.#move(key.name === 'up' ? -1 : 1)
         if (key.name === 'tab') return
-        if (m.pick.multi && key.name === 'space' && it) {
+        if (m.pick.multi && key.name === 'space' && it && !it.item.only) {
           it.item.checked = !it.item.checked // Space ticks; Enter takes the ticked ones; Ctrl+A/N all/none (handled earlier, before tab shortcuts)
           return this.refreshMenu()
         }
         if (key.name === 'escape' || (key.name === 'return' && it)) {
           const ticked = m.pick.items.filter((x) => x.checked)
-          m.pick.chosen = key.name !== 'return' ? null : m.pick.multi ? (ticked.length ? ticked : [it.item]) : it.item
+          m.pick.chosen = key.name !== 'return' ? null : m.pick.multi ? (ticked.length && !it.item.only ? ticked : [it.item]) : it.item // only: an entry that stands alone (Enter on it takes just it)
           rl.line = ''
           rl.cursor = 0
           return write('\r', { name: 'return' })
@@ -1143,6 +1318,8 @@ export class UI {
       case 'voice':
         if (m.pick || (this.asking && !this.histOn)) return
         return this.dictateIn()
+      case 'background_log':
+        return this.onPanel?.()
       case 'stop':
         return this.asking ? undefined : this.onEscape?.()
       case 'cycle_permissions':
@@ -1339,10 +1516,10 @@ export class UI {
     this.render()
   }
 
-  #menuLines(cols) {
+  #menuLines(cols, rows) {
     const m = this.menu
     const width = cols - 1
-    const max = m.pick ? Math.max(5, (this.out.rows || 24) - 8) : MENU_ROWS
+    const max = rows ?? (m.pick ? Math.max(5, (this.out.rows || 24) - 8) : MENU_ROWS)
     const first = Math.max(0, Math.min(m.sel - max + 1, m.items.length - max))
     const shown = m.items.slice(first, first + max)
     const pad = m.items.some((x) => x.header) ? '  ' : ''
@@ -1442,6 +1619,7 @@ export class UI {
   }
 
   ask(prompt, { initial = '', suggest = false, history = false } = {}) {
+    if (this.dialog && !history) this.setDialog(null) // a question (a permission, a picker) needs you: the dialog makes way
     if (this.full && this.asking) return this.#free().then(() => this.ask(prompt, { initial, suggest, history }))
     if (history && this.kept) [initial, this.kept] = [initial || this.kept, ''] // typed before a submit()
     this.stopSpin()
@@ -1523,7 +1701,7 @@ export class UI {
   // multi: tick several with Space; returns the ticked items (an array), or null.
   // quiet: the question and answer aren't left in the conversation (a question before it starts).
   // fixed: a dialog: no typing to filter, no other keys meanwhile.
-  async pick(title, items, { filter = '', multi = false, quiet = false, fixed = false } = {}) {
+  async pick(title, items, { filter = '', multi = false, quiet = false, fixed = false, body = '' } = {}) {
     if (!this.full) {
       items.forEach((it, i) => this.print(`  ${i + 1}. ${it.group ? `${it.group} · ` : ''}${it.label}${it.desc ? '  ' + c.dim(it.desc) : ''}`))
       const a = await this.ask(`${title} ${c.dim(multi ? '(numbers, like 1,3)' : '(number)')}: `)
@@ -1532,8 +1710,8 @@ export class UI {
       return chosen.length ? chosen : null
     }
     await this.#free()
-    if (multi) for (const it of items) it.checked ??= false
-    this.menu.pick = { items, chosen: null, multi, quiet, fixed }
+    if (multi) for (const it of items) if (!it.only) it.checked ??= false
+    this.menu.pick = { items, chosen: null, multi, quiet, fixed, body }
     try {
       await this.ask(`${c.bold(title)} ${c.dim('›')} `, { suggest: true, initial: filter })
       return this.menu.pick.chosen
@@ -1558,16 +1736,12 @@ export class UI {
     const mode = this.permission === 'plan' ? (this.beforePlan ?? 'ask') : this.permission
     if (mode === 'all' || (mode === 'commands' && kind === 'edit')) return true
     if (this.full) {
-      const opts = [
-        { label: 'Yes', value: true },
-        { label: "Yes, and don't ask again", value: 'all' },
-        { label: 'No', value: false },
-        { label: 'No, and tell the model what to do instead', value: 'why' },
-      ]
-      const a = (await this.pick(`${c.yellow('?')} ${question}`, opts))?.value ?? false
-      if (a === 'all') this.setPermission('all')
-      if (a !== 'why') return Boolean(a)
-      return (await this.ask(`${c.bold('What should it do instead?')} `))?.trim() || false
+      this.askAbout = true // the dialog shows what it's about (the diff, the command) above the choices
+      try {
+        return await this.#confirmFull(question)
+      } finally {
+        this.askAbout = false
+      }
     }
     const a = await this.ask(`${c.yellow('?')} ${question} ${c.dim('[Y/n or type feedback]')} `)
     if (a === null) return false
@@ -1575,6 +1749,18 @@ export class UI {
     if (/^(y|yes)?$/i.test(t)) return true
     if (/^(n|no)$/i.test(t)) return false
     return t
+  }
+  async #confirmFull(question) {
+    const opts = [
+      { label: 'Yes', value: true },
+      { label: "Yes, and don't ask again", value: 'all' },
+      { label: 'No', value: false },
+      { label: 'No, and tell the model what to do instead', value: 'why' },
+    ]
+    const a = (await this.pick(`${c.yellow('?')} ${question}`, opts))?.value ?? false
+    if (a === 'all') this.setPermission('all')
+    if (a !== 'why') return Boolean(a)
+    return (await this.ask(`${c.bold('What should it do instead?')} `))?.trim() || false
   }
 
   write(s) {
@@ -1679,6 +1865,7 @@ export class UI {
 
   close() {
     this.busySince = null // closing ends any work in progress: the spinner stops too
+    clearInterval(this.dialogTimer)
     this.stopSpin()
     this.rl?.close()
     this.leaveFullscreen()

@@ -1,11 +1,11 @@
 // web_fetch and web_search: a page as text, and search results, with no API key.
-// Search asks several engines at once and puts their results together (webSearch): public SearXNG
-// instances (the list from searx.space), Mwmbl, DuckDuckGo's HTML page, and for coding questions
-// Stack Overflow, npm and GitHub. Bing, Startpage, Mojeek, Google and Brave were tried too: blocked
+// Search asks engines in your order (the settings page) and puts their results together (webSearch):
+// your own SearXNG if you have one, public SearXNG instances (the list from searx.space), Mwmbl,
+// DuckDuckGo's HTML page, and for coding questions Stack Overflow, npm and GitHub. Bing, Startpage, Mojeek, Google and Brave were tried too: blocked
 // (Brave refuses Node's connections), or junk results for scripts. When none can be reached, the
 // model is told "search is unreachable", so it stops searching instead of trying other words.
 import path from 'node:path'
-import { HOME, readJson, writeJson } from './config.js'
+import { HOME, CONFIG_FILE, readJson, writeJson } from './config.js'
 import { keywords } from './memory.js'
 // ponytail: scraping, no API; add a keyed backend (Brave, Tavily) if DuckDuckGo blocks for good.
 
@@ -312,58 +312,96 @@ async function github(query, signal) {
   return ((await res.json()).items ?? []).map((r) => ({ title: `${r.full_name} (GitHub, ${r.stargazers_count}★)`, url: r.html_url, snippet: r.description ?? '' }))
 }
 
-// All asked at once; a search fails only when every one does. Public instances of the open-source
-// engines come and go (on 2026-10-31 most LibreY, Whoogle and 4get ones were down or blocked, so
-// they aren't here), and DuckDuckGo is blocked on some networks.
-export const ENGINES = { searx, mwmbl, duckduckgo, stackoverflow, npm, github }
-const SIDE = new Set(['stackoverflow', 'npm', 'github']) // for coding questions: a few each, when they match
-const GENERAL = new Set(['searx', 'duckduckgo']) // the broadest: waited for a while even when the fast ones have answered
+// Your own SearXNG (cfg.search.searxng): its JSON API when it's switched on there, else its results
+// page, as the public ones are asked.
+async function mySearxng(query, signal, base = searchSettings().searxng) {
+  if (!base) throw new Error('no address set')
+  base = base.replace(/\/?$/, '/')
+  try {
+    const res = await fetch(`${base}search?format=json&q=${encodeURIComponent(query)}`, { headers: { ...HEADERS, accept: 'application/json' }, signal })
+    if (res.ok) return ((await res.json()).results ?? []).map((r) => ({ title: decode(String(r.title ?? '')), url: r.url, snippet: decode(String(r.content ?? '')) }))
+  } catch (e) {
+    if (signal?.aborted) throw e
+  }
+  return searxAt(base, query, signal)
+}
 
-// Results as text: title, URL, where they came from and snippet, numbered. The engines are asked
-// together; once enough good results are in, the slower ones get 2 s more. Each result is scored on
-// its own (the query's words in it), one that several engines found ranks higher.
+// The settings page's Test button: does this address answer a search? → how many results.
+export async function testSearxng(url) {
+  const hits = await mySearxng('open source search engine', AbortSignal.timeout(15_000), url)
+  return hits.filter((h) => h.url && h.title).length
+}
+
+// A search fails only when every engine does. Public instances of the open-source engines come and
+// go (on 2026-10-31 most LibreY, Whoogle and 4get ones were down or blocked, so they aren't here),
+// and DuckDuckGo is blocked on some networks.
+export const ENGINES = { searxng: mySearxng, searx, duckduckgo, mwmbl, stackoverflow, npm, github }
+export const ENGINE_NAMES = { searxng: 'Your SearXNG', searx: 'Public SearXNG instances', duckduckgo: 'DuckDuckGo', mwmbl: 'Mwmbl', stackoverflow: 'Stack Overflow', npm: 'npm', github: 'GitHub' }
+// The settings page's order and switches (cfg.search: { searxng, order, off }), read at each search
+// (a change applies at once, also in other HeartCodes). Engines missing from a saved order go after it.
+export function searchSettings() {
+  const { searxng, order = [], off = [] } = readJson(CONFIG_FILE, {}).search ?? {}
+  const names = Object.keys(ENGINES)
+  const all = [...order.filter((n) => names.includes(n)), ...names.filter((n) => !order.includes(n))]
+  return { searxng: searxng || '', order: all, off, use: all.filter((n) => !off.includes(n) && (n !== 'searxng' || searxng)) }
+}
+// Asked in this order: the next one starts when the one before has answered without enough good
+// results, failed, or taken 3 s; once there are enough, the rest aren't asked.
+const STAGGER = 3000
+const SIDE = new Set(['stackoverflow', 'npm', 'github']) // for coding questions: a few each, when they match
+
+// Results as text: title, URL, where they came from and snippet, numbered. The engines are asked in
+// your order (searchSettings, STAGGER). Each result is scored on its own (the query's words in it),
+// one that several engines found ranks higher.
 let unreachableUntil = 0 // search couldn't be reached: said at once for a while, without waiting again
 let unreachableWhy = ''
-export async function webSearch(query, { signal, limit = 10, engines = ENGINES } = {}) {
+export async function webSearch(query, { signal, limit = 10, engines = ENGINES, order } = {}) {
   const q = String(query ?? '').trim()
   if (!q) return 'error: no query given'
-  if (Date.now() < unreachableUntil && engines === ENGINES) return unreachableWhy
+  if (Date.now() < unreachableUntil && engines === ENGINES && !order) return unreachableWhy
   const words = [...new Set(q.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}.+#-]{2,}/gu) ?? [])]
   const failed = []
   const merged = new Map()
   const stop = new AbortController()
   const each = AbortSignal.any([signal, stop.signal, AbortSignal.timeout(25_000)].filter(Boolean))
   const good = () => [...merged.values()].filter((x) => x.score >= 0.5).length
+  const names = order ?? (engines === ENGINES ? searchSettings().use : Object.keys(engines))
+  if (!names.length) return 'error: every search engine is switched off (settings page → General → Web search). web_fetch pages you know instead.'
+  const place = Object.fromEntries(names.map((n, i) => [n, i]))
   await new Promise((resolve) => {
-    const names = Object.keys(engines)
-    let left = names.length
-    let answered = 0
-    let general = 0
-    let grace = null
-    const done = () => (clearTimeout(grace), resolve())
-    for (const name of names) {
+    let next = 0
+    let running = 0
+    let over = false
+    let stagger = null
+    const done = () => (over = true, clearTimeout(stagger), resolve())
+    const launch = () => {
+      clearTimeout(stagger)
+      if (over || next >= names.length) return
+      const name = names[next++]
+      running++
+      stagger = setTimeout(launch, STAGGER) // slow: the next one starts beside it
       engines[name](q, each)
         .then((hits) => {
           hits = hits.filter((h) => h.url && h.title)
           if (SIDE.has(name)) hits = hits.slice(0, 3)
           if (!hits.length) return failed.push(`${name}: no results`)
-          answered++
-          if (GENERAL.has(name)) general++
           for (const h of hits) {
             const key = h.url.replace(/^https?:\/\/(www\.)?/, '').replace(/[/#?]+$/, '')
             const had = merged.get(key)
             if (!had) merged.set(key, { hit: h, score: relevance(words, h), from: [name] })
             else if (!had.from.includes(name)) had.from.push(name)
           }
-          // enough: the slower ones get a little more (a general engine, the best results, up to 12 s)
-          if (answered >= 2 && good() >= limit) {
-            clearTimeout(grace)
-            grace = setTimeout(done, general ? 2000 : 12_000)
-          }
         })
         .catch((e) => failed.push(`${name}: ${e.name === 'AbortError' || /aborted/.test(e.message) ? (signal?.aborted ? 'stopped' : 'too slow') : e.message}`))
-        .finally(() => --left === 0 && done())
+        .finally(() => {
+          running--
+          if (over) return
+          if (good() >= limit) return done() // enough: the rest aren't asked
+          if (next < names.length) return launch() // not enough: the next one now
+          if (!running) done()
+        })
     }
+    launch()
   })
   stop.abort() // the slow ones: not waited for
   if (signal?.aborted) throw Object.assign(new Error('stopped'), { name: 'AbortError' })
@@ -373,7 +411,8 @@ export async function webSearch(query, { signal, limit = 10, engines = ENGINES }
   const textOf = (h) => `${h.title} ${h.snippet} ${h.url}`.toLowerCase()
   const weight = Object.fromEntries(words.map((w) => [w, Math.log(1 + all.length / (1 + all.filter((x) => textOf(x.hit).includes(w)).length))]))
   const total = words.reduce((t, w) => t + weight[w], 0) || 1
-  const ranked = all.map((x) => ({ ...x, rank: words.reduce((t, w) => t + (textOf(x.hit).includes(w) ? weight[w] : 0), 0) / total + 0.15 * (x.from.length - 1) })).sort((a, b) => b.rank - a.rank)
+  // and a little by the engine's place in your order
+  const ranked = all.map((x) => ({ ...x, rank: words.reduce((t, w) => t + (textOf(x.hit).includes(w) ? weight[w] : 0), 0) / total + 0.15 * (x.from.length - 1) + 0.1 * (1 - Math.min(...x.from.map((n) => place[n] ?? names.length)) / names.length) })).sort((a, b) => b.rank - a.rank)
   if (ranked.length) {
     unreachableUntil = 0
     return ranked

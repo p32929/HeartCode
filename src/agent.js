@@ -5,11 +5,12 @@ import { prompt, userInstructions } from './prompts.js'
 import { newChat } from './sessions.js'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { est, Client, writtenBy, tokensOf, COMPACT_SHARE } from './client.js'
+import { est, estMessages, Client, writtenBy, tokensOf, COMPACT_SHARE } from './client.js'
 import { runGuided } from './guided.js'
 import { markUsed, removeResearch, findResearch } from './research.js'
 import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed } from './tools.js'
 import { serversNote } from './lsp.js'
+import { newlyEnded, jobLine } from './background.js'
 import { loadHooks, runHooks } from './hooks.js'
 import { takeConfigErrors } from './config.js'
 import { c, duration, Block, Markdown, color, diffLines, renderDiff } from './ui.js'
@@ -148,6 +149,7 @@ export class Session {
   // images: data: URLs from the caller (headless input), besides @shot.png in the task.
   async run(task, signal, extra = []) {
     if (!this.isSub) this.client.newMessage?.() // the model list: from #1 again (unless set to stay)
+    this.runs = (this.runs ?? 0) + 1
     const { chat, ui } = this
     repairSummary(chat)
     if (this.hooks !== false) this.hooks = loadHooks(this.root) // edits to hooks.json apply right away
@@ -365,14 +367,15 @@ export class Session {
     const tools = [...extraTools({ memory: this.memory }), ...(extra?.defs ?? [])].map((f) => ({ type: 'function', function: f }))
     const messages = [{ role: 'system', content: system }, { role: 'user', content: user }]
     let last = ''
+    const client = extra?.client ?? this.client
     for (;;) {
-      const was = this.client.purpose
-      this.client.purpose = 'memory' // in the requests log
+      const was = client.purpose
+      client.purpose = extra?.purpose ?? 'memory' // in the requests log
       let res
       try {
-        res = await this.client.chat({ messages, tools }, { signal })
+        res = await client.chat({ messages, tools }, { signal })
       } finally {
-        this.client.purpose = was
+        client.purpose = was
       }
       messages.push({ role: 'assistant', content: res.content || '', ...(res.toolCalls.length && { tool_calls: res.toolCalls }) })
       if (!res.toolCalls.length) return res.content.trim()
@@ -396,14 +399,26 @@ export class Session {
   // or deleted as junk, and throwaway files it made are removed. Done by code after every such task,
   // not left to the model to remember: a fresh, small request (the task, its answer, the lists), on
   // the model that did the task. Helpers' pages are in the same list (they share it).
-  async wrapUp(task, answer, signal) {
+  // It runs after the answer is back (wrapUpLater), beside whatever you do next: its own connection,
+  // one wrap-up at a time; what it needs is taken from the task first, before the next one changes it.
+  wrapUpLater(task, answer) {
+    const at = { research: this.research, turn: this.chat.turns.at(-1), dirsBefore: this.dirsBefore, ran: this.ran, runs: this.runs }
+    const job = (this.wrapping ?? Promise.resolve())
+      .then(() => this.wrapUp(task, answer, undefined, at))
+      .catch((e) => log('wrapup', `failed: ${e.message}`))
+      .finally(() => this.wrapping === job && (this.wrapping = null))
+    this.wrapping = job
+  }
+
+  // at: the task's own state (wrapUpLater), else this message's
+  async wrapUp(task, answer, signal, at = { research: this.research, turn: this.chat.turns.at(-1), dirsBefore: this.dirsBefore, ran: this.ran, runs: this.runs }) {
     if (this.isSub || !this.memory || this.ui.permission === 'plan') return
-    const pages = this.research ?? []
-    const turn = this.chat.turns.at(-1)
+    const pages = at.research ?? []
+    const turn = at.turn
     const made = Object.entries(turn?.files ?? {}).filter(([rel, before]) => before === null && fs.existsSync(path.join(this.root, rel))).map(([rel]) => rel)
     // folders the task made that are still empty (a test folder): offered for cleanup too
-    if (this.dirsBefore) for (const d of foldersOf(this.root)) if (!this.dirsBefore.has(d) && isEmptyDir(path.join(this.root, d))) made.push(`${d}/`)
-    const ran = this.ran ?? []
+    if (at.dirsBefore) for (const d of foldersOf(this.root)) if (!at.dirsBefore.has(d) && isEmptyDir(path.join(this.root, d))) made.push(`${d}/`)
+    const ran = at.ran ?? []
     if (!pages.length && !made.length && !ran.length) return
     const commands = ran.map((r) => `- ${clip(r.command.replace(/\s+/g, ' '), 200)} → ${r.result}`).join('\n')
     const known = this.memory.relevant(`${task}\n${answer}\n${pages.map((p) => p.title).join('\n')}`, 12)
@@ -416,6 +431,7 @@ export class Session {
     })
     const files = new Set(pages.map((p) => p.file))
     const scratch = new Set(made)
+    const mine = at.runs // a message sent since: its task may use these files, so none are deleted
     const kept = []
     const dropped = []
     const removed = []
@@ -435,6 +451,7 @@ export class Session {
         if (!scratch.has(rel) && scratch.has(`${rel}/`)) rel = `${rel}/` // a folder named without its slash
         if (!scratch.has(rel)) return `error: "${rel}" isn't one of the new files this task made: ${[...scratch].join(', ')}`
         if (a.verdict !== 'delete') return `Kept ${rel}.`
+        if (this.runs !== mine) return `Kept ${rel}: the user has gone on to another task, which may use it.`
         if (rel.endsWith('/')) {
           if (!isEmptyDir(path.join(this.root, rel))) return `error: ${rel} isn't empty: delete the files in it first, or keep it`
           fs.rmSync(path.join(this.root, rel, '.DS_Store'), { force: true })
@@ -446,19 +463,15 @@ export class Session {
         return `Deleted ${rel}.`
       }
     }
-    this.ui.spinner('keeping what this task learned')
-    const was = this.client.purpose
+    const own = { provider: this.client.provider, model: this.client.model }
     try {
-      this.client.purpose = 'wrapup'
-      const said = await this.memoryTask(prompt('agent/wrapup'), request, signal, { defs, run })
+      const { client } = this.engineFor ? await this.engineFor(own) : { client: this.client }
+      const said = await this.memoryTask(prompt('agent/wrapup'), request, signal, { defs, run, client, purpose: 'wrapup' })
       log('wrapup', `${said} | pages kept ${kept.length}, deleted ${dropped.length}; files removed ${removed.length}`)
       if (kept.length || dropped.length) this.ui.step('research', `kept ${kept.length} page${kept.length === 1 ? '' : 's'}${dropped.length ? `, deleted ${dropped.length} as junk` : ''}`)
     } catch (e) {
       if (e.name === 'AbortError' || signal?.aborted) throw e
       log('wrapup', `failed: ${e.message}`)
-    } finally {
-      this.client.purpose = was
-      this.ui.stopSpin()
     }
   }
 
@@ -938,7 +951,7 @@ async function runNative(s, task, images, signal) {
       }
       const more = sinceNudge && !s.isSub && ((await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal)))
       if (!more) {
-        await s.wrapUp?.(task, res.content, signal)
+        s.wrapUpLater?.(task, res.content) // after the answer, beside what comes next
         return res.content
       }
       nudged++
@@ -984,8 +997,8 @@ async function runNative(s, task, images, signal) {
           ? `${args.server} · ${args.tool ?? ''}`
           : name === 'memory'
             ? `${args.action} ${args.name ? `[[${args.name}]]` : (args.query ?? '')}`
-            : name === 'manage'
-              ? [args.action, args.kind, args.name].filter(Boolean).join(' ')
+            : name === 'manage' || name === 'background'
+              ? [args.action, args.kind, args.name, args.id && `#${args.id}`].filter(Boolean).join(' ')
               : name === 'agent'
                 ? [args.model && `${args.model}:`, args.description].filter(Boolean).join(' ')
                 : name === 'todo' || name === 'ask_user'
@@ -1037,6 +1050,11 @@ async function runNative(s, task, images, signal) {
       s.onEvent?.({ type: 'tool', id: call.id, name, output: out })
     }
     trimOldResults(s)
+    const ended = newlyEnded(s.root) // background commands that exited meanwhile: the model hears it now
+    if (ended.length) {
+      for (const j of ended) ui.step('background', `#${j.id} ${clip(j.command, 60)} exited with ${j.code}`)
+      s.messages.push({ role: 'user', content: prompt('agent/background-ended', { jobs: ended.map(jobLine).join('\n') }) })
+    }
     if (stuck) {
       handOver(stuck)
       stuck = null
@@ -1660,4 +1678,51 @@ function attachNamed(s, task) {
     s.ui.result(`${body.split('\n').length} lines`)
   }
   if (calls.length) s.messages.push({ role: 'assistant', content: '', tool_calls: calls }, ...results)
+}
+
+// /context: what the next request carries, part by part, in tokens (estimated, by this model's
+// ratio of counted to estimated; the server's count of the last request beside it), and the
+// biggest single pieces. Returns { total, window, compactAt, counted, parts: [{ name, tokens, note }], biggest: [{ tokens, what, ago }] }.
+export function contextReport(s) {
+  const ratio = s.strat?.ratio ?? 1
+  const tok = (x) => Math.round(est(typeof x === 'string' ? x : JSON.stringify(x ?? '')) * ratio)
+  const msgs = s.messages ?? []
+  const tasks = (s.chat.turns ?? []).map((t) => String(t.task ?? '').slice(0, 60)).filter(Boolean)
+  const tools = [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name))
+  const parts = { system: 0, you: 0, notes: 0, replies: 0, results: 0, pointers: 0 }
+  let whole = 0
+  let cut = 0
+  const pieces = []
+  msgs.forEach((m, i) => {
+    const n = Math.round(estMessages([m]) * ratio)
+    const ago = msgs.length - 1 - i
+    if (i === 0 && (m.role === 'system' || s.strat?.mergeSystem)) return void (parts.system += n)
+    if (i === 1 && s.strat?.mergeSystem && m.role === 'assistant') return void (parts.system += n)
+    if (m.role === 'tool') {
+      const old = typeof m.content === 'string' && /^\[older output/.test(m.content)
+      old ? (parts.pointers += n, cut++) : (parts.results += n, whole++)
+      pieces.push({ tokens: n, what: `${callOf(msgs, m.tool_call_id)} (result${old ? ', a pointer' : ''})`, ago })
+    } else if (m.role === 'assistant') {
+      parts.replies += n
+      pieces.push({ tokens: n, what: 'a model reply', ago })
+    } else {
+      const text = typeof m.content === 'string' ? m.content : (m.content ?? []).map((p) => p.text ?? '').join(' ')
+      const yours = tasks.some((t) => text.startsWith(t))
+      yours ? (parts.you += n) : (parts.notes += n)
+      pieces.push({ tokens: n, what: yours ? `your message "${clip(text.split('\n')[0], 50)}"` : `a note to the model "${clip(text.split('\n')[0], 50)}"`, ago })
+    }
+  })
+  const toolTokens = tok(tools.map((f) => ({ type: 'function', function: f })))
+  const list = [
+    { name: 'system prompt', tokens: parts.system },
+    { name: `tools (${tools.length})`, tokens: toolTokens },
+    { name: 'your messages', tokens: parts.you },
+    { name: 'notes to the model', tokens: parts.notes, note: 'summaries, guides, reminders, saved notes found' },
+    { name: 'model replies', tokens: parts.replies },
+    { name: 'tool results', tokens: parts.results, note: `${whole} whole` },
+    { name: 'older results', tokens: parts.pointers, note: `${cut} shortened to pointers to their files` },
+  ]
+  const total = list.reduce((a, p) => a + p.tokens, 0)
+  const window = s.strat?.context ?? 0
+  return { total, window, compactAt: Math.round(window * COMPACT_SHARE), counted: s.counted?.tokens ?? 0, parts: list, biggest: pieces.sort((a, b) => b.tokens - a.tokens).slice(0, 5) }
 }
