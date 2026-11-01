@@ -1132,7 +1132,7 @@ export class UI {
       for (const [i, l] of this.ahead.slice(0, 5).entries()) bottom.push(fit(`  ${c.accent(`${i + 1}.`)} ${c.muted(l.replace(/\s+/g, ' '))}`, cols))
       if (this.ahead.length > 5) bottom.push(c.faint(`  … ${this.ahead.length - 5} more`))
     }
-    if (this.noticeText) bottom.push(fit(`${c.warn('!')} ${c.muted(this.noticeText)}`, cols))
+    if (this.noticeText) bottom.push(fit(this.noticeMark ? `${c.warn(this.noticeMark)} ${c.muted(this.noticeText)}` : `  ${c.muted(this.noticeText)}`, cols))
     if (menu.on && !asked) bottom.push(...this.#menuLines(cols))
     bottom.push(first ? note(first, '↑') : rule)
     const head = [...(this.tabBar?.(cols) ?? []), ...(this.header?.(cols) ?? [])].map((l) => fit(l, cols))
@@ -1464,14 +1464,27 @@ export class UI {
     write('\r', { name: 'return' })
   }
 
-  // The words go where the cursor is, in the box (also while it works).
-  async dictateIn() {
+  // Voice: listening at once; the words go where the cursor is, in the box (also while it works), and
+  // on Enter they're sent: at the prompt as if Enter was pressed, while it works as a message typed
+  // then (a command that can run beside the task runs; the rest waits in the queue).
+  async dictateIn(send = true) {
     const text = await this.dictate()
     if (!text) return
     const rl = this.rl
     const pad = rl.line && !/\s$/.test(rl.line.slice(0, rl.cursor)) ? ' ' : ''
     rl.line = rl.line.slice(0, rl.cursor) + pad + text + rl.line.slice(rl.cursor)
     rl.cursor += pad.length + text.length
+    if (!send) return this.render()
+    if (this.asking && this.histOn) {
+      this.sent = rl.line
+      this.menu.items = []
+      return this.ttyWrite('\r', { name: 'return' })
+    }
+    if (this.asking) return this.render() // a question's answer: in its box, to check and send
+    const line = rl.line.trim()
+    rl.line = ''
+    rl.cursor = 0
+    if (line && !this.onNow?.(line)) this.ahead.push(line)
     this.render()
   }
 
@@ -1514,9 +1527,9 @@ export class UI {
     }
     const draw = () => {
       showBox()
-      const keys = 'Enter to finish · Esc to cancel'
-      if (finishing) return this.notice('transcribing…', 60 * 60_000)
-      this.notice(mic ? `● listening ${Math.floor(mic.seconds())}s · Space to pause · ${keys}` : `voice · Space to ${said ? 'go on' : 'talk'} · ${keys}`, 60 * 60_000)
+      const keys = 'Enter to send · Esc to cancel'
+      if (finishing) return this.notice('transcribing the last part… (Esc cancels)', 60 * 60_000, '')
+      this.notice(mic ? `${c.red('●')} listening ${Math.floor(mic.seconds())}s · Space to pause · ${keys}` : `paused · Space to go on · ${keys}`, 60 * 60_000, '')
     }
     const heard = (pcm, fast) =>
       transcribePcm(pcm, voice, providers, { fast }).catch((e) => {
@@ -1552,9 +1565,9 @@ export class UI {
         draw()
       })
     }
-    draw()
+    start() // listening at once: the key that got here was the go-ahead
     const tick = setInterval(() => mic && draw(), 1000)
-    const go = await new Promise((resolve) => {
+    let go = await new Promise((resolve) => {
       this.recording = {
         key: (key, bound) => {
           if (key.name === 'escape') resolve(false)
@@ -1564,10 +1577,12 @@ export class UI {
       }
     })
     clearInterval(tick)
-    this.recording = null
+    // the last part being transcribed: keys still wait (an Enter now would send half of it); Esc cancels
+    this.recording = { key: (key) => key.name === 'escape' && (go = false) }
     if (!go) mic?.cancel(), (mic = null)
     else if (mic) (finishing = true), pause()
     await busy
+    this.recording = null
     if (rl) [rl.line, rl.cursor] = [base.line, base.cursor] // the caller puts the words in
     const text = go ? words().trim() : ''
     log('voice', go ? text : '(cancelled)')
@@ -1644,8 +1659,10 @@ export class UI {
 
   // initial: text already typed in, ready to edit. suggest: show the suggestion menu while typing.
   // A one-line message just above the input until `ms` pass or a key is pressed ('' hides it).
-  notice(text, ms = 2000) {
+  // mark: what goes before it ('!' a warning; '' none, for a state like voice listening)
+  notice(text, ms = 2000, mark = '!') {
     this.noticeText = text
+    this.noticeMark = mark
     clearTimeout(this.noticeTimer)
     if (text) this.noticeTimer = setTimeout(() => this.notice(''), ms)
     this.render()

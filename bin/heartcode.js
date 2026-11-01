@@ -104,7 +104,7 @@ const SECTIONS = [
   ]],
   ['settings', [
     ['/toggle_thinking', "show or collapse the model's thinking"],
-    ['/voice', 'say your message: Space to talk, Enter to finish; it shows in the input box as you speak'],
+    ['/voice', 'say your message (or Space in an empty box): it shows in the box as you speak, Enter sends it, Esc cancels'],
   ]],
   ['session', [
     ['/resume', 'continue an earlier session in this folder'],
@@ -155,7 +155,7 @@ function keysHelp(keys = {}) {
   const forAct = (a) => Object.entries(keys).filter(([, v]) => v === a).map(([k]) => pretty(k)).join(' / ')
   const tabs = /(^|,)alt\+[1-9]/.test(Object.keys(keys).join(','))
   const rows = [
-    ['Space', 'start voice input (when the input box is empty)'],
+    ['Space', 'voice: listens at once, Enter sends what you said (in an empty box)'],
     ['Enter', 'send · while it works, queue the message (commands like /help, /cost, /select_model run at once)'],
     ['Option/Shift/Ctrl+Enter', 'new line in the box'],
     ['Esc', 'stop the task (press twice to confirm)'],
@@ -1644,9 +1644,9 @@ async function slash(app, line, working = false) {
     case 'btw':
       return app.btw(line.trim().replace(/^\/btw\b/, '').trim(), working)
     case 'voice': {
-      if (working) return ui.dictateIn() // into the box, as Space does while it works
+      if (working) return ui.dictateIn() // as Space does while it works: sent when you press Enter
       const text = await ui.dictate()
-      if (text) app.nextInput = text // in the box, to read over and send
+      if (text) ui.ahead.push(text) // sent: the next prompt takes it, as if typed
       return
     }
     case 'toggle_thinking':

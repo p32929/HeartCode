@@ -2,6 +2,13 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.36 (2026-11-02)
+
+- Voice: Space in an empty box (or /voice) starts listening at once, no second key; what you say
+  shows in the box as you speak, and Enter sends it, all of it as one message. Keys wait while the
+  last part is transcribed (an Enter then sent only the part heard so far, and the rest stayed in
+  the box). Esc cancels; Space pauses and goes on. While a task works, it's sent as typed then.
+
 ## 0.1.35 (2026-11-02)
 
 - Settings page, Your list: every column sorts by the value it shows, ↑ smallest first and ↓
