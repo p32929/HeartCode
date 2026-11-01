@@ -155,7 +155,9 @@ Type `Hi` and press Enter. Wait for the reply: your model works.
 
 Use HeartCode like any other coding agent: ask it to read, change, run and fix things in your
 project. `/` shows every command, `Shift+Tab` changes what it may do without asking, `Esc` stops
-it, and `heart --help` lists everything else.
+it, and `heart --help` lists everything else. While it works, commands that leave the conversation
+alone (`/help`, `/cost`, `/diff`, `/select_model`, `/settings`, `/tab`, `/exit`…) run at once; the
+ones that change it (`/compact`, `/rewind`, `/resume`…) wait until it's done.
 
 ## License
 

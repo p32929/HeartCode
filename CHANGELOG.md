@@ -2,6 +2,19 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.31 (2026-11-01)
+
+- Commands typed while HeartCode works run at once instead of waiting in the queue, when they leave
+  the conversation alone: `/help`, `/cost`, `/model_info`, `/diff`, `/copy`, `/mcp`, `/doctor`,
+  `/toggle_thinking`, `/btw`, `/rename`, `/export`, `/tab`, `/close_tab`, `/exit`, `/settings`,
+  `/login_mcp`, `/install_skill`, `/import`, `/voice`, `/select_model`. The ones that change it
+  (`/compact`, `/clear_chat`, `/resume`, `/rewind`, `/tree`, `/fork`, `/init`, skills, `/tidy_memory`,
+  `/test_model`, `/reset`) still wait until it's done.
+- `/select_model` while it works: the task goes on with its models, yours from the next message.
+  `/exit` while it works asks first (that stops the task).
+- One question on screen at a time: a command's picker and the task's question (a permission)
+  take turns instead of drawing over each other.
+
 ## 0.1.30 (2026-11-01)
 
 - Settings page: the sidebar is 7 items in 4 groups split by lines (Models · General, Notifications ·

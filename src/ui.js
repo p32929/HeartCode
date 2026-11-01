@@ -646,6 +646,7 @@ export class UI {
     this.isCommand = (l) => l.startsWith('/') // the app's: only real commands (a path like /Users/… is a message)
     this.keys = { ...DEFAULT_KEYS, ...loadKeys() }
     this.waiters = []
+    this.freed = [] // asks waiting for the one on screen (a command's picker beside a task's question)
     this.closed = false
     this.rl = null
     this.onInterrupt = null
@@ -1103,8 +1104,7 @@ export class UI {
       rl.cursor = 0
       m.items = []
       m.off = null
-      if (/^\/btw\b/.test(line) && this.onBtw) this.onBtw(line.replace(/^\/btw\b/, '').trim()) // answered now, beside the task
-      else if (line) this.ahead.push(line) // a /command runs when the task is done (the queue)
+      if (line && !this.onNow?.(line)) this.ahead.push(line) // a command that leaves the conversation alone runs now, beside the task (onNow); the rest when it's done (the queue)
       return this.render()
     }
     if (['up', 'down', 'tab'].includes(key.name) || key.name === 'paste-start' || key.name === 'paste-end') {
@@ -1140,15 +1140,9 @@ export class UI {
       case 'next_tab':
       case 'prev_tab':
         return this.onTab?.(what)
-      case 'voice': // the words go where the cursor is, in the box (also while it works)
+      case 'voice':
         if (m.pick || (this.asking && !this.histOn)) return
-        return this.dictate().then((text) => {
-          if (!text) return
-          const pad = rl.line && !/\s$/.test(rl.line.slice(0, rl.cursor)) ? ' ' : ''
-          rl.line = rl.line.slice(0, rl.cursor) + pad + text + rl.line.slice(rl.cursor)
-          rl.cursor += pad.length + text.length
-          this.render()
-        })
+        return this.dictateIn()
       case 'stop':
         return this.asking ? undefined : this.onEscape?.()
       case 'cycle_permissions':
@@ -1189,6 +1183,17 @@ export class UI {
     this.sent = what
     m.items = []
     write('\r', { name: 'return' })
+  }
+
+  // The words go where the cursor is, in the box (also while it works).
+  async dictateIn() {
+    const text = await this.dictate()
+    if (!text) return
+    const rl = this.rl
+    const pad = rl.line && !/\s$/.test(rl.line.slice(0, rl.cursor)) ? ' ' : ''
+    rl.line = rl.line.slice(0, rl.cursor) + pad + text + rl.line.slice(rl.cursor)
+    rl.cursor += pad.length + text.length
+    this.render()
   }
 
   // Voice mode (/voice, or a key bound to voice): Space to talk, Space again to pause (and again to go on), Enter
@@ -1431,7 +1436,13 @@ export class UI {
   }
 
   // history: this prompt's messages go into ↑/↓ history (only the main prompt, never answers like keys).
+  // One question on screen at a time: a command run beside a task (onNow) and the task can both ask.
+  async #free() {
+    while (this.full && this.asking) await new Promise((r) => this.freed.push(r))
+  }
+
   ask(prompt, { initial = '', suggest = false, history = false } = {}) {
+    if (this.full && this.asking) return this.#free().then(() => this.ask(prompt, { initial, suggest, history }))
     if (history && this.kept) [initial, this.kept] = [initial || this.kept, ''] // typed before a submit()
     this.stopSpin()
     const rl = this.#rl()
@@ -1498,6 +1509,7 @@ export class UI {
         }
         if (draft) [rl.line, rl.cursor] = [draft, draft.length]
         resolve(l)
+        this.freed.shift()?.()
       }),
     )
   }
@@ -1519,6 +1531,7 @@ export class UI {
       const chosen = String(a ?? '').split(/[\s,]+/).map((n) => items[Number(n) - 1]).filter(Boolean)
       return chosen.length ? chosen : null
     }
+    await this.#free()
     if (multi) for (const it of items) it.checked ??= false
     this.menu.pick = { items, chosen: null, multi, quiet, fixed }
     try {

@@ -136,6 +136,9 @@ const SECTIONS = [
   ]],
 ]
 const COMMANDS = SECTIONS.flatMap(([, list]) => list)
+// Typed while a task works, these run at once, beside it: they leave the conversation alone. The
+// others (/compact, /rewind, /resume, /init…) wait in the queue until it's done.
+const RIGHT_AWAY = new Set(['help', 'cost', 'model_info', 'diff', 'copy', 'mcp', 'doctor', 'toggle_thinking', 'btw', 'rename', 'export', 'tab', 'close_tab', 'exit', 'quit', 'settings', 'login_mcp', 'install_skill', 'import', 'voice', 'select_model'])
 const helpText = (sections) => sections.map(([title, list]) => `  ${c.bold(title)}\n` + list.map(([n, d]) => `  ${c.cyan(n.padEnd(18))} ${d}`).join('\n')).join('\n\n')
 const SLASH = helpText(SECTIONS)
 
@@ -148,7 +151,7 @@ function keysHelp(keys = {}) {
   const tabs = /(^|,)alt\+[1-9]/.test(Object.keys(keys).join(','))
   const rows = [
     ['Space', 'start voice input (when the input box is empty)'],
-    ['Enter', 'send · while it works, queue the message'],
+    ['Enter', 'send · while it works, queue the message (commands like /help, /cost, /select_model run at once)'],
     ['Option/Shift/Ctrl+Enter', 'new line in the box'],
     ['Esc', 'stop the task (press twice to confirm)'],
     ['Esc Esc', 'rewind to an earlier message (at the prompt)'],
@@ -862,29 +865,40 @@ class App {
 
   // Use a chosen set of models for this session: one pins it (no rotation), several rotate among
   // just those. Remembered for this folder (.heartcode/models.json); the saved ranking is untouched.
-  async setSession(list) {
+  // later: chosen while a task works; it goes on with its models, yours from the next message.
+  async setSession(list, later = false) {
     const { cfg } = this
-    cfg.session = list // the global #1 (cfg.provider/model) stays, so your whole list and the picker are unchanged
-    this.saveProjectModels()
-    this.s = null
-    this.ui.print(list.length === 1 ? `${c.green('using')} ${c.cyan(list[0].model)} ${c.dim('· pinned for this folder')}` : `${c.green(`using ${list.length} models for this folder`)}: ${c.cyan(list.map((t) => t.model).join(', '))}`)
+    const apply = () => {
+      cfg.session = list // the global #1 (cfg.provider/model) stays, so your whole list and the picker are unchanged
+      this.saveProjectModels()
+      this.s = null
+    }
+    const msg = list.length === 1 ? `${c.green('using')} ${c.cyan(list[0].model)} ${c.dim('· pinned for this folder')}` : `${c.green(`using ${list.length} models for this folder`)}: ${c.cyan(list.map((t) => t.model).join(', '))}`
+    if (later) return this.later.push(apply), this.ui.print(`${msg} ${c.dim('· from your next message')}`)
+    apply()
+    this.ui.print(msg)
     await this.session()
   }
 
   // Back to auto: your whole list again (#1, then the next when one fails), following the saved
   // ranking. The folder's remembered choice is cleared.
-  async auto() {
+  async auto(later = false) {
     const { cfg } = this
-    delete cfg.session
-    this.saveProjectModels()
-    this.s = null
-    this.ui.print(`${c.green('using')} ${c.dim('auto')} ${c.cyan(`(${this.myModels().length} models)`)}`)
+    const apply = () => {
+      delete cfg.session
+      this.saveProjectModels()
+      this.s = null
+    }
+    const msg = `${c.green('using')} ${c.dim('auto')} ${c.cyan(`(${this.myModels().length} models)`)}`
+    if (later) return this.later.push(apply), this.ui.print(`${msg} ${c.dim('· from your next message')}`)
+    apply()
+    this.ui.print(msg)
     await this.session()
   }
 
   // The picker: tick the models for this session — one pins it, several rotate among them, all of
   // them (or none) is the same as auto (your whole list). "auto" is the first entry.
-  async chooseModel(filter = '') {
+  async chooseModel(filter = '', later = false) {
     const { ui, cfg } = this
     const mine = this.myModels()
     if (!mine.length) {
@@ -897,15 +911,15 @@ class App {
     const picked = await ui.pick('Models for this session — tick several to rotate, one to pin (all = auto)', items, { filter, multi: true })
     if (!picked) return
     const list = picked.map((it) => it.t)
-    return list.length >= mine.length ? this.auto() : this.setSession(list)
+    return list.length >= mine.length ? this.auto(later) : this.setSession(list, later)
   }
 
   // "/select_model a, b, c": use those models this session (one pins, several rotate). One model:
   // "model", "provider model" or "provider/model". "/select_model auto": your whole list. No
   // argument: the picker.
-  async pickModel(args) {
-    if (!args.length) return this.chooseModel()
-    if (args.every((a) => isAuto(a))) return this.cfg.session ? this.auto() : this.ui.print(c.dim('already on auto'))
+  async pickModel(args, later = false) {
+    if (!args.length) return this.chooseModel('', later)
+    if (args.every((a) => isAuto(a))) return this.cfg.session ? this.auto(later) : this.ui.print(c.dim('already on auto'))
     const raw = args.join(' ')
     const specs = raw.includes(',') ? raw.split(',').map((x) => x.trim()).filter(Boolean) : [raw]
     const resolve = (spec) => {
@@ -922,9 +936,9 @@ class App {
     for (const spec of specs) (resolve(spec) ? found : missing).push(resolve(spec) ?? spec)
     if (missing.length || !found.length) {
       if (missing.length) this.ui.print(c.dim(`not in your models: ${missing.join(', ')} · add on /settings`))
-      return this.chooseModel(specs.length === 1 ? specs[0] : '')
+      return this.chooseModel(specs.length === 1 ? specs[0] : '', later)
     }
-    return this.setSession(found)
+    return this.setSession(found, later)
   }
 
   listProviders() {
@@ -1245,17 +1259,21 @@ async function signInMcp(app, name, signal) {
   return `signed in to ${name} · ${tools.length} tools`
 }
 
-async function slash(app, line) {
+// working: typed while a task works and run beside it (RIGHT_AWAY): no spinner of its own, nothing
+// that would end the task's.
+async function slash(app, line, working = false) {
   const [cmd, ...args] = line.slice(1).trim().split(/\s+/)
   const { ui, cfg } = app
+  const spin = (label) => !working && ui.spinner(label)
+  const unspin = () => !working && ui.stopSpin()
   switch (cmd) {
     case 'close_tab':
-      return void (await app.closeTab())
+      return void (await app.closeTab(working))
     case 'exit':
     case 'quit': {
       const n = app.tabs?.list.length ?? 1
-      if (n > 1) {
-        const go = await ui.pick(`Quit HeartCode? ${n} tabs are open`, [
+      if (n > 1 || working) {
+        const go = await ui.pick(`Quit HeartCode?${working ? ' It is still working: that stops.' : ''}${n > 1 ? ` ${n} tabs are open` : ''}`, [
           { label: 'Yes, quit', desc: 'they come back next time you start HeartCode here', yes: true },
           { label: 'No', desc: 'Alt+W closes just this tab' },
         ])
@@ -1285,8 +1303,9 @@ async function slash(app, line) {
       openBrowser(url)
       ui.print(`${c.info('↗')} ${c.bold('settings')} ${c.muted('opened in your browser:')}\n  ${c.faint(url)}`)
       // a dialog until it's turned off: nothing else meanwhile, in any tab (Esc turns it off too).
-      // Not busy meanwhile: what's changed on the page applies at once, here too.
-      ui.idle()
+      // Not busy meanwhile: what's changed on the page applies at once, here too (opened while a task
+      // works: once it's done).
+      if (!working) ui.idle()
       if (app.tabs) app.tabs.locked = true
       try {
         await ui.pick(`${c.info('↗')} ${c.bold('The settings page is on')}`, [{ label: 'Turn off', desc: 'stops the page and gives HeartCode back' }], { fixed: true })
@@ -1311,7 +1330,7 @@ async function slash(app, line) {
     case 'help':
       return ui.print(app.help())
     case 'select_model':
-      return app.pickModel(args)
+      return app.pickModel(args, working)
     case 'rename': {
       const name = args.join(' ').trim() || (await ui.ask(`  ${c.bold('Name for this session')}: `, { initial: app.chat.name ?? '' }))?.trim()
       if (!name) return ui.print(c.dim('cancelled'))
@@ -1427,13 +1446,13 @@ async function slash(app, line) {
       const name = args[0] ?? (await ui.pick('Sign in to which server?', remote.map((n) => ({ label: n, desc: app.mcp.get(n).url, hint: mcpAuth(app.mcp.get(n).cfg) === 'in' ? 'signed in' : 'not signed in' }))))?.label
       if (!name) return remote.length ? undefined : ui.print('No remote MCP servers (ones with a "url") to sign in to.')
       if (!app.mcp.get(name)?.url) return ui.print(`No remote MCP server "${name}".`)
-      ui.spinner(`connecting to ${name}`)
+      spin(`connecting to ${name}`)
       try {
         const msg = await signInMcp(app, name, app.signal)
-        ui.stopSpin()
+        unspin()
         return ui.print(`${c.green('✓')} ${msg}`)
       } catch (e) {
-        ui.stopSpin()
+        unspin()
         return ui.print(`${c.red('✗')} ${e.message}`)
       }
     }
@@ -1450,7 +1469,7 @@ async function slash(app, line) {
         }
       }
       app.reload('skill')
-      app.reload('mcp')
+      app.reload('mcp', working) // working: the old servers stop once the task is done
       log('import', chosen.map((it) => `${it.group}: ${it.label}`))
       return
     }
@@ -1458,20 +1477,21 @@ async function slash(app, line) {
       const url = args.find((a) => !a.startsWith('--'))
       if (!url) return ui.print('Usage: /install_skill <github repo or a SKILL.md url> [--project]')
       const scope = args.includes('--project') ? 'project' : 'global'
-      ui.spinner(`installing from ${url}`)
+      spin(`installing from ${url}`)
       try {
         const msg = await installSkill(app.root, url, scope, { signal: app.signal })
-        ui.stopSpin()
+        unspin()
         app.reload('skill')
         return ui.print(`${c.green('✓')} ${msg}${scope === 'project' ? ' (this folder)' : ''} ${c.dim('· run with /skill:<name>, /help lists them')}`)
       } catch (e) {
-        ui.stopSpin()
+        unspin()
         return ui.print(`${c.red('✗')} could not install: ${e.message}`)
       }
     }
     case 'btw':
-      return app.btw(line.trim().replace(/^\/btw\b/, '').trim())
+      return app.btw(line.trim().replace(/^\/btw\b/, '').trim(), working)
     case 'voice': {
+      if (working) return ui.dictateIn() // into the box, as Space does while it works
       const text = await ui.dictate()
       if (text) app.nextInput = text // in the box, to read over and send
       return
@@ -1544,7 +1564,14 @@ async function repl(app, f = {}) {
   ui.onDoubleEscape = () => '/rewind'
   let ctl = null
   ui.onEscape = () => ctl?.abort()
-  ui.onBtw = (q) => app.btw(q, true) // /btw typed while it works
+  // a command typed while it works: run now, beside the task, if it leaves the conversation alone
+  ui.onNow = (line) => {
+    if (!RIGHT_AWAY.has(/^\/([\w-]+)/.exec(line)?.[1]) || !app.isCommand(line)) return false
+    slash(app, line, true)
+      .then((r) => r === 'exit' && (ctl?.abort(), app.save(), quit()))
+      .catch((e) => (log('error', e.stack), ui.print(c.red(`error: ${e.message}`))))
+    return true
+  }
   ui.onWaiting = (question) => notify(cfg, 'waiting', `⏳ Waiting for you · ${path.basename(app.root)}\n${clip(question.replace(/\x1b\[[0-9;]*m/g, '').replace(/\s*›\s*$/, '').replace(/^\?\s*/, '').trim(), 1000)}`) // a question or a permission while it works (Telegram)
   ui.isCommand = (l) => app.isCommand(l)
   loadPrices().then(() => ui.render?.()) // models.dev: what each model can do, for the model lists
