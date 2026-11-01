@@ -473,6 +473,8 @@
   .setting .t span { display: block; margin-top: 2px; color: var(--muted); font-size: 13px; line-height: 1.45; text-wrap: pretty; }
   .setting select, .setting input { flex: none; width: 240px; }
   .settings-col .card.wide { grid-column: 1 / -1; }
+  .test-wait { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  .test-wait input { width: 64px; height: 28px; padding: 2px 8px; font-size: 12.5px; text-align: right; }
   .ws-url { display: flex; gap: 8px; margin-top: 10px; }
   .ws-url input { flex: 1; min-width: 0; }
   .ws-addr { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
@@ -1389,7 +1391,7 @@ const MEANS = {
   503: '503: the model or provider is unavailable now',
   504: '504: the provider timed out',
   empty: 'it answered, but with no text at all',
-  'no answer': 'no answer within 90 seconds',
+  'no answer': 'no answer within the test timeout (next to Test all)',
   failed: 'it failed without a status code (a lost connection, an unreadable reply…)',
 }
 // What a test came to, in a word: works, its status code (402, 429…), empty, no answer or failed;
@@ -1935,7 +1937,8 @@ const COLS = {
   images: { label: 'Images', get: (t) => can(t).images },
   input: { label: 'In $/M', how: 'cheap', get: (t) => t.price?.input ?? null },
   output: { label: 'Out $/M', how: 'cheap', get: (t) => t.price?.output ?? null },
-  works: { label: 'Works?', get: (t) => { const r = TRIES[keyOf(t)]; return !r || r.going ? 1 : r.ok ? 2 : 0 } }, // tested and working first; not tested; not working
+  // tested and working first, the fastest answer first (its seconds); not tested; not working
+  works: { label: 'Works?', get: (t) => { const r = TRIES[keyOf(t)]; return !r || r.going ? 1 : r.ok ? 2 + 1 / (1 + (r.ms ?? 0) / 1000) : 0 } },
 }
 let SORT = []
 // your ranking of the providers, best first (kept: savePref); a provider not ranked yet comes after, A to Z
@@ -1995,7 +1998,7 @@ function sorted(order) {
   }
   return order.map((t, i) => ({ t, i })).sort((a, b) => SORT.reduce((r, s) => r || cmp(a.t, b.t, s), 0) || a.i - b.i).map((x) => x.t)
 }
-const dirText = (key, dir) => (key === 'provider' ? (dir === 'up' ? 'your ranking' : 'your ranking, reversed') : key === 'works' ? (dir === 'down' ? 'working first' : 'not working first') : COLS[key].how === 'text' ? (dir === 'up' ? 'A→Z' : 'Z→A') : COLS[key].how === 'cheap' ? (dir === 'up' ? 'cheapest first' : 'priciest first') : dir === 'down' ? 'most first' : 'least first')
+const dirText = (key, dir) => (key === 'provider' ? (dir === 'up' ? 'your ranking' : 'your ranking, reversed') : key === 'works' ? (dir === 'down' ? 'working first, fastest first' : 'not working first') : COLS[key].how === 'text' ? (dir === 'up' ? 'A→Z' : 'Z→A') : COLS[key].how === 'cheap' ? (dir === 'up' ? 'cheapest first' : 'priciest first') : dir === 'down' ? 'most first' : 'least first')
 // The models ticked on the Your models page ("provider/model"), to remove several at once; the last
 // one ticked, so a Shift+click ticks the ones between
 const PICKED = new Set()
@@ -2068,7 +2071,14 @@ function drawMine(s) {
       SORT.length ? h('button', { className: 'small', textContent: 'Clear sort', onclick: () => setSort([]) }) : null,
       order.length > 1 ? h('button', { className: 'small primary', textContent: 'Save order', title: 'save the order shown as your model order (#1 first)', onclick: () => keep(view) }) : null,
       order.length ? h('button', { className: 'small', textContent: 'Refresh from models.dev', title: 'ask models.dev again what each model can do: context, tools, thinking, images, price', onclick: () => lookUp() }) : null,
-      order.length ? h('button', { className: 'small', textContent: 'Test all', disabled: testingAll, title: 'send each a short message to see which really answer: every provider at once, a few from each (one at a time per 100 models)', onclick: () => tryAll(order) }) : null),
+      order.length ? h('button', { className: 'small', textContent: 'Test all', disabled: testingAll, title: 'send each a short message to see which really answer: every provider at once, a few from each (one at a time per 100 models)', onclick: () => tryAll(order) }) : null,
+      // how long a test waits for an answer (every model test: Test all, a row's Test and Hello)
+      order.length ? h('label', { className: 'test-wait', title: 'how long a model test waits for its answer before it counts as failed' }, 'Timeout',
+        h('input', { type: 'number', min: 1, max: 600, step: 1, value: S.settings.testTimeout ?? 10, 'aria-label': 'Test timeout in seconds', onchange: (e) => {
+          const v = Math.round(Number(e.target.value))
+          if (!(v >= 1 && v <= 600)) return (e.target.value = S.settings.testTimeout ?? 10), toast('a whole number of seconds, 1 to 600', true)
+          act('/api/setting', { name: 'testTimeout', value: v }, `tests wait ${v} second${v === 1 ? '' : 's'} for an answer`)
+        } }), 's') : null),
     // when the one in use fails, and what a new message starts with
     order.length > 1 ? h('div', { className: 'mt-rules' },
       h('span', { className: 'rule' },

@@ -236,6 +236,9 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     for (const key of Object.keys(tests)) if (!mine.has(key)) (delete tests[key]), gone++
     if (gone) saveTests()
   }
+  // How long a model test waits for its answer (cfg.testTimeout, seconds; the settings page sets it).
+  const testWait = () => (Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10) * 1000
+  const noAnswer = () => `no answer within ${testWait() / 1000} seconds`
   // Never throws: { ok, ms, reply } or { ok: false, ms, status, error }; { stopped } when stop
   // (a run's Stop) cancels it.
   async function tryOne({ provider, model }, stop) {
@@ -244,14 +247,14 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     c.purpose = 'test'
     const t0 = Date.now()
     try {
-      const signal = stop ? AbortSignal.any([AbortSignal.timeout(90_000), stop]) : AbortSignal.timeout(90_000)
+      const signal = stop ? AbortSignal.any([AbortSignal.timeout(testWait()), stop]) : AbortSignal.timeout(testWait())
       const r = await c.chat({ messages: [{ role: 'user', content: 'Reply with just the word OK.' }], stream: true }, { signal })
       const reply = (r.content || '').trim()
       if (!reply && !r.toolCalls.length) return { ok: false, ms: Date.now() - t0, error: `it answered with nothing${r.usage?.completion_tokens ? ` (${r.usage.completion_tokens} tokens it said it wrote)` : ''}` }
       return { ok: true, ms: Date.now() - t0, reply: reply.slice(0, 80) }
     } catch (e) {
       if (stop?.aborted) return { stopped: true }
-      return { ok: false, ms: Date.now() - t0, status: e.status ?? null, error: e.name === 'TimeoutError' ? 'no answer within 90 seconds' : whyFailed(e), ...(e.retryAfter > 0 && { retryAfter: Number(e.retryAfter) }) }
+      return { ok: false, ms: Date.now() - t0, status: e.status ?? null, error: e.name === 'TimeoutError' ? noAnswer() : whyFailed(e), ...(e.retryAfter > 0 && { retryAfter: Number(e.retryAfter) }) }
     }
   }
   // result: kept and sent to the page (given: a test already made, as a run decided to end it)
@@ -360,7 +363,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     model: cfg.model ?? null,
     order: [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then].map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t) })),
     rotation: (({ then, ...opts }) => opts)(rotationOf(cfg)),
-    settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), ...Object.fromEntries(LOG_SWITCHES.map((k) => [k, cfg[k] === true])), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg) },
+    settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), ...Object.fromEntries(LOG_SWITCHES.map((k) => [k, cfg[k] === true])), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg), testTimeout: Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10 },
     logs: { runs: tilde(path.join(LOGS, 'runs')), requests: tilde(REQUESTS) },
     voice: cfg.voice ? JSON.stringify(cfg.voice, null, 2) : '',
     statusBar: cfg.statusBar === undefined ? null : cfg.statusBar, // false (off), a list of lines, or null (default)
@@ -552,7 +555,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       const sent = { method: 'POST', url, headers: { 'content-type': 'application/json', ...(c.apiKey && { authorization: `Bearer ${mask(c.apiKey)}` }) }, body }
       const t0 = Date.now()
       try {
-        const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(c.apiKey && { authorization: `Bearer ${c.apiKey}` }) }, body: JSON.stringify(body), signal: AbortSignal.timeout(90_000) })
+        const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(c.apiKey && { authorization: `Bearer ${c.apiKey}` }) }, body: JSON.stringify(body), signal: AbortSignal.timeout(testWait()) })
         const text = await res.text()
         let json = null
         try {
@@ -561,7 +564,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
         const reply = json?.choices?.[0]?.message?.content ?? null
         return { sent, received: { status: res.status, ok: res.ok, ms: Date.now() - t0, type: res.headers.get('content-type'), body: json ?? text.slice(0, 20_000) }, reply }
       } catch (e) {
-        return { sent, received: { error: e.name === 'TimeoutError' ? 'no answer within 90 seconds' : `couldn't send it: ${e.cause?.code || e.cause?.message || e.message}`, ms: Date.now() - t0 } }
+        return { sent, received: { error: e.name === 'TimeoutError' ? noAnswer() : `couldn't send it: ${e.cause?.code || e.cause?.message || e.message}`, ms: Date.now() - t0 } }
       }
     },
     'POST /api/tests': () => ({ results: tests, run: run && { ...runState(), pending: [...run.pending] } }),
@@ -640,7 +643,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       if ((name in TOGGLES || LOG_SWITCHES.includes(name)) && typeof value !== 'boolean') throw new Error(`${name}: on or off`)
       if (name === 'logDays' && !(Number.isInteger(value) && value >= 1 && value <= 3650)) throw new Error('logDays: a whole number of days, 1 to 3650')
       if (name === 'logDetail' && !DETAILS.includes(value)) throw new Error(`logDetail: ${DETAILS.join(' or ')}`)
-      if (!['permissions', 'effort', 'theme', 'context', 'logDetail', 'logDays', ...Object.keys(TOGGLES), ...LOG_SWITCHES].includes(name)) throw new Error(`no setting "${name}"`)
+      if (name === 'testTimeout' && !(Number.isInteger(value) && value >= 1 && value <= 600)) throw new Error('test timeout: a whole number of seconds, 1 to 600')
+      if (!['permissions', 'effort', 'theme', 'context', 'logDetail', 'logDays', 'testTimeout', ...Object.keys(TOGGLES), ...LOG_SWITCHES].includes(name)) throw new Error(`no setting "${name}"`)
       cfg[name] = name === 'effort' && value === 'default' ? undefined : name === 'context' ? (value === null ? undefined : Number(value)) : value
       save(`setting:${name}`)
       if (name === 'logRequests' || name === 'logDetail') useRequestLog(cfg) // from the next request (a running HeartCode takes it in too: applySettings)

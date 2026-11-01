@@ -129,6 +129,7 @@ On **Models → Your list**:
 2. **Rearrange a bit more.** Drag a row to move it. #1 is the one HeartCode uses; the others are
    its fallbacks, tried in order.
 3. **Test them** (optional): **Test all** sends each a short message and shows which really answer.
+   Each test waits up to 10 seconds; the **Timeout** box next to it changes that.
 
 If a model says *not found* in models.dev, **Retry** looks it up again, or **Set up** tells
 HeartCode what it can do.

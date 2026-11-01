@@ -2,6 +2,14 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.34 (2026-11-02)
+
+- Model tests on the settings page (Test all, Test selected, a row's Test and Hello) wait 10
+  seconds for an answer by default, not 90; the Timeout box next to Test all changes it (1 to 600
+  seconds, kept in the config as testTimeout).
+- Sorting by Works? puts the fastest working model first (by its test's time), then the untested,
+  then the ones that don't work.
+
 ## 0.1.33 (2026-11-01)
 
 - Text you may need can be selected and copied, not only the conversation: drag to select (copied
