@@ -126,11 +126,16 @@ On **Models → Your list**:
 1. **Sort them by context and abilities.** Click the *Abilities* column, then *Context*: the
    models that can do the most come first, the biggest context window first among those (each
    column clicked breaks the ties of the ones before; click one again to reverse it, a third time to
-   drop it). Click **Save order** to keep it.
+   drop it). Click **Save list** to keep it.
 2. **Rearrange a bit more.** Drag a row to move it. #1 is the one HeartCode uses; the others are
    its fallbacks, tried in order.
 3. **Test them** (optional): **Test all** sends each a short message and shows which really answer.
    Each test waits up to 10 seconds; the **Timeout** box next to it changes that.
+4. **Filter them** (optional): by name, provider, test result (works, doesn't, not tested, or one
+   error like 402), context, tools, thinking, images or free. **Test all** then tests only the ones
+   shown. **Save list** puts the ones shown first, in the order you see (the rest after them);
+   **Keep only these** makes them your whole list. Filter to the working ones, sort by Works?, save:
+   your fastest working models come first.
 
 If a model says *not found* in models.dev, **Retry** looks it up again, or **Set up** tells
 HeartCode what it can do.

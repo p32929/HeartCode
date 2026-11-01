@@ -127,7 +127,7 @@ const LIST_V = 2 // how a saved list was read (2: airforce's cents, Cloudflare's
 // The page's own choices (sorts, folded providers, the provider ranking): kept here, not in the
 // browser, whose storage is per address (a new port each time)
 const PREFS = path.join(HOME, 'settings-page.json')
-const PREF_KEYS = ['catSort', 'freeOnly', 'folded', 'sort', 'sorts', 'rank']
+const PREF_KEYS = ['catSort', 'freeOnly', 'folded', 'sort', 'sorts', 'rank', 'filters']
 function forgetList(...names) {
   const all = readJson(LISTS, {})
   if (!names.some((n) => n in all)) return
@@ -145,7 +145,9 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       log('web', `applying ${what}: ${e.stack}`)
     }
   }
-  const save = (what) => (saveConfig(cfg), changed(what))
+  // a file this page's server writes itself: its watcher (below) needn't look at it again
+  let ownWrite = 0
+  const save = (what) => ((ownWrite = Date.now()), saveConfig(cfg), changed(what))
 
   // the page listens (GET /api/events): a model's profile as it changes, a request as it's logged
   const listeners = new Set()
@@ -385,8 +387,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     'GET /api/log-size': () => logSize(),
     'POST /api/prefs': ({ key, value }) => {
       if (!PREF_KEYS.includes(key)) throw new Error(`no such choice: ${key}`)
+      ownWrite = Date.now() // the page's own choice: not sent back to it as a change (a second redraw)
       writeJson(PREFS, { ...readJson(PREFS, {}), [key]: value })
-      shown = JSON.stringify(state()) // the page's own choice: not sent back to it as a change (a second redraw)
       return {}
     },
     'POST /api/clear-logs': () => ({ gone: clearLogs(), size: logSize() }),
@@ -533,6 +535,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       const changed1 = cfg.provider !== clean[0]?.provider || cfg.model !== clean[0]?.model
       Object.assign(cfg, { provider: clean[0]?.provider, model: clean[0]?.model })
       cfg.rotation = { on: opts.on, retries: opts.retries, next: opts.next, then: clean.slice(1) }
+      ownWrite = Date.now()
       saveConfig(cfg)
       changed(changed1 ? 'model' : 'setting:rotation')
       test(clean)
@@ -887,6 +890,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   try {
     const w = fs.watch(HOME, { recursive: true }, (_, f) => {
       if (!SETTINGS_FILES.includes(String(f ?? '').split(path.sep)[0])) return
+      if (Date.now() - ownWrite < 1000 && ['config.json', 'settings-page.json'].includes(String(f))) return // written here a moment ago: the page has it
       clearTimeout(pending)
       pending = setTimeout(pushState, 150) // a file written in parts, several at once: one look
     })

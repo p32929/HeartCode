@@ -370,10 +370,10 @@
   .mt-top .chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); border-radius: 8px; padding: 1px 3px 1px 9px; margin: 2px 4px 2px 0; color: var(--text); font-size: 12.5px; }
   .mt-top .chip button { border: 0; background: none; padding: 0 4px; font-size: 12px; color: var(--muted); }
   .mt-scroll { overflow-x: auto; }
-  .mt { min-width: 1116px; }
+  .mt { min-width: 1080px; }
   .mt-h input[type=checkbox], .mtable input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(--brand); cursor: pointer; }
   .mtable li.picked { background: var(--brand-soft); }
-  .mt-rules { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 28px; padding: 12px 18px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .mt-rules { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 24px; padding: 12px 18px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
   .mt-rules .rule { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
   .mt-rules select { width: auto; height: 32px; padding: 4px 30px 4px 10px; }
   .mt-rules input { width: 64px; height: 32px; }
@@ -392,8 +392,10 @@
   .pill .again:hover:not(:disabled) { color: var(--text); }
   .pill.on { border-color: var(--accent); background: var(--accent-soft); }
   .pill.on .again { border-left-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-  .mt-h, .mtable li { display: grid; grid-template-columns: 16px 20px 44px minmax(150px, 3fr) minmax(70px, 1.1fr) 66px 66px 42px 60px 50px 54px 60px minmax(166px, 1.5fr) minmax(120px, 1.3fr) 28px; align-items: center; column-gap: 6px; padding: 8px 16px; }
-  .mtable .src, .mt-h > :nth-child(13) { padding-left: 12px; } /* room after the right-aligned prices */
+  .mt-h, .mtable li { display: grid; grid-template-columns: 14px 18px 44px minmax(200px, 1fr) 100px 60px 50px 70px 58px 112px 84px 186px; /* the last: Test · Request · Edit · ✕, as wide as they are */ align-items: center; column-gap: 6px; padding: 8px 18px; }
+  .mt-h button.mid, .mtable .mid { text-align: center; }
+  .mt-h > :nth-child(11), .mtable .try { padding-left: 12px; } /* Works?: a little room after the right-aligned price */
+  .mtable li .acts { justify-content: flex-start; }
   .mt-h { border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 500; color: var(--faint); padding-top: 10px; padding-bottom: 10px; background: var(--panel2); }
   .mt-h button { display: inline; border: 0; background: none !important; padding: 0; font: inherit; color: inherit; text-align: left; white-space: nowrap; transform: none !important; }
   .mt-h button.num { text-align: right; }
@@ -477,6 +479,63 @@
   #mt.sorting { opacity: .55; transition: opacity .1s; pointer-events: none; }
   button.sorting::after { content: ''; display: inline-block; width: 9px; height: 9px; margin-left: 6px; vertical-align: -1px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; }
   .sort-live { color: var(--warn); }
+  /* Your models: the header's buttons, the list's settings, the toolbar (sticky), the table */
+  .mt-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  /* Your models: the settings (three cells across), the toolbar (sticky), the table */
+  .mt-sets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
+  .mt-set { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px; border-left: 1px solid var(--line); min-width: 0; }
+  .mt-set:first-child { border-left: 0; }
+  .mt-setl { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .mt-setc { display: flex; align-items: center; gap: 8px; }
+  .mt-setc select { flex: 1; width: 100%; min-width: 0; height: 34px; }
+  .mt-setc input[type=number] { width: 96px; height: 34px; }
+  .mt-setc input.tries { width: 64px; }
+  .mt-setc .unit { color: var(--muted); font-size: 13px; }
+  .mt-sets + .mt-tools { border-radius: 0; }
+  .mt-line { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; padding: 0 18px 12px; }
+  .mt-status { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-height: 30px; font-size: 13px; color: var(--muted); }
+  .mt-do { display: flex; align-items: center; gap: 8px; flex: none; }
+  .mt-hpick .mt-pickbar { grid-column: 3 / -1; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+  .mt-hpick { background: var(--brand-soft); }
+  .mt-h.mt-hpick .mt-pickbar button { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-s); background: var(--panel) !important; color: var(--text); font-size: 12.5px; font-weight: 500; }
+  .mt-h.mt-hpick .mt-pickbar button:hover { background: var(--hover) !important; }
+  .mt-h.mt-hpick .mt-pickbar button.danger { color: var(--err); }
+  .mt-h.mt-hpick .mt-pickbar button.ghost { border-color: transparent; background: transparent !important; color: var(--muted); }
+  .mt-h.mt-hpick .mt-pickbar b { margin-right: 4px; }
+  .mt-tools { position: sticky; top: 0; z-index: 6; background: var(--panel); border-bottom: 1px solid var(--line); border-radius: var(--radius) var(--radius) 0 0; }
+  .mt-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 18px 10px; }
+  .f-search { position: relative; flex: 1 1 0; min-width: 170px; display: block; } /* the room the others leave: one line */
+  .f-search .f-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-52%); color: var(--faint); font-size: 16px; pointer-events: none; }
+  .mt-filters .f-text { width: 100%; height: 34px; padding-left: 32px; }
+  .mt-filters select { height: 34px; width: auto; padding-top: 0; padding-bottom: 0; line-height: 32px; }
+  .mt-filters select.on { border-color: var(--accent); background-color: color-mix(in srgb, var(--accent-soft) 50%, var(--input)); }
+  .f-togs { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+  .mt-status .count b { color: var(--text); }
+  .mt-status .chip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); border-radius: 999px; padding: 2px 4px 2px 10px; color: var(--text); font-size: 12.5px; }
+  .mt-status .chip.sort { border-color: var(--line-strong); background: var(--panel2); }
+  .mt-status .chip button { border: 0; background: none; padding: 0 5px; font-size: 11px; color: var(--muted); border-radius: 999px; }
+  .mt-status .chip button:hover { color: var(--text); background: var(--hover); }
+  .mt-tools .mt-outcomes { border-bottom: 0; border-top: 1px solid var(--line); padding: 9px 18px; }
+  .mt-hwrap { overflow: hidden; border-top: 1px solid var(--line); }
+  .mt-hwrap .mt-h { border-bottom: 0; }
+  .mt-outcomes .label { margin-right: 4px; }
+  .pill.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .mt-tools .job-slot:not(:empty) { border-top: 1px solid var(--line); }
+  .mtable .m { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .mtable .m .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .mtable .tag { flex: none; font: 600 10.5px var(--sans); padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--muted); background: none; line-height: 1.5; }
+  .mtable .tag.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  .mtable button.tag:hover { background: var(--hover); }
+  .mtable .price { white-space: nowrap; font-size: 12.5px; }
+  .mtable .acts { display: flex; justify-content: flex-end; gap: 4px; }
+  .mtable li .acts button { padding-left: 8px; padding-right: 8px; background: transparent; border-color: transparent; color: var(--muted); }
+  .mtable li .acts button:hover:not(:disabled) { background: var(--hover); border-color: var(--line-strong); color: var(--text); }
+  .mtable li .acts button.danger:hover:not(:disabled) { color: var(--err); }
+  .f-tog { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; font-size: 13px; cursor: pointer; user-select: none; }
+  .f-tog:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 60%, var(--panel)); }
+  .f-tog input { margin: 0; accent-color: var(--brand); }
+  .mt-filters .f-count { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  .mt-filters.on .f-count { color: var(--text); font-weight: 600; }
   .test-wait { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
   .test-wait input { width: 64px; height: 28px; padding: 2px 8px; font-size: 12.5px; text-align: right; }
   .ws-url { display: flex; gap: 8px; margin-top: 10px; }
@@ -555,6 +614,12 @@
     nav a.on::before { display: none; } /* a strip of tabs: the highlighted one is enough */
     nav a .count, .using, .nav-group { display: none; }
     .theme-btn { top: 10px; right: 12px; }
+    .mt-tools { position: static; } /* a phone: too tall to stay in sight, it scrolls with the page */
+    .mt-sets { grid-template-columns: minmax(0, 1fr); }
+    .mt-set { border-left: 0; border-top: 1px solid var(--line); }
+    .mt-set:first-child { border-top: 0; }
+    .mt-do { width: 100%; }
+    .mt-do button { flex: 1; }
     main { padding: 20px 16px 60px; }
     .steps { grid-template-columns: 1fr; }
     .choices, .choices.three { grid-template-columns: 1fr; }
@@ -665,7 +730,7 @@
 
     <!-- Your models: all at once, sortable -->
     <section class="page" id="page-models">
-      <div class="head"><div><h1>Your models</h1><p class="lead">Every model HeartCode can use, and what each can do. Drag a row to reorder, or sort by columns (click more to break ties) and save the order you see.</p></div></div>
+      <div class="head"><div><h1>Your models</h1><p class="lead">HeartCode uses #1, and the next one when it fails. Filter, sort or drag, then Save list.</p></div><div class="mt-actions" id="mt-actions"></div></div>
       <div class="card mt-card" id="mt"></div>
     </section>
 
@@ -1416,12 +1481,13 @@ function triedCell(t) {
     : r.going ? ['going', 'testing…', 'sending it a short message']
     : r.ok ? ['ok', `✓ ${(r.ms / 1000).toFixed(1)}s`, `works: it answered "${r.reply}"${secs}`]
     : ['bad', `✗ ${outcome(r)}`, `doesn't work: ${r.error}${secs}`] // the reason on hover
-  return h('div', { className: 'try ' + cls },
-    h('span', { className: 'msg', textContent: text, title: about }),
-    h('button', { className: 'small', textContent: 'Test', disabled: Boolean(r?.going), title: 'send it a short message to see that it really answers', 'aria-label': `test ${t.model}`, onclick: () => tryModel(t) }))
+  return h('div', { className: 'try ' + cls }, h('span', { className: 'msg', textContent: text, title: about }))
 }
 function showTried(t) {
-  document.querySelector(`#mt li[data-key="${CSS.escape(keyOf(t))}"] .try`)?.replaceWith(triedCell(t))
+  const li = document.querySelector(`#mt li[data-key="${CSS.escape(keyOf(t))}"]`)
+  li?.querySelector('.try')?.replaceWith(triedCell(t))
+  const btn = li?.querySelector('.row-test')
+  if (btn) (btn.disabled = Boolean(TRIES[keyOf(t)]?.going)), (btn.textContent = btn.disabled ? '…' : 'Test')
   if (!TRIES[keyOf(t)]?.going) mineSoon() // a result: the counts by result (and a sort by it) change
 }
 let mineFrame = 0
@@ -1972,6 +2038,8 @@ const COLS = {
   images: { label: 'Images', first: 'down', get: (t) => can(t).images, words: ['without first', 'with first'] },
   input: { label: 'In $/M', first: 'up', get: (t) => t.price?.input ?? null, words: ['cheapest first', 'priciest first'] },
   output: { label: 'Out $/M', first: 'up', get: (t) => t.price?.output ?? null, words: ['cheapest first', 'priciest first'] },
+  // in and out together, per million tokens
+  price: { label: 'Price $/M', first: 'up', get: (t) => (t.price?.input == null && t.price?.output == null ? null : (t.price.input ?? 0) + (t.price.output ?? 0)), words: ['cheapest first', 'priciest first'] },
   // its test's time (seconds, as shown); failed or not tested: no time, at the end (not tested before failed)
   works: { label: 'Works?', first: 'up', get: (t) => { const r = TRIES[keyOf(t)]; return r?.ok && !r.going ? r.ms ?? 0 : null }, missing: (t) => { const r = TRIES[keyOf(t)]; return !r || r.going ? 0 : 1 }, words: ['fastest first', 'slowest first'] },
 }
@@ -2043,54 +2111,203 @@ function sorted(order) {
   return order.map((t, i) => ({ t, i })).sort((a, b) => SORT.reduce((r, s) => r || cmp(a.t, b.t, s), 0) || a.i - b.i).map((x) => x.t)
 }
 const dirText = (key, dir) => COLS[key].words[dir === 'up' ? 0 : 1] + (key === 'works' ? ' (then not tested, then not working)' : '')
+// Filters on the Your models page: which models are shown (and tested by "Test N shown", counted,
+// sorted, selected by "select all", saved first by Save list). Combined: a model shows when it passes
+// all of them. Kept with the page's choices.
+const NO_FILTER = { text: '', provider: '', works: '', context: 0, tools: false, thinking: false, images: false, free: false }
+let FILTER = { ...NO_FILTER }
+let filtersLoaded = false
+const filtering = () => Object.keys(NO_FILTER).some((k) => FILTER[k] !== NO_FILTER[k])
+function passes(t, skip) {
+  const f = FILTER
+  if (f.text) {
+    const hay = `${t.model} ${t.provider}`.toLowerCase()
+    if (!f.text.toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w))) return false
+  }
+  if (f.provider && t.provider !== f.provider) return false
+  if (f.works && skip !== 'works') {
+    const r = TRIES[keyOf(t)]
+    const tested = r && !r.going
+    if (f.works === 'works' ? !(tested && r.ok) : f.works === 'fails' ? !(tested && !r.ok) : f.works === 'untested' ? tested : outcome(r) !== f.works) return false
+  }
+  if (f.context && !((COLS.context.get(t) ?? 0) >= f.context)) return false
+  const c = can(t)
+  if ((f.tools && !c.tools) || (f.thinking && !c.thinking) || (f.images && !c.images)) return false
+  if (f.free && !(t.price?.input === 0 && t.price?.output === 0)) return false
+  return true
+}
+const setFilter = (change) => {
+  FILTER = { ...FILTER, ...change }
+  if ('text' in change && filterBar) filterBar.querySelector('.f-text').value = FILTER.text
+  savePref('filters', FILTER)
+  drawMine(S)
+}
+const RESULT_NAME = (w) => (w === 'works' ? '✓ works' : w === 'fails' ? "✗ doesn't work" : w === 'untested' ? 'not tested' : `✗ ${w}`)
+const CONTEXTS = [[0, 'Any context'], [32_000, '32k+'], [128_000, '128k+'], [200_000, '200k+'], [1_000_000, '1M+']]
+// the active filters, as chips to take off one by one
+const filterChips = () => [
+  FILTER.text && [`“${FILTER.text}”`, { text: '' }],
+  FILTER.provider && [`Provider: ${FILTER.provider}`, { provider: '' }],
+  FILTER.works && [`Result: ${RESULT_NAME(FILTER.works)}`, { works: '' }],
+  FILTER.context && [`Context ${CONTEXTS.find(([v]) => v === FILTER.context)?.[1] ?? FILTER.context}`, { context: 0 }],
+  FILTER.tools && ['Tools', { tools: false }],
+  FILTER.thinking && ['Thinking', { thinking: false }],
+  FILTER.images && ['Images', { images: false }],
+  FILTER.free && ['Free', { free: false }],
+].filter(Boolean)
+const clearView = () => {
+  SORT = []
+  savePref('sorts', SORT)
+  setFilter({ ...NO_FILTER })
+}
+// The filter controls: made once (typing in the search isn't interrupted by the table being drawn
+// again), brought up to date each time
+let filterBar = null
+function filterBarOf(order, counts = {}) {
+  if (!filterBar) {
+    let typing = 0
+    const toggle = (key, label, about) => h('label', { className: 'f-tog', title: about }, h('input', { type: 'checkbox', 'data-f': key, onchange: (e) => setFilter({ [key]: e.target.checked }) }), label)
+    filterBar = h('div', { className: 'mt-filters' },
+      h('label', { className: 'f-search' },
+        h('span', { className: 'f-icon', 'aria-hidden': 'true', textContent: '⌕' }),
+        h('input', { type: 'search', className: 'f-text', placeholder: 'Search models', 'aria-label': 'Search models and providers', oninput: (e) => (clearTimeout(typing), (typing = setTimeout(() => ((FILTER = { ...FILTER, text: e.target.value.trim() }), savePref('filters', FILTER), drawMine(S)), 150))) })),
+      h('select', { className: 'f-provider', 'aria-label': 'Filter by provider', onchange: (e) => setFilter({ provider: e.target.value }) }),
+      h('select', { className: 'f-works', 'aria-label': 'Filter by test result', onchange: (e) => setFilter({ works: e.target.value }) }),
+      h('select', { className: 'f-context', 'aria-label': 'Filter by context window', onchange: (e) => setFilter({ context: Number(e.target.value) }) },
+        CONTEXTS.map(([v, l]) => h('option', { value: v, textContent: v ? `Context ${l}` : l }))),
+      h('span', { className: 'f-togs' },
+        toggle('tools', 'Tools', 'only models that call tools'),
+        toggle('thinking', 'Thinking', 'only models that think'),
+        toggle('images', 'Images', 'only models that see images'),
+        toggle('free', 'Free', 'only models that cost nothing, in and out')))
+  }
+  const bar = filterBar
+  const focused = (el) => document.activeElement === el
+  const providers = [...new Set(order.map((t) => t.provider))].sort(byName)
+  const results = [...new Set(order.map((t) => outcome(TRIES[keyOf(t)])).filter((o) => o && o !== 'works'))].sort(byName)
+  const fill = (sel, opts, value) => {
+    const sig = JSON.stringify(opts)
+    if (sel.dataset.sig !== sig && !focused(sel)) (sel.dataset.sig = sig), put(sel, opts.map(([v, l]) => h('option', { value: v, textContent: l })))
+    if (!focused(sel)) sel.value = String(value)
+  }
+  fill(bar.querySelector('.f-provider'), [['', 'All providers'], ...providers.map((p) => [p, p])], FILTER.provider)
+  const c = (k) => (counts[k] ? ` (${counts[k].toLocaleString()})` : ' (0)')
+  fill(bar.querySelector('.f-works'), [['', 'Any result'], ['works', `✓ Works${c('works')}`], ['fails', `✗ Doesn't work${c('fails')}`], ['untested', `Not tested${c('untested')}`], ...results.map((o) => [o, `   ✗ ${o}${c(o)}`])], FILTER.works)
+  if (!focused(bar.querySelector('.f-context'))) bar.querySelector('.f-context').value = String(FILTER.context)
+  const text = bar.querySelector('.f-text')
+  if (!focused(text) && text.value.trim() !== FILTER.text) text.value = FILTER.text
+  for (const box of bar.querySelectorAll('input[data-f]')) box.checked = Boolean(FILTER[box.dataset.f])
+  for (const sel of bar.querySelectorAll('select')) sel.classList.toggle('on', Boolean(FILTER[{ 'f-provider': 'provider', 'f-works': 'works', 'f-context': 'context' }[sel.className.split(' ')[0]]]))
+  return bar
+}
+
 // The models ticked on the Your models page ("provider/model"), to remove several at once; the last
 // one ticked, so a Shift+click ticks the ones between
 const PICKED = new Set()
 let lastPicked = null
+
 function drawMine(s) {
   const order = shownOrder() // a provider switched off: its models aren't shown (nor tested, sorted, ranked)
   $('n-mine').textContent = order.length || ''
-  const view = sorted(order)
+  const shown = filtering() ? order.filter((t) => passes(t)) : order
+  const view = sorted(shown)
+  const filtered = shown.length !== order.length
   for (const k of PICKED) if (placeOf(...k.split(/\/(.*)/s)) === undefined) PICKED.delete(k) // gone from the list
-  const removePicked = () => {
-    const rest = order.filter((t) => !PICKED.has(keyOf(t)))
-    const n = order.length - rest.length
-    if (!confirm(`Take ${n} model${n === 1 ? '' : 's'} off your list?${!rest.length ? ' None is left then: HeartCode has no model to use until you choose one.' : rest[0] !== order[0] ? ` HeartCode then uses ${rest[0].provider} · ${rest[0].model}.` : ''} (They stay under their providers.)`)) return
-    PICKED.clear()
-    saveOrder(withOff(rest), `${n} removed${rest.length ? '' : ': no model chosen now'}`)
-  }
-  const all = view.length > 0 && view.every((t) => PICKED.has(keyOf(t)))
-  // the tests' results, by outcome: a click selects those models (again: unselects them)
-  const outcomes = Map.groupBy(order.filter((t) => outcome(TRIES[keyOf(t)])), (t) => outcome(TRIES[keyOf(t)]))
-  const byOutcome = [...outcomes].sort(([a, x], [b, y]) => (b === 'works') - (a === 'works') || y.length - x.length).map(([what, models]) => {
-    const on = models.every((t) => PICKED.has(keyOf(t)))
-    const n = models.length
-    return h('span', { className: 'pill' + (what === 'works' ? ' ok' : ' bad') + (on ? ' on' : '') },
-      h('button', { type: 'button', className: 'pick', title: `${MEANS[what] ?? `the provider answered ${what}`}\n${on ? 'Unselect' : 'Select'} the ${n} model${n === 1 ? '' : 's'}`, onclick: () => (models.forEach((t) => (on ? PICKED.delete(keyOf(t)) : PICKED.add(keyOf(t)))), drawMine(S)) },
-        h('span', { className: 'what', textContent: what === 'works' ? '✓ works' : `✗ ${what}` }), h('span', { className: 'n', textContent: n.toLocaleString() })),
-      what === 'works' ? null : h('button', { type: 'button', className: 'again', textContent: '↻', title: `Test these ${n} again`, 'aria-label': `test the ${what} ones again`, disabled: testingAll, onclick: () => tryAll(models) }))
-  })
+  const n = (x) => x.toLocaleString()
 
+  // --- what you do to the list ---
   // the order you see, saved as yours; the sort then goes (your own order from here on: drag on)
   const keep = (list, moved) => {
     SORT = []
     savePref('sorts', SORT)
-    return saveOrder(withOff(list), list[0] !== order[0] ? `${moved ? '' : 'order saved: '}HeartCode now uses ${list[0].provider} · ${list[0].model}` : 'order saved')
+    return saveOrder(withOff(list), list[0] !== order[0] ? `${moved ? '' : 'list saved: '}HeartCode now uses ${list[0].provider} · ${list[0].model}` : 'list saved')
   }
-  // a row dragged (in the order shown, sorted or not)
+  // a row dragged (in the order shown, sorted or not). Filtered: it moves among the ones shown; the
+  // hidden ones keep their places (the shown ones fill their own places in the new order)
   const move = (i, j) => {
     if (i === j) return
     const list = [...view]
     const [t] = list.splice(i, 1)
     list.splice(j, 0, t)
-    return keep(list, true)
+    if (!filtered) return keep(list, true)
+    const mine = new Set(list)
+    const slots = order.map((x, k) => (mine.has(x) ? k : -1)).filter((k) => k >= 0)
+    const all = [...order]
+    slots.forEach((k, m) => (all[k] = list[m]))
+    return keep(all, true)
   }
-  const head = (key, num) => {
+  // Save list: what's shown, in the order shown; filtered, the others after them as they were
+  const saveList = () => keep(filtered ? [...view, ...order.filter((t) => !view.includes(t))] : view)
+  const keepOnly = () => {
+    if (!confirm(`Keep only these ${n(view.length)} as your list, in this order? The other ${n(order.length - view.length)} come off it (they stay under their providers: you can add them back).`)) return
+    return keep(view)
+  }
+  const removePicked = () => {
+    const rest = order.filter((t) => !PICKED.has(keyOf(t)))
+    const k = order.length - rest.length
+    if (!confirm(`Take ${k} model${k === 1 ? '' : 's'} off your list?${!rest.length ? ' None is left then: HeartCode has no model to use until you choose one.' : rest[0] !== order[0] ? ` HeartCode then uses ${rest[0].provider} · ${rest[0].model}.` : ''} (They stay under their providers.)`)) return
+    PICKED.clear()
+    saveOrder(withOff(rest), `${k} removed${rest.length ? '' : ': no model chosen now'}`)
+  }
+  const pickedList = order.filter((t) => PICKED.has(keyOf(t)))
+
+  // --- the page's header, right: what's known about the models ---
+  put($('mt-actions'),
+    h('button', { className: 'small', textContent: 'Provider ranking', disabled: !order.some((t) => t.provider !== order[0]?.provider), title: 'drag your providers into order; the Provider column sorts by it', onclick: openRanking }),
+    h('button', { className: 'small', textContent: 'Refresh from models.dev', disabled: !order.length, title: 'ask models.dev again what each model can do: context, tools, thinking, images, price', onclick: () => lookUp() }))
+
+  // --- the list's settings: three cells across, a label over each control ---
+  const ro = s.rotation
+  const cell = (label, about, ...control) => h('label', { className: 'mt-set', title: about }, h('span', { className: 'mt-setl', textContent: label }), h('span', { className: 'mt-setc' }, ...control))
+  const settings = h('div', { className: 'mt-sets' },
+    cell('When a model fails', ro.on === 'retries' ? 'a rate limit or outage: that model is tried again that many times first; any other error moves on at once' : "any error moves on at once, to another provider's model first",
+      h('select', { onchange: (e) => saveOrder(S.order, 'saved', { on: e.target.value }) },
+        [['failure', 'the next one answers'], ['retries', 'try it again first']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.on === v }))),
+      ro.on === 'retries' ? h('input', { type: 'number', className: 'tries', 'aria-label': 'tries', title: 'tries of the same model first (rate limits, outages)', min: 1, max: 20, value: ro.retries, onchange: (e) => saveOrder(S.order, 'saved', { retries: Number(e.target.value) }) }) : null),
+    cell('A new message starts with', 'the model a new message goes to first',
+      h('select', { onchange: (e) => saveOrder(S.order, 'saved', { next: e.target.value }) },
+        [['first', '#1'], ['stay', 'the last that answered']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.next === v })))),
+    cell('A test waits for an answer', 'every model test: Test, Test all, Request',
+      h('input', { type: 'number', min: 1, max: 600, step: 1, value: S.settings.testTimeout ?? 10, 'aria-label': 'Test timeout in seconds', onchange: (e) => {
+        const v = Math.round(Number(e.target.value))
+        if (!(v >= 1 && v <= 600)) return (e.target.value = S.settings.testTimeout ?? 10), toast('a whole number of seconds, 1 to 600', true)
+        act('/api/setting', { name: 'testTimeout', value: v }, `tests wait ${v} second${v === 1 ? '' : 's'} for an answer`)
+      } }), h('span', { className: 'unit', textContent: 'seconds' })))
+
+  // --- under the filters: what's shown (left) · what you do with it (right) ---
+  const chip = (label, off, cls = '') => h('span', { className: 'chip ' + cls }, label, h('button', { type: 'button', textContent: '✕', 'aria-label': `remove ${label}`, onclick: off }))
+  const line = h('div', { className: 'mt-line' },
+    h('div', { className: 'mt-status' },
+      h('span', { className: 'count' }, filtered ? [h('b', { textContent: n(shown.length) }), ` of ${n(order.length)} shown`] : [h('b', { textContent: n(order.length) }), ` model${order.length === 1 ? '' : 's'}, in your order`]),
+      ...filterChips().map(([label, off]) => chip(label, () => setFilter(off))),
+      ...SORT.map(({ key, dir }, k) => chip(`${SORT.length > 1 ? `${k + 1}. ` : 'Sorted: '}${COLS[key].label} ${COLS[key].words[dir === 'up' ? 0 : 1]}`, () => setSort(SORT.filter((x) => x.key !== key)), 'sort')),
+      testingAll && SORT.some((x) => x.key === 'works') ? h('span', { className: 'sort-live', textContent: 'tests running: the order moves as results come in' }) : null,
+      filtering() || SORT.length ? h('button', { className: 'small ghost', textContent: 'Clear all', title: 'every filter and the sort off: your whole list, in your order', onclick: clearView }) : null),
+    h('div', { className: 'mt-do' },
+      h('button', { className: 'small', textContent: filtered ? `Test ${n(shown.length)} shown` : 'Test all', disabled: testingAll || !shown.length, title: `send ${filtered ? 'the models shown' : 'each model'} a short message to see which really answer`, onclick: () => tryAll(filtered ? shown : order) }),
+      filtered ? h('button', { className: 'small', textContent: `Keep only these ${n(view.length)}`, disabled: !view.length, title: 'your list becomes the models shown, in this order; the others come off it (they stay under their providers)', onclick: keepOnly }) : null,
+      h('button', { className: 'small primary', textContent: 'Save list', disabled: !view.length || order.length < 2, title: filtered ? `save these ${n(view.length)} first, in the order shown; the other ${n(order.length - view.length)} after them, as they are` : 'save the list in the order shown (#1 first)', onclick: saveList })))
+
+  // --- the table ---
+  const all = view.length > 0 && view.every((t) => PICKED.has(keyOf(t)))
+  const head = (key, align) => {
     const at = SORT.findIndex((x) => x.key === key)
-    return h('button', { type: 'button', className: (at >= 0 ? 'on ' : '') + (num ? 'num' : ''), title: `sort by ${COLS[key].label.toLowerCase()} too (after the ones already sorted by) · click again: reversed · again: not by it`, onclick: (e) => clickSort(key, e.currentTarget) },
-      COLS[key].label, at >= 0 ? ` ${SORT[at].dir === 'up' ? '↑' : '↓'}${SORT.length > 1 ? at + 1 : ''}` : '')
+    return h('button', { type: 'button', className: (at >= 0 ? 'on ' : '') + (align || ''), title: `sort by ${COLS[key].label.toLowerCase()} (after the ones already sorted by) · click again: reversed · again: off`, onclick: (e) => clickSort(key, e.currentTarget) },
+      COLS[key].label, at >= 0 ? h('span', { className: 'dir', textContent: ` ${SORT[at].dir === 'up' ? '↑' : '↓'}${SORT.length > 1 ? at + 1 : ''}` }) : '')
   }
-  const table = order.length ? h('ol', { className: 'mtable' + (order.length < 2 ? '' : ' drag') }) : null
+  const selectAll = h('input', { type: 'checkbox', checked: all, indeterminate: PICKED.size > 0 && !all, title: all ? 'select none' : 'select all shown', 'aria-label': 'select all shown', onchange: () => (all ? PICKED.clear() : view.forEach((t) => PICKED.add(keyOf(t))), (lastPicked = null), drawMine(S)) })
+  // the columns' names; with models selected, what to do with them instead (the checkbox stays)
+  const header = PICKED.size
+    ? h('div', { className: 'mt-h mt-hpick' }, h('span'), selectAll,
+        h('div', { className: 'mt-pickbar' },
+          h('b', { textContent: `${n(PICKED.size)} selected` }),
+          h('button', { className: 'small', textContent: 'Test', disabled: testingAll, onclick: () => tryAll(pickedList) }),
+          h('button', { className: 'small danger', textContent: 'Remove', onclick: removePicked }),
+          h('button', { className: 'small ghost', textContent: 'Invert', title: "select the ones shown that aren't selected, unselect the ones that are", onclick: () => (view.forEach((t) => (PICKED.has(keyOf(t)) ? PICKED.delete(keyOf(t)) : PICKED.add(keyOf(t)))), (lastPicked = null), drawMine(S)) }),
+          h('button', { className: 'small ghost', textContent: 'Select none', onclick: () => (PICKED.clear(), drawMine(S)) })))
+    : h('div', { className: 'mt mt-h' }, h('span'), selectAll,
+        h('span', { textContent: '#', title: 'its place in your list' }), head('model'), head('provider'), head('context', 'num'), head('tools', 'mid'), head('thinking', 'mid'), head('images', 'mid'), head('price', 'num'), head('works'), h('span', { className: 'num', textContent: '' }))
+  const table = view.length ? h('ol', { className: 'mtable' + (view.length < 2 ? '' : ' drag') }) : null
   // ticked or not; with Shift, every row from the last one ticked to this one
   const pick = (i, e) => {
     const on = !PICKED.has(keyOf(view[i]))
@@ -2102,54 +2319,41 @@ function drawMine(s) {
   }
   const tableV = table && virtual(table, { count: view.length, height: TABLE_ROW, row: (i) => tableRow(view[i], order.indexOf(view[i]), (e) => pick(i, e)), scroller: window })
   if (tableV) tableV.items = view.length
+  // typing in a filter: the box is put back in the redrawn page, still with the focus and the caret
+  const typing = filterBar?.contains(document.activeElement) ? document.activeElement : null
+  const caret = typing?.selectionStart ?? null
+  const empty = (text, ...more) => h('div', { className: 'mt-empty' }, text, ...more)
+  // the counts of each test result, for the Result filter (with the other filters as they are)
+  const counted = order.filter((t) => passes(t, 'works'))
+  const results = { works: 0, fails: 0, untested: 0 }
+  for (const t of counted) {
+    const o = outcome(TRIES[keyOf(t)])
+    if (!o) results.untested++
+    else if (o === 'works') results.works++
+    else (results.fails++, (results[o] = (results[o] ?? 0) + 1))
+  }
   put($('mt'),
-    h('div', { className: 'mt-top' },
-      h('div', { className: 'sorts' }, SORT.length
-        ? ['Sorted by ', SORT.map(({ key, dir }, k) => h('span', { className: 'chip' }, `${k + 1}. ${COLS[key].label}: ${dirText(key, dir)}`, h('button', { type: 'button', textContent: '✕', 'aria-label': `stop sorting by ${COLS[key].label}`, onclick: () => setSort(SORT.filter((x) => x.key !== key)) })))]
-        : order.length > 1 ? 'Your order: #1 first, the next when one fails.' : '',
-        testingAll && SORT.some((x) => x.key === 'works') ? h('span', { className: 'sort-live' }, ' · tests still running: the order moves as their results come in') : null),
-      PICKED.size ? h('button', { className: 'small danger', textContent: `Remove ${PICKED.size} selected`, onclick: removePicked }) : null,
-      PICKED.size ? h('button', { className: 'small', textContent: `Test ${PICKED.size} selected`, disabled: testingAll, onclick: () => tryAll(order.filter((t) => PICKED.has(keyOf(t)))) }) : null,
-      PICKED.size ? h('button', { className: 'small', textContent: 'Clear selection', onclick: () => (PICKED.clear(), drawMine(S)) }) : null,
-      PICKED.size ? h('button', { className: 'small', textContent: 'Invert selection', title: 'tick the ones not ticked, untick the ones ticked', onclick: () => (view.forEach((t) => (PICKED.has(keyOf(t)) ? PICKED.delete(keyOf(t)) : PICKED.add(keyOf(t)))), (lastPicked = null), drawMine(S)) }) : null,
-      order.some((t) => t.provider !== order[0].provider) ? h('button', { className: 'small', textContent: 'Provider ranking', title: 'drag your providers into order; the Provider column sorts by it', onclick: openRanking }) : null,
-      SORT.length ? h('button', { className: 'small', textContent: 'Clear sort', onclick: () => setSort([]) }) : null,
-      order.length > 1 ? h('button', { className: 'small primary', textContent: 'Save order', title: 'save the order shown as your model order (#1 first)', onclick: () => keep(view) }) : null,
-      order.length ? h('button', { className: 'small', textContent: 'Refresh from models.dev', title: 'ask models.dev again what each model can do: context, tools, thinking, images, price', onclick: () => lookUp() }) : null,
-      order.length ? h('button', { className: 'small', textContent: 'Test all', disabled: testingAll, title: 'send each a short message to see which really answer: every provider at once, a few from each (one at a time per 100 models)', onclick: () => tryAll(order) }) : null,
-      // how long a test waits for an answer (every model test: Test all, a row's Test and Hello)
-      order.length ? h('label', { className: 'test-wait', title: 'how long a model test waits for its answer before it counts as failed' }, 'Timeout',
-        h('input', { type: 'number', min: 1, max: 600, step: 1, value: S.settings.testTimeout ?? 10, 'aria-label': 'Test timeout in seconds', onchange: (e) => {
-          const v = Math.round(Number(e.target.value))
-          if (!(v >= 1 && v <= 600)) return (e.target.value = S.settings.testTimeout ?? 10), toast('a whole number of seconds, 1 to 600', true)
-          act('/api/setting', { name: 'testTimeout', value: v }, `tests wait ${v} second${v === 1 ? '' : 's'} for an answer`)
-        } }), 's') : null),
-    // when the one in use fails, and what a new message starts with
-    order.length > 1 ? h('div', { className: 'mt-rules' },
-      h('span', { className: 'rule' },
-        h('label', { for: 'r-on', textContent: 'When a model fails, go on to the next' }),
-        h('select', { id: 'r-on', onchange: (e) => saveOrder(S.order, 'saved', { on: e.target.value }) },
-          [['failure', 'at its first failure'], ['retries', 'after some tries of the same model']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.on === v }))),
-        s.rotation.on === 'retries' ? h('input', { type: 'number', 'aria-label': 'tries', title: 'tries of the same model first (rate limits, outages)', min: 1, max: 20, value: s.rotation.retries, onchange: (e) => saveOrder(S.order, 'saved', { retries: Number(e.target.value) }) }) : null),
-      h('span', { className: 'rule' },
-        h('label', { for: 'r-next', textContent: 'A new message starts with' }),
-        h('select', { id: 'r-next', onchange: (e) => saveOrder(S.order, 'saved', { next: e.target.value }) },
-          [['first', '#1 again'], ['stay', 'the model that answered last']].map(([v, t]) => h('option', { value: v, textContent: t, selected: s.rotation.next === v })))),
-      h('span', { className: 'hint', textContent: s.rotation.on === 'retries' ? 'A rate limit or outage: that model is tried again that many times first; any other error moves on at once.' : "Any error moves on at once, to another provider's model first." })) : null,
+    order.length > 1 ? settings : null,
     order.length
-      ? h('div', { className: 'mt-scroll' }, h('div', { className: 'mt' },
+      ? h('div', { className: 'mt-tools' },
+          filterBarOf(order, results),
+          line,
           (tableJobs ??= jobSlot('table')), // the same one every time: its Stop button isn't replaced under the mouse
-          byOutcome.length ? h('div', { className: 'mt-outcomes' }, h('span', { textContent: 'Test results', title: 'click one to select those models; ↻ tests them again' }), byOutcome) : null,
-          h('div', { className: 'mt-h' }, h('span'),
-            h('input', { type: 'checkbox', checked: all, indeterminate: PICKED.size > 0 && !all, title: all ? 'select none' : 'select all', 'aria-label': 'select all', onchange: () => (all ? PICKED.clear() : view.forEach((t) => PICKED.add(keyOf(t))), (lastPicked = null), drawMine(S)) }),
-            h('span', { textContent: '#' }), head('model'), head('provider'), head('context', true), head('abilities', true), head('tools'), head('thinking'), head('images'), head('input', true), head('output', true), h('span', { textContent: 'From' }), head('works'), h('span')),
-          table))
-      : h('div', { className: 'mt-empty' }, 'No models in your list yet. ', h('a', { href: '#providers', textContent: 'Choose some under Providers & models' }), '.'))
+          view.length ? h('div', { className: 'mt-hwrap' }, header) : null)
+      : null,
+    order.length
+      ? h('div', { className: 'mt-scroll', onscroll: (e) => { const hw = e.target.closest('.card')?.querySelector('.mt-hwrap'); if (hw) hw.scrollLeft = e.target.scrollLeft } }, h('div', { className: 'mt' },
+          table ?? empty('No model matches these filters. ', h('button', { type: 'button', className: 'small', textContent: 'Clear all', onclick: clearView }))))
+      : empty('No models in your list yet. ', h('a', { href: '#providers', textContent: 'Choose some under Providers' }), '.'))
+  if (typing && document.activeElement !== typing) {
+    typing.focus({ preventScroll: true })
+    if (caret !== null && typing.setSelectionRange) typing.setSelectionRange(caret, caret)
+  }
   tableV?.draw()
   sortable(tableV, move)
 }
 // the table's cells: yes or no; where what it can do comes from
-const yes = (v) => h('span', { className: v ? 'yes' : 'no', textContent: v ? '✓' : '–' })
+const yes = (v) => h('span', { className: (v ? 'yes' : 'no') + ' mid', textContent: v ? '✓' : '–' })
 const src = (t) => {
   const x = t.tested
   if (!x) return h('div', { className: 'src', textContent: 'looking it up…' })
@@ -2157,24 +2361,33 @@ const src = (t) => {
   return h('div', { className: 'src' }, Object.keys(x.set ?? {}).length ? 'set by you' : x.source === 'models.dev' ? 'models.dev' : FROM[x.source], h('button', { className: 'small', textContent: 'Edit', onclick: () => openSetup(t) }))
 }
 // a row of the table: one model of your list, in the order shown (at: its place in your order)
+const money = (x) => (x == null ? '–' : x === 0 ? '$0' : usd(x))
+const priceOf = (t) => (t.price?.input == null && t.price?.output == null ? '–' : t.price.input === 0 && t.price.output === 0 ? 'free' : `${money(t.price.input)} / ${money(t.price.output)}`)
 function tableRow(t, at, pick) {
   const c = can(t)
   const ctx = COLS.context.get(t)
   const picked = PICKED.has(keyOf(t))
+  const x = t.tested
+  // where what it can do comes from, when that's worth a look: not known to models.dev (a guess), or set by you
+  const tag = !x ? h('span', { className: 'tag', textContent: '…', title: 'looking it up in models.dev' })
+    : x.source === 'assumed' ? h('button', { type: 'button', className: 'tag warn', textContent: 'unknown', title: "models.dev doesn't know it: what it can do is a guess. Click to set it up", onclick: () => openSetup(t) })
+    : Object.keys(x.set ?? {}).length ? h('button', { type: 'button', className: 'tag', textContent: 'edited', title: 'what it can do: set by you (click to change)', onclick: () => openSetup(t) }) : null
+  const going = Boolean(TRIES[keyOf(t)]?.going)
   return h('li', { className: 'in' + (picked ? ' picked' : '') + (isOff(t.provider) ? ' off' : ''), 'data-key': `${t.provider}/${t.model}`, title: isOff(t.provider) ? `${t.provider} is switched off: HeartCode skips this model until it's on` : '' },
     h('span', { className: 'grip', textContent: '⋮⋮', 'aria-hidden': 'true' }),
     h('input', { type: 'checkbox', checked: picked, 'aria-label': `select ${t.model}`, title: 'select (Shift: and every row up to the last one selected)', onclick: (e) => (e.preventDefault(), pick(e)) }),
-    h('span', { className: 'n', textContent: `#${at + 1}`, title: SORT.length ? 'its place in your order now' : '' }),
-    h('span', { className: 'm', textContent: t.model, title: t.model }),
+    h('span', { className: 'n', textContent: `#${at + 1}`, title: SORT.length || filtering() ? 'its place in your list' : '' }),
+    h('span', { className: 'm' }, h('span', { className: 'name', textContent: t.model, title: t.model }), tag),
     h('span', { className: 'p', textContent: isOff(t.provider) ? `${t.provider} · off` : t.provider, title: t.provider }),
     h('span', { className: 'num', textContent: ctx ? `${t.tested?.sure === false ? '~' : ''}${kTok(ctx)}` : '–' }),
-    h('span', { className: 'num', textContent: `${Object.values(c).filter(Boolean).length} of 3` }),
     yes(c.tools), yes(c.thinking), yes(c.images),
-    h('span', { className: 'num', textContent: t.price?.input != null ? usd(t.price.input) : '–' }),
-    h('span', { className: 'num', textContent: t.price?.output != null ? usd(t.price.output) : '–' }),
-    src(t),
+    h('span', { className: 'num price', textContent: priceOf(t), title: t.price ? `in ${money(t.price.input)} · out ${money(t.price.output)} per million tokens` : 'price not known' }),
     triedCell(t),
-    h('button', { className: 'danger', textContent: '✕', title: 'take it off the list', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) }))
+    h('span', { className: 'acts' },
+      h('button', { type: 'button', className: 'small ghost row-test', textContent: going ? '…' : 'Test', disabled: going, title: 'send it a short message to see that it really answers', 'aria-label': `test ${t.model}`, onclick: () => tryModel(t) }),
+      h('button', { type: 'button', className: 'small ghost', textContent: 'Request', title: 'send it "Hello" and see exactly what was sent and what came back', 'aria-label': `raw request to ${t.model}`, onclick: () => hello(t.provider, t.model) }),
+      h('button', { type: 'button', className: 'small ghost', textContent: 'Edit', title: 'what it can do: context, tool calls, thinking, images (or look it up in models.dev again)', 'aria-label': `edit ${t.model}`, onclick: () => openSetup(t) }),
+      h('button', { type: 'button', className: 'small ghost danger', textContent: '✕', title: 'take it off your list (it stays under its provider)', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) })))
 }
 
 // your list changed: the rows and counts it touches, in place
@@ -2810,8 +3023,11 @@ function render(s) {
     FOLDED.clear()
     for (const n of Array.isArray(p.folded) ? p.folded : []) FOLDED.add(n)
     const flip = (x) => (['provider', 'works'].includes(x.key) ? { ...x, dir: x.dir === 'up' ? 'down' : 'up' } : x) // an older page's sort: these two ran the other way
-    SORT = Array.isArray(p.sorts) ? p.sorts.filter((x) => COLS[x?.key]) : Array.isArray(p.sort) ? p.sort.filter((x) => COLS[x?.key]).map(flip) : []
+    // the sort and filters: taken in once; after that the page's own are the latest (a state from the
+    // server can be older than a change made here a moment ago)
+    if (!filtersLoaded) SORT = Array.isArray(p.sorts) ? p.sorts.filter((x) => COLS[x?.key]) : Array.isArray(p.sort) ? p.sort.filter((x) => COLS[x?.key]).map(flip) : []
     RANK = Array.isArray(p.rank) ? p.rank.filter((x) => typeof x === 'string') : []
+    if (!filtersLoaded) (filtersLoaded = true), (FILTER = { ...NO_FILTER, ...(p.filters && typeof p.filters === 'object' ? p.filters : {}) }) // after that the page's own are the latest
   }
   S = s
   for (const [key, r] of Object.entries(TRIES)) if (!r.going && placeOf(...key.split(/\/(.*)/s)) === undefined) delete TRIES[key] // off your list: its result too
