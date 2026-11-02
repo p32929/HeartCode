@@ -585,7 +585,7 @@ class App {
   // Built-in commands (/name), then the skills you can type, namespaced as /skill:name so they're
   // easy to tell apart from HeartCode's own commands (and can't clash with them).
   commands() {
-    const mine = [...this.skills.values()].filter((k) => k.use !== 'model').map((k) => [`/skill:${k.name}`, k.description, true]).sort(byName)
+    const mine = [...this.skills.values()].filter((k) => k.use === 'me' || k.use === 'both').map((k) => [`/skill:${k.name}`, k.description, true]).sort(byName)
     return [...COMMANDS, ...mine]
   }
 
@@ -1659,7 +1659,7 @@ async function slash(app, line, working = false) {
     if (cmd.startsWith('skill:')) {
       const name = cmd.slice(6)
       const k = app.skills.get(name)
-      if (k && k.use !== 'model') return runTask(app, await app.expandSkill(k, args.join(' ')), { signal: app.signal })
+      if (k && (k.use === 'me' || k.use === 'both')) return runTask(app, await app.expandSkill(k, args.join(' ')), { signal: app.signal })
       return ui.print(`unknown skill /skill:${name} ${c.dim('· /help lists your skills')}`)
     }
     if (app.skills.has(cmd)) return ui.print(`${c.dim(`/${cmd} is a skill — run it as`)} ${c.cyan(`/skill:${cmd}`)}`) // bare skill name: point to the namespaced form

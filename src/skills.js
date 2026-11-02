@@ -1,10 +1,12 @@
 // Skills: reusable prompts that you can type as /name and/or the model can load when a task
 // matches. One file (<name>.md) or a folder (<name>/SKILL.md, for extra files), in
-//   ~/.heart/skills/          for every project
+//   skills/ in HeartCode      the ones it comes with
+//   ~/.heart/skills/          for every project (wins over those on the same name)
 //   .heartcode/skills/        for one project (wins on the same name)
 //   ---
 //   description: Review my changes before committing   (what the model sees; also in the / menu)
 //   use: both          me (only typed: costs nothing until used) · model (only the model) · both
+//                      · always (in every system prompt: how to work, not a task)
 //   ---
 //   Review the uncommitted changes, focusing on {{args}}.
 //   !`git diff HEAD`
@@ -12,9 +14,11 @@
 // other CLIs), @path/to/file (its contents), !`command` (its output).
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { HOME } from './config.js'
 
-export const USES = ['me', 'model', 'both']
+export const USES = ['me', 'model', 'both', 'always']
+export const BUNDLED = fileURLToPath(new URL('../skills/', import.meta.url))
 
 export function frontMatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text)
@@ -53,7 +57,7 @@ function useOf(meta, fallback = 'both') {
 export const extraSkillDirs = []
 
 export function skillDirs(root) {
-  return [path.join(HOME, 'skills'), root && path.join(root, '.heartcode', 'skills'), ...extraSkillDirs].filter(Boolean)
+  return [BUNDLED, path.join(HOME, 'skills'), root && path.join(root, '.heartcode', 'skills'), ...extraSkillDirs].filter(Boolean)
 }
 
 export function loadSkills(root) {

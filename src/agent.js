@@ -1,3 +1,5 @@
+import vm from 'node:vm'
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import { log } from './log.js'
@@ -8,7 +10,8 @@ import { pathToFileURL } from 'node:url'
 import { est, estMessages, Client, writtenBy, tokensOf, COMPACT_SHARE } from './client.js'
 import { runGuided } from './guided.js'
 import { markUsed, removeResearch, findResearch } from './research.js'
-import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed } from './tools.js'
+import { learnStrengths, loadStrengths, strengthKey } from './strengths.js'
+import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, noteNamedPaths } from './tools.js'
 import { serversNote } from './lsp.js'
 import { newlyEnded, jobLine } from './background.js'
 import { loadHooks, runHooks } from './hooks.js'
@@ -516,6 +519,7 @@ const SYSTEM = (s) => {
   return [
     prompt('agent/system', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), rootList: rootList(s.root), servers: serversNote(s.root), files: '', more: '', caller: Boolean(s.appendSystem) }),
     instructions && prompt('agent/instructions', { instructions }),
+    ...[...(s.skills?.values() ?? [])].filter((k) => k.use === 'always').map((k) => k.body), // skills that say how to work (use: always)
     s.memory && prompt('agent/memory', { tags: s.memory.tagSummary() || '(none yet)' }),
     s.strat.vision && prompt('agent/you-see'), // models that can see often say they can't
     s.mcpInstructions && prompt('agent/mcp-instructions', { instructions: s.mcpInstructions }), // what the MCP servers say about their tools
@@ -534,8 +538,11 @@ const teamPrompt = (s) => {
   const team = s.team?.() ?? []
   if (!team.length) return ''
   const fails = (t) => s.failures?.[`${t.provider} ${t.model}`] && `failed ${s.failures[`${t.provider} ${t.model}`]}× this session`
-  const can = (t) => [t.tools ? 'tool calls' : 'no tool calls', t.images && 'images', t.thinking && 'thinking', `${Math.round(t.context / 1000)}k context`, fails(t)].filter(Boolean).join(', ')
-  const you = [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking'].filter(Boolean).join(', ')
+  const known = loadStrengths()
+  const at = (model) => (/^unknown/i.test(known[strengthKey(model)]?.good ?? '') ? null : known[strengthKey(model)]) // nothing published: kept, so not looked up again, but not shown
+  const strong = (model) => (at(model) ? `; good at: ${at(model).good}${at(model).weak ? `; weak at: ${at(model).weak}` : ''}` : '')
+  const can = (t) => [t.tools ? 'tool calls' : 'no tool calls', t.images && 'images', t.thinking && 'thinking', `${Math.round(t.context / 1000)}k context`, fails(t)].filter(Boolean).join(', ') + strong(t.model)
+  const you = [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking'].filter(Boolean).join(', ') + strong(s.client.model)
   return prompt('agent/team', { models: team.map((t) => `- ${t.provider} ${t.model}: ${can(t)}`).join('\n'), you })
 }
 
@@ -712,6 +719,9 @@ async function runNative(s, task, images, signal) {
   // The system prompt is rebuilt for every message: files come and go, and a resumed chat's is
   // from back then (it once told the model the project was empty after it had made files).
   // Unchanged, it stays the same text, so a provider's prompt cache still holds.
+  // what your models are good at, learned once per model, before the system prompt that lists them
+  const team = !s.isSub && !s.appendSystem ? (s.team?.() ?? []) : []
+  if (team.length) await learnStrengths(s, [{ model: client.model }, ...team], signal)
   const sys = SYSTEM(s)
   if (!s.messages) {
     s.messages = strat.mergeSystem ? [{ role: 'user', content: sys }, { role: 'assistant', content: prompt('agent/system-acknowledged') }] : [{ role: 'system', content: sys }]
@@ -803,6 +813,8 @@ async function runNative(s, task, images, signal) {
   if (!s.isSub && s.chat.todos?.every((t) => t.status === 'completed')) s.chat.todos = []
   s.todoTouched = false
   s.task = task // the user's message, for the page review (lookAtUi)
+  noteNamedPaths(task) // folders outside the project it names: readable (and cd there is no wrong turn)
+  if (!s.isSub) s.choicesFresh = false // a question about how to do it, this message: replaces the earlier answers (s.chat.choices)
   s.uiTouched = new Set() // pages (and styles) written in this message: looked at before it ends
   s.uiLooks = 0
   s.uiErrorsPrev = [] // hard errors from the last look: when one is gone next look, it was fixed — learn from it
@@ -813,7 +825,7 @@ async function runNative(s, task, images, signal) {
   let sinceNudge = true // a tool call made since the last reminder: one that changed nothing isn't sent again (no count: it goes on while the model gets on)
   s.planAsked = false // asked for a plan before its first change, this message
   // what changed and when it was last checked, this message: a change not run/tested since isn't done
-  Object.assign(s, { changed: new Set(), seq: 0, lastChangeAt: -1, lastCheckAt: -1, reviewedAt: -1 })
+  Object.assign(s, { changed: new Set(), seq: 0, lastChangeAt: -1, lastCheckAt: -1, reviewedAt: -1, checksSince: 0 })
 
   let empty = 0 // replies in a row with neither text nor tool calls
   let looping = 0 // replies cut for going into a loop, this message
@@ -830,6 +842,7 @@ async function runNative(s, task, images, signal) {
   let refitted = false // this step's conversation was just compacted for a smaller model the list moved on to
   // No step limit (helpers too): a long fix takes many steps, and Esc stops it. A caller can set one (--max-turns).
   for (let step = 0; ; step++) {
+    if (step && !s.isSub) s.onTurn?.() // saved after every step: a quit, crash or kill mid-task loses nothing done so far
     const tools = toolList()
     if (s.maxTurns && step >= s.maxTurns) {
       ui.warn(`stopped after ${s.maxTurns} steps (--max-turns); say "continue" to go on`)
@@ -1006,10 +1019,11 @@ async function runNative(s, task, images, signal) {
                   : (args.path ?? args.url ?? args.query ?? args.filter ?? args.name ?? '')
       if (name !== 'run_command' && !together.has(call.id)) ui.step(name, clip(detail, 80))
       const pre = early.get(call.id)
-      // the first change to the files with no plan yet (this message, or still open from an earlier one):
-      // not made — the plan first, then the change again. Once a message; not a helper's (its job is its plan)
-      const planFirst = !s.isSub && !s.planAsked && EDITS.has(name) && args && allowed(s, name) && ui.permission !== 'plan' && !s.todoTouched && !(s.chat.todos ?? []).some((t) => t.status !== 'completed')
-      if (planFirst) s.planAsked = true
+      // the first changes to the files with no plan yet (this message, or still open from an earlier one):
+      // not made — the plan first, then the changes again. Every change in that reply (one made beside a
+      // refused one is easily taken for refused too), once a message; not a helper's (its job is its plan)
+      const planFirst = !s.isSub && (!s.planAsked || s.planHeldIn === res) && EDITS.has(name) && args && allowed(s, name) && ui.permission !== 'plan' && !s.todoTouched && !(s.chat.todos ?? []).some((t) => t.status !== 'completed')
+      if (planFirst) Object.assign(s, { planAsked: true, planHeldIn: res })
       const refused = planFirst ? prompt('agent/plan-first') : pre ? (pre.refused ?? null) : !together.has(call.id) && args && allowed(s, name) ? guard.before(name, args) : null
       let out = refused ?? (pre ? await pre.running : together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal, call.id) : 'error: the tool arguments were not valid JSON')
       if (!refused && args) out += guard.after(name, args, out)
@@ -1018,8 +1032,14 @@ async function runNative(s, task, images, signal) {
         s.seq++
         if (EDITS.has(name) && !failed(out)) {
           s.lastChangeAt = s.seq
+          s.checksSince = 0
           if (args.path) s.changed.add(String(args.path))
-        } else if (CHECKS.has(name)) s.lastCheckAt = s.seq // ran something: a check of what changed (the model judges its result)
+        } else if (CHECKS.has(name)) {
+          s.lastCheckAt = s.seq // ran something: a check of what changed (the model judges its result)
+          // checking on and on with nothing changed (sleeps, screenshots, play-throughs): told once per
+          // change that it's proven or not by now — stop, or fix what's broken
+          if (++s.checksSince === 5 && (s.changed.size || s.isSub)) out += `\n\n${prompt('agent/enough-checks', { n: s.checksSince, choices: (s.chat?.choices ?? []).join('; ') })}`
+        }
       }
       if (name === 'run_command' && args && !refused) s.ran?.push({ command: String(args.command ?? ''), result: clip(String(out).split('\n').filter((l) => l.trim()).slice(0, 2).join(' · '), 160) })
       if (!s.isSub && s.memory && !refused && args) await noteRun(s, name, args, out, signal).catch((e) => log('learn', `run note: ${e.message}`)) // learn from any run that failed then passed
@@ -1137,7 +1157,7 @@ export function newGuard() {
 // Problems found in a built page without a browser: JavaScript that doesn't parse, and the Tailwind
 // CDN used with @apply/@layer (it throws "Cannot apply unknown utility class" at runtime and the
 // styling breaks). These are caught even when the browser can't be opened.
-function staticChecks(root, rel) {
+export function staticChecks(root, rel) {
   const out = []
   let html
   try {
@@ -1147,12 +1167,26 @@ function staticChecks(root, rel) {
   }
   for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
     const attrs = m[1]
-    if (/\bsrc\s*=/.test(attrs) || /\btype\s*=\s*["']?module/.test(attrs) || !m[2].trim()) continue // external or ESM: can't check this way
-    try {
-      new Function(m[2]) // compiles without running: throws on a syntax error (unclosed brace, typo)
-    } catch (e) {
-      out.push(`${rel}: the <script> doesn't parse — ${e.message}. The page's JavaScript won't run at all. Find and fix it (often an unclosed brace or bracket).`)
+    const type = /\btype\s*=\s*["']?([^"'\s>]+)/i.exec(attrs)?.[1].toLowerCase() ?? ''
+    if (/\bsrc\s*=/.test(attrs) || !m[2].trim() || (type && !/^(module|text\/javascript|application\/javascript)$/.test(type))) continue // external, or not JavaScript (an import map, JSON, a template)
+    // compiled without running, with the line it's on in the page (so the model goes straight to it)
+    const offset = html.slice(0, m.index + m[0].indexOf('>') + 1).split('\n').length - 1
+    let line = 0
+    let why = ''
+    if (type === 'module') {
+      const r = spawnSync(process.execPath, ['--input-type=module', '--check'], { input: m[2], encoding: 'utf8' })
+      if (r.status) (line = Number(/\[stdin\]:(\d+)/.exec(r.stderr)?.[1] ?? 0)), (why = /SyntaxError: .*/.exec(r.stderr)?.[0] ?? r.stderr.trim().split('\n').at(-1))
+    } else {
+      try {
+        new vm.Script(m[2], { filename: rel, lineOffset: offset })
+      } catch (e) {
+        line = Number(new RegExp(`${rel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:(\\d+)`).exec(e.stack)?.[1] ?? 0) - offset
+        why = `${e.name}: ${e.message}`
+      }
     }
+    if (!why) continue
+    const at = line > 0 ? offset + line : 0
+    out.push(`${rel}${at ? ` line ${at}` : ''}: the <script> doesn't parse — ${why}${at ? ` (the line: ${html.split('\n')[at - 1]?.trim().slice(0, 160)})` : ''}. The page's JavaScript won't run at all: fix that line (or what's just before it: an unclosed brace or bracket).`)
   }
   const tailwindCdn = /cdn\.tailwindcss\.com|@tailwindcss\/browser|type\s*=\s*["']text\/tailwindcss/.test(html)
   if (tailwindCdn) {
@@ -1362,7 +1396,7 @@ async function lookAtUi(s, signal) {
     // model checking its own work in its own conversation tends to call it fine
     const self = { provider: s.client.provider, model: s.client.model, images: s.strat.vision }
     const reviewers = [...(self.images ? [self] : []), ...(s.team?.() ?? []).filter((t) => t.images && !(t.provider === self.provider && t.model === self.model))]
-    const ask = prompt('agent/ui-review', { task: s.task ?? '', shots: shots.map((x, i) => `${i + 1}. ${x.label}`).join('\n') })
+    const ask = prompt('agent/ui-review', { task: s.task ?? '', emphasis: (s.chat?.choices ?? []).join('; '), shots: shots.map((x, i) => `${i + 1}. ${x.label}`).join('\n') })
     for (const t of reviewers) {
       s.ui.spinner(`${t.model} is reviewing ${shown.join(', ')}`)
       try {
@@ -1510,7 +1544,7 @@ export async function review(s, task, answer, signal) {
   if (!diffs.length) return null
   const plan = (s.chat.todos ?? []).map((t) => `- [${t.status === 'completed' ? 'x' : ' '}] ${t.content}`).join('\n')
   const ran = (s.ran ?? []).slice(-15).map((r) => `- ${clip(r.command.replace(/\s+/g, ' '), 160)} → ${r.result}`).join('\n')
-  const ask = prompt('agent/review', { request: requestsOf(s.chat, 1200), plan: plan || '(none)', answer: clip(String(answer ?? ''), 3000), changes: diffs.join('\n\n'), ran: ran || '(nothing)' })
+  const ask = prompt('agent/review', { request: requestsOf(s.chat, 1200), emphasis: (s.chat?.choices ?? []).join('; '), plan: plan || '(none)', answer: clip(String(answer ?? ''), 3000), changes: diffs.join('\n\n'), ran: ran || '(nothing)' })
   const self = { provider: s.client.provider, model: s.client.model, self: true }
   const fails = (t) => s.failures?.[`${t.provider} ${t.model}`] ?? 0
   const others = (s.team?.() ?? []).filter((t) => t.tools !== false && !(t.provider === self.provider && t.model === self.model)).sort((a, b) => fails(a) - fails(b))

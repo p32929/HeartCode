@@ -17,7 +17,7 @@ import { runHooks } from './hooks.js'
 import { parsePatch, applyChunks } from './patch.js'
 import { formatFile } from './format.js'
 import { diagnose, lspTool, findCommand } from './lsp.js'
-import { startJob, newOutput, listJobs, getJob, stopJob, jobLine } from './background.js'
+import { startJob, waitFor, newOutput, listJobs, getJob, stopJob, removeJob, jobLine } from './background.js'
 
 const IGNORE = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage', '.venv', 'venv', '__pycache__', 'target', '.cache', '.DS_Store'])
 
@@ -44,12 +44,27 @@ export function saveOutput(chatId, name, data, ext = 'txt') {
   }
 }
 
-export function resolveIn(root, p) {
-  const clean = String(p ?? '').trim().replace(/^["'`]+|["'`]+$/g, '')
+// Folders (and files) outside the project that the user's messages name ("look at ~/code/other
+// first"): read_file, list_files and search read there, and commands there aren't called a wrong
+// turn. Nothing outside the project is written.
+const namedOutside = new Set()
+const expandHome = (p) => p.replace(/^~(?=[\\/]|$)/, os.homedir())
+export function noteNamedPaths(text) {
+  for (const m of String(text ?? '').matchAll(/(?:^|[\s"'`(<])((?:~|\/|[A-Za-z]:[\\/])[^\s"'`)>]+)/g)) {
+    const abs = path.resolve(expandHome(m[1].replace(/[.,;:!?]+$/, '')))
+    if (abs !== path.parse(abs).root && abs !== os.homedir() && fs.existsSync(abs)) namedOutside.add(abs)
+  }
+}
+const readableOutside = (abs) => [...namedOutside].some((d) => abs === d || abs.startsWith(d + path.sep))
+
+// read: a path the user named outside the project is fine too (for reading only)
+export function resolveIn(root, p, read = false) {
+  const clean = expandHome(String(p ?? '').trim().replace(/^["'`]+|["'`]+$/g, ''))
   if (!clean) throw new Error('no path given')
   const bare = root.replace(/^[\\/]+/, '') // the project's own path, its leading "/" left out by a sloppy copy
   let abs = clean === bare || clean.startsWith(bare + '/') ? path.join(root, clean.slice(bare.length)) : path.resolve(root, clean)
   if (isSavedOutput(abs)) return abs // a saved tool output
+  if (read && readableOutside(abs) && !(abs === root || abs.startsWith(root + path.sep))) return abs
   // "num.js:" or "num.js," from a sloppy model: the file without the stray mark, if that one exists
   const trimmed = path.resolve(root, clean.replace(/[:;,.]+$/, ''))
   if (trimmed !== abs && !fs.existsSync(abs) && fs.existsSync(trimmed)) abs = trimmed
@@ -120,7 +135,7 @@ export function listFiles(root, limit = 2000) {
 // One folder's entries (the project root: ''), all of them: folders end in "/", what .gitignore
 // leaves out says "(ignored)". Names only. At most `limit`.
 export function folderView(root, rel = '', limit = 200) {
-  const abs = resolveIn(root, rel || '.')
+  const abs = resolveIn(root, rel || '.', true)
   let entries
   try {
     entries = fs.readdirSync(abs, { withFileTypes: true })
@@ -148,7 +163,7 @@ const isBinary = (buf) => buf.subarray(0, 8000).includes(0)
 export const numberLines = (lines, from = 1) => lines.map((l, i) => `${from + i}| ${l}`).join('\n')
 
 export function readFileTool(root, p, start, end, maxLines = 400) {
-  const abs = resolveIn(root, p)
+  const abs = resolveIn(root, p, true)
   const rel = path.relative(root, abs)
   if (!fs.existsSync(abs)) {
     const base = path.basename(abs)
@@ -186,7 +201,7 @@ export function imageUrl(abs, shown = abs) {
 // are); for one that can't, where to send it.
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i
 function readImage(s, p) {
-  const abs = resolveIn(s.root, p)
+  const abs = resolveIn(s.root, p, true)
   const rel = path.relative(s.root, abs) || p
   if (!fs.existsSync(abs)) return readFileTool(s.root, p)
   if (s.strat?.vision) {
@@ -208,15 +223,16 @@ export function searchFiles(root, query, sub = '', limit = 50) {
   } catch {
     re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), ci ? 'i' : '')
   }
-  const abs = sub ? resolveIn(root, sub) : ''
+  const abs = sub ? resolveIn(root, sub, true) : ''
+  const away = abs && abs !== root && !abs.startsWith(root + path.sep) && !isSavedOutput(abs) // a folder the user named outside the project
   let single = false // one file named: searched whatever lists leave out (a saved page, a .gitignored file)
   try {
     single = Boolean(abs) && fs.statSync(abs).isFile()
   } catch {}
   const saved = isSavedOutput(abs) || single
-  const prefix = sub && !saved ? path.relative(root, abs) : ''
+  const prefix = sub && !saved && !away ? path.relative(root, abs) : ''
   const hits = []
-  for (const f of saved ? [abs] : listFiles(root)) {
+  for (const f of saved ? [abs] : away ? listFiles(abs).map((f) => path.join(abs, f)) : listFiles(root)) {
     if (prefix && f !== prefix && !f.startsWith(prefix + '/')) continue
     let buf
     try {
@@ -397,7 +413,9 @@ export function searchesOutside(cmd, root) {
     })
 }
 
-export async function runConfirmed(s, cmd, signal, background = false) {
+// Waited on for `wait` seconds (the model's choice): finished by then, its exit code and output;
+// still running, it carries on in the background, and the model checks on it when it likes.
+export async function runConfirmed(s, cmd, signal, background = false, wait) {
   s.ui.step(background ? 'run in background' : 'run', cmd)
   if (s.ui.permission === 'plan' && !readOnlyCommand(cmd)) {
     s.ui.result('not run: plan mode')
@@ -410,26 +428,32 @@ export async function runConfirmed(s, cmd, signal, background = false) {
   }
   const ok = s.ui.permission === 'plan' ? true : await s.ui.confirm(`Run ${c.bold(cmd)}?`, 'command') // plan mode: only read-only ones get here
   if (ok !== true) return `The user declined to run this command.${typeof ok === 'string' ? ' User feedback: ' + ok : ''}`
-  if (background) {
-    const { job, output } = await startJob(s.root, cmd)
-    s.ui.result(job.exited ? `exited with ${job.code}` : `running in the background as #${job.id}`)
-    return prompt('agent/background-started', { id: job.id, running: !job.exited, code: job.code, output: output.trim() || '(nothing yet)', file: job.file })
-  }
+  const secs = Number(wait) > 0 ? Number(wait) : background ? 3 : 30
   const before = snapshot(s)
   s.ui.spinner(`running ${cmd}`)
-  const t0 = Date.now()
-  const { code, output } = await runCommand(s.root, cmd, { signal })
-  log('command', `${cmd} → exit ${code} in ${Date.now() - t0}ms\n${tail(output, 8000)}`)
+  const job = startJob(s.root, cmd)
+  await waitFor(job, secs * 1000, signal)
   s.ui.stopSpin()
-  s.ui.result(`exit ${code}`)
+  if (!job.exited) {
+    if (signal?.aborted && !background) {
+      removeJob(job) // Esc stops what it was waiting on
+      s.ui.result('stopped')
+      return `Stopped by the user (Esc) after ${Math.round((Date.now() - job.started) / 1000)}s.`
+    }
+    s.ui.result(`still running: #${job.id} in the background`)
+    return prompt('agent/background-started', { id: job.id, secs, output: newOutput(job).trim() || '(nothing yet)', file: job.file })
+  }
+  const left = removeJob(job) // done: not one of the background list
+  const output = newOutput(job, 4000) + (left ? '\n(Processes this command left running were stopped. To keep a server or watcher running, run it with background: true.)' : '')
+  log('command', `${cmd} → exit ${job.code} in ${job.ended - job.started}ms\n${output}`)
+  s.ui.result(`exit ${job.code}`)
   const changed = changesSince(s, before)
-  const why = code === 'timeout' ? `\n${prompt('agent/command-timeout', { root: s.root })}` : ''
-  return `exit code ${code}\n${tail(output, 4000) || '(no output)'}${changed ? `\nFiles this command changed: ${changed}` : ''}${why}`
+  return `exit code ${job.code}\n${output.trim() || '(no output)'}${changed ? `\nFiles this command changed: ${changed}` : ''}`
 }
 
-// The background tool: what a command started with background: true printed since the last look,
-// the list of them, or stop one.
-function backgroundTool(s, a) {
+// The background tool: what a command still running printed since the last look (after waiting
+// up to `wait` seconds for it to finish, if asked), the list of them, or stop one.
+async function backgroundTool(s, a, signal) {
   const mine = listJobs(s.root)
   if (a.action === 'list') return mine.length ? mine.map(jobLine).join('\n') : 'No background commands.'
   const job = getJob(a.id ?? mine.at(-1)?.id)
@@ -439,6 +463,12 @@ function backgroundTool(s, a) {
     s.ui.result(was ? `stopped #${job.id}` : `#${job.id} had already exited`)
     return was ? `Stopped #${job.id} (${job.command}).` : `#${job.id} had already exited with ${job.code}.`
   }
+  if (Number(a.wait) > 0) {
+    s.ui.spinner(`waiting on #${job.id} ${clip(job.command, 60)}`)
+    await waitFor(job, Number(a.wait) * 1000, signal)
+    s.ui.stopSpin()
+  }
+  if (job.exited) job.told = true // told here: not again as a background-ended note
   const out = newOutput(job)
   return `${jobLine(job)}\n${out.trim() ? `New output since the last look:\n${out}` : '(no new output since the last look)'}`
 }
@@ -519,12 +549,12 @@ export const TOOL_DEFS = [
   // One edit per call: a list of edits per call measured 2–6 malformed calls per benchmark run vs 0.
   { name: 'edit_file', description: prompt('agent/tool-edit_file'), parameters: obj({ path: str, search: str, replace: str, start_line: int, end_line: int }, ['path', 'replace']) },
   { name: 'write_file', description: prompt('agent/tool-write_file'), parameters: obj({ path: str, content: str, append: { type: 'boolean' } }, ['path', 'content']) },
-  { name: 'run_command', description: prompt('agent/tool-run_command'), parameters: obj({ command: str, background: { type: 'boolean' } }, ['command']) },
-  { name: 'background', description: prompt('agent/tool-background'), parameters: obj({ action: { type: 'string', enum: ['output', 'list', 'stop'] }, id: int }, ['action']) },
+  { name: 'run_command', description: prompt('agent/tool-run_command'), parameters: obj({ command: str, wait: int, background: { type: 'boolean' } }, ['command']) },
+  { name: 'background', description: prompt('agent/tool-background'), parameters: obj({ action: { type: 'string', enum: ['output', 'list', 'stop'] }, id: int, wait: int }, ['action']) },
   { name: 'todo', description: prompt('agent/tool-todo'), parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] } }, ['content', 'status']) } }, ['todos']) },
   { name: 'web_search', description: prompt('agent/tool-web_search'), parameters: obj({ query: str, fresh: { type: 'boolean' } }, ['query']) },
   { name: 'web_fetch', description: prompt('agent/tool-web_fetch'), parameters: obj({ url: str, look_for: str, start: int }, ['url']) },
-  { name: 'ask_user', description: prompt('agent/tool-ask_user'), parameters: obj({ question: str, options: { type: 'array', items: str }, multiple: { type: 'boolean' } }, ['question']) },
+  { name: 'ask_user', description: prompt('agent/tool-ask_user'), parameters: obj({ question: str, options: { type: 'array', items: str }, multiple: { type: 'boolean' }, emphasis: { type: 'boolean' } }, ['question']) },
 ]
 
 // Plan mode (permission "plan"): looking around is fine, changing things isn't. Edits are refused,
@@ -535,7 +565,7 @@ const READ_ONLY = /^(cd|ls|cat|head|tail|wc|grep|egrep|rg|find|fd|tree|pwd|file|
 // path wrong, then lost in what it finds there): told where the project is.
 function outsideNote(root, cmd) {
   const dirs = [...cmd.matchAll(/(?:^|&&|;|\|\|)\s*cd\s+("[^"]+"|'[^']+'|\S+)/g)].map((m) => m[1].replace(/^["']|["']$/g, '').replace(/^~(?=\/|$)/, os.homedir()))
-  const out = dirs.map((d) => path.resolve(root, d)).find((d) => d !== root && !d.startsWith(root + path.sep))
+  const out = dirs.map((d) => path.resolve(root, d)).find((d) => d !== root && !d.startsWith(root + path.sep) && !readableOutside(d))
   return out ? `\n\n${prompt('agent/outside-project', { dir: out, root })}` : ''
 }
 
@@ -594,7 +624,7 @@ export function extraTools(s) {
       parameters: obj({ action: { type: 'string', enum: ['write', 'read', 'search', 'delete'] }, name: str, description: str, type: str, tags: str, scope: { type: 'string', enum: ['project', 'global'] }, content: str, query: str }, ['action']),
     })
   }
-  const forModel = [...(s.skills?.values() ?? [])].filter((k) => k.use !== 'me') // "use: me" skills cost nothing here
+  const forModel = [...(s.skills?.values() ?? [])].filter((k) => k.use === 'model' || k.use === 'both') // "use: me" skills cost nothing here; "always" ones are in the system prompt
   if (forModel.length) {
     const skills = forModel.map((k) => `${k.name}: ${k.description}`).join('\n')
     out.push({ name: 'skill', description: prompt('agent/tool-skill', { skills }), parameters: obj({ name: str }, ['name']) })
@@ -656,6 +686,13 @@ async function askUser(s, args) {
     answer = [...got.filter((x) => !x.own).map((x) => x.label), own?.trim()].filter(Boolean).join(', ')
   } else answer = (await s.ui.ask(`${c.yellow('?')} ${c.bold(question)} `))?.trim()
   log('ask', question, answer)
+  // how the user wants the work done: kept with the conversation (a "continue" later still knows), the
+  // first such question of a new message starts them afresh; steers the checks and reviews
+  if (args.emphasis && answer && s.chat) {
+    if (!s.choicesFresh) s.chat.choices = []
+    s.choicesFresh = true
+    s.chat.choices.push(`${question} → ${answer}`)
+  }
   return answer ? `The user answered: ${answer}` : prompt('agent/ask-no-answer')
 }
 
@@ -804,6 +841,39 @@ export function argProblems(schema, a) {
   return out
 }
 
+// A call's arguments mended where the tool's schema says what was meant, so it isn't sent back over
+// a slip any model makes: a name in the wrong case (msgId → msgid), an unknown name when exactly one
+// required one is missing (expression → function), one value where a list is wanted, a number or
+// true/false written as text, a required one left out that an earlier call to this server gave (or
+// its result marked "[selected]": the page a browser has open). Returns { a, fixed } (what changed).
+export function repairArgs(schema, a, known = {}) {
+  const props = schema?.properties ?? {}
+  if (!a || typeof a !== 'object' || Array.isArray(a) || !schema?.properties) return { a, fixed: [] }
+  a = { ...a }
+  const fixed = []
+  const rename = (k, to) => ((a[to] = a[k]), delete a[k], fixed.push(`"${k}" → "${to}"`))
+  for (const k of Object.keys(a)) {
+    const to = !props[k] && Object.keys(props).find((p) => p.toLowerCase() === k.toLowerCase())
+    if (to && a[to] === undefined) rename(k, to)
+  }
+  for (const k of (schema.required ?? []).filter((k) => a[k] === undefined && known[k] !== undefined)) {
+    a[k] = known[k]
+    fixed.push(`"${k}": ${JSON.stringify(known[k])} (from the last call)`)
+  }
+  const unknown = Object.keys(a).filter((k) => !props[k])
+  const missing = (schema.required ?? []).filter((k) => a[k] === undefined)
+  const fits = (k, v) => { const ty = [props[k]?.type ?? []].flat(); return !ty.length || ty.includes(Array.isArray(v) ? 'array' : typeof v) || ty.includes('array') || (Number.isInteger(v) && ty.includes('integer')) }
+  if (unknown.length === 1 && missing.length === 1 && fits(missing[0], a[unknown[0]])) rename(unknown[0], missing[0])
+  for (const [k, v] of Object.entries(a)) {
+    const types = [props[k]?.type ?? []].flat()
+    if (!types.length || v === undefined || v === null) continue
+    if (types.includes('array') && !Array.isArray(v)) (a[k] = [v]), fixed.push(`"${k}" made a list`)
+    else if ((types.includes('number') || types.includes('integer')) && typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v)) && !types.includes('string')) (a[k] = Number(v)), fixed.push(`"${k}" made a number`)
+    else if (types.includes('boolean') && (v === 'true' || v === 'false') && !types.includes('string')) (a[k] = v === 'true'), fixed.push(`"${k}" made ${v}`)
+  }
+  return { a, fixed }
+}
+
 // One tool's description and arguments, for the model (describe, or a call that didn't fit).
 const describeTool = (t) => `${t.name}: ${t.description ?? ''}\nArguments (JSON schema): ${JSON.stringify(t.inputSchema ?? {})}`
 
@@ -819,7 +889,11 @@ async function callMcp(s, server, tool, a, signal) {
       return `error: ${server.name} has no tool "${tool}".${close.length ? ` Did you mean ${close.join(' or ')}?` : ''} Its tools: ${tools.map((t) => t.name).join(', ')}`
     }
   }
-  // arguments that don't fit: the schema comes back with what's wrong, and nothing is sent
+  // slips mended first (said in the result, so it's done right next time); what still doesn't fit:
+  // the schema comes back with what's wrong, and nothing is sent
+  const known = (server.lastArgs ??= {}) // values earlier calls to this server gave (helpers share it)
+  const mended = def?.inputSchema ? repairArgs(def.inputSchema, a, known) : { a, fixed: [] }
+  a = mended.a
   const problems = def?.inputSchema ? argProblems(def.inputSchema, a) : []
   if (problems.length) return `error: ${server.name} · ${tool} wasn't called — ${problems.join('; ')}.\n${describeTool(def)}\nCall it again with arguments that fit.`
   // a tool its server marks read-only isn't asked about (reading isn't, in any mode; headless
@@ -839,6 +913,9 @@ async function callMcp(s, server, tool, a, signal) {
   }
   const parts = r.content ?? []
   const text = parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n')
+  for (const [k, v] of Object.entries(a)) if (v !== null && typeof v !== 'object') known[k] = v
+  const selected = /(\d+):[^\n]*\[selected\]/.exec(text)?.[1] // a browser's open page, after new_page/select_page
+  if (selected) known.pageId = Number(selected)
   // Its images: the ones it returned, and image files it made while it ran (a path in its text to a
   // file written during the call: "Saved screenshot to /…/shot.webp"; an old one it only mentions
   // isn't one). Each is a file too, so a model that can't see them can have one that can look.
@@ -868,7 +945,8 @@ async function callMcp(s, server, tool, a, signal) {
     note = `\n(${s.pendingImages.length - shown} image(s): shown to you in the next message${left.length ? `; not shown: ${left.join('; ')}` : ''})`
   } else if (files.length && s.team?.().some((t) => t.images)) note = `\n${prompt('agent/images-unseen', { files: files.join('\n') })}`
   else if (files.length) note = `\n(${files.length} image(s) not shown: this model can't see images)`
-  return `${r.isError ? 'error: ' : ''}${text || '(no text)'}${note}`
+  const mendNote = mended.fixed.length ? `\n(HeartCode corrected the arguments: ${mended.fixed.join('; ')}. Use them that way next time.)` : ''
+  return `${r.isError ? 'error: ' : ''}${text || '(no text)'}${note}${mendNote}`
 }
 
 // tool "search": the tools of every server (or one) whose name or description has the query's
@@ -1182,9 +1260,9 @@ async function tool(name, args, s, signal, id) {
       }
       case 'run_command':
         if (/^\s*apply_patch\b[\s\S]*\*\*\* Begin Patch/.test(String(args.command ?? ''))) return await applyPatch(s, args.command) // apply_patch <<'EOF' … as Codex runs it
-        return (await runConfirmed(s, String(args.command ?? ''), signal, args.background === true || args.background === 'true')) + outsideNote(root, String(args.command ?? ''))
+        return (await runConfirmed(s, String(args.command ?? ''), signal, args.background === true || args.background === 'true', args.wait)) + outsideNote(root, String(args.command ?? ''))
       case 'background':
-        return backgroundTool(s, args)
+        return await backgroundTool(s, args, signal)
       case 'apply_patch':
         return await applyPatch(s, args.input ?? args.patch ?? args.command ?? '')
       case 'mcp':

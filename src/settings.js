@@ -16,7 +16,7 @@ import { clip } from './tools.js'
 import { loadProfile, strategy, profilePath, profileFrom } from './probe.js'
 import { loadPrices, priceOf, limitsOf } from './usage.js'
 import { THEMES, PERMISSIONS } from './ui.js'
-import { loadSkills, frontMatter } from './skills.js'
+import { loadSkills, frontMatter, BUNDLED } from './skills.js'
 import { installSkill, findImports } from './importer.js'
 import { capabilities } from './capabilities.js'
 import { connect, sendTelegram, tokenHint, tgReady, EVENTS } from './telegram.js'
@@ -375,7 +375,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     capabilities: capabilities(cfg), // features that need outside tools, and whether they're here
     choices: { permissions: PERMISSIONS, effort: EFFORTS, theme: Object.keys(THEMES), toggles: TOGGLES, statusItems: STATUS_ITEMS },
     files: FILES.map(([name, about, json, example]) => ({ name, about, json, example, text: fs.existsSync(path.join(HOME, name)) ? fs.readFileSync(path.join(HOME, name), 'utf8') : '' })),
-    skills: [...loadSkills(null).values()].map((s) => ({ name: s.name, description: s.description, use: s.use, mine: s.file.startsWith(skillsDir() + path.sep), text: fs.readFileSync(s.file, 'utf8') })),
+    skills: [...loadSkills(null).values()].map((s) => ({ name: s.name, description: s.description, use: s.use, mine: s.file.startsWith(skillsDir() + path.sep), builtIn: s.file.startsWith(BUNDLED), text: fs.readFileSync(s.file, 'utf8') })),
     mcp: mcpServers(),
     prompts: prompts(),
     home: tilde(HOME),

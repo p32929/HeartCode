@@ -2928,7 +2928,7 @@ function drawMcp(s) {
 }
 
 // --- skills: a form (name, who uses it, what it's for, the prompt); SKILL.md is made from it ---
-const USES = [['both', 'You and the model', 'type /skill:name, or the model uses it when it fits'], ['me', 'Only you', 'only when you type /skill:name'], ['model', 'Only the model', "when it fits; you don't type it"]]
+const USES = [['both', 'You and the model', 'type /skill:name, or the model uses it when it fits'], ['me', 'Only you', 'only when you type /skill:name'], ['model', 'Only the model', "when it fits; you don't type it"], ['always', 'Always on', 'in every message: how to work, not a task']]
 function parseSkill(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text)
   const out = { description: '', use: 'both', extra: [], body: (m ? m[2] : text).replace(/^\s*\n/, '') }
@@ -3016,7 +3016,8 @@ async function openImport() {
 
 function drawSkills(s) {
   const mine = s.skills.filter((k) => k.mine)
-  const theirs = s.skills.filter((k) => !k.mine)
+  const theirs = s.skills.filter((k) => !k.mine && !k.builtIn)
+  const builtIn = s.skills.filter((k) => k.builtIn)
   const item = (k) => ({ id: k.name, title: '/skill:' + k.name, sub: k.description, k })
   const install = async () => {
     const url = $('k-url').value.trim()
@@ -3038,17 +3039,19 @@ function drawSkills(s) {
     if (e.key === 'Enter') install()
   }
   $('k-import').onclick = openImport
-  masterDetail('skills', $('k-items'), $('k-detail'), [{ title: mine.length && theirs.length ? 'Yours' : '', items: mine.map(item) }, { title: 'From projects', items: theirs.map(item) }], (x) => {
+  masterDetail('skills', $('k-items'), $('k-detail'), [{ title: mine.length && (theirs.length || builtIn.length) ? 'Yours' : '', items: mine.map(item) }, { title: 'From projects', items: theirs.map(item) }, { title: 'Comes with HeartCode', items: builtIn.map(item) }], (x) => {
     if (!x) return h('div', { className: 'card' }, h('h2', { textContent: 'No skills yet' }), h('p', { className: 'sub', textContent: 'A skill is a prompt you use again and again, like "review this" or "write the release notes". Make one with + New skill, install one from GitHub above, or bring them from Claude Code and others with /import in HeartCode.' }))
     const k = x.k
     const f = skillForm(k.name, parseSkill(k.text), { readOnly: !k.mine })
     return h('div', { className: 'card' },
-      h('div', { className: 'row', style: 'justify-content:space-between;align-items:center' }, h('h2', { style: 'margin:0', className: 'mono', textContent: '/skill:' + k.name }), k.mine ? null : h('span', { className: 'tag', textContent: 'from a project: read only' })),
+      h('div', { className: 'row', style: 'justify-content:space-between;align-items:center' }, h('h2', { style: 'margin:0', className: 'mono', textContent: '/skill:' + k.name }), k.mine ? null : h('span', { className: 'tag', textContent: k.builtIn ? 'comes with HeartCode: read only' : 'from a project: read only' })),
       f.el,
       k.mine ? h('div', { className: 'actions' },
         h('button', { className: 'primary', textContent: 'Save', onclick: () => saveItem('skills', k.name, '/api/skill', { name: k.name, was: k.name, text: skillText(f.d) }, `saved /skill:${k.name}`) }),
         h('span', { className: 'spacer' }),
-        h('button', { className: 'danger', textContent: 'Delete', onclick: () => confirm(`Delete the skill /skill:${k.name}?`) && saveItem('skills', k.name, '/api/skill/delete', { name: k.name }, `deleted /skill:${k.name}`) })) : null)
+        h('button', { className: 'danger', textContent: 'Delete', onclick: () => confirm(`Delete the skill /skill:${k.name}?`) && saveItem('skills', k.name, '/api/skill/delete', { name: k.name }, `deleted /skill:${k.name}`) }))
+      : k.builtIn ? h('div', { className: 'actions' },
+        h('button', { textContent: 'Make my own copy', title: 'Saved with your skills under the same name, it replaces this one: change it, or set it to "Only you" to turn it off', onclick: () => saveItem('skills', k.name, '/api/skill', { name: k.name, text: k.text }, `/skill:${k.name} is yours now: change it here`) })) : null)
   })
   $('n-skills').textContent = s.skills.length || ''
 }

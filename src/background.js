@@ -1,7 +1,8 @@
-// Commands that keep running (a dev server, a watcher, a long build): run_command with background
-// true starts one and answers after a few seconds with what it printed so far; the background tool
-// (and /background) reads what it printed since, lists them, stops one. Each runs in its own process
-// group, its output going to a file; all of them are stopped when HeartCode exits.
+// Every command run_command runs: started here, waited on for as long as the model chose, and if
+// it's still running then, it carries on in the background (nothing ever blocks HeartCode); the
+// background tool (and /background) reads what it printed since, waits on it, lists them, stops
+// one. Each runs in its own process group, its output going to a file; all of them are stopped when
+// HeartCode exits.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -23,22 +24,35 @@ const kill = (job, sig) => {
   }
 }
 
-// Started, and after `wait` ms: { job, output } (what it printed so far).
-export async function startJob(root, command, { wait = 3000 } = {}) {
+// Started (it runs on; waitFor waits on it).
+export function startJob(root, command) {
   fs.mkdirSync(DIR, { recursive: true })
   const id = ++made
   const file = path.join(DIR, `${process.pid}-${id}.log`)
   const fd = fs.openSync(file, 'w')
-  const child = spawn(command, { cwd: root, shell: true, detached: group, stdio: ['ignore', fd, fd], env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' } })
+  const child = spawn(command, { cwd: root, shell: true, detached: group, stdio: ['ignore', fd, fd], env: { ...process.env, CI: '1', FORCE_COLOR: '0', NO_COLOR: '1' } })
   fs.closeSync(fd)
   const job = { id, command, root, pid: child.pid, file, started: Date.now(), code: null, read: 0, exited: false, told: false }
   jobs.set(id, job)
-  child.on('error', (e) => fs.appendFileSync(file, `\n${e.message}\n`))
-  child.on('exit', (code, sig) => Object.assign(job, { code: code ?? sig, exited: true, ended: Date.now() }))
+  job.over = new Promise((r) => {
+    const end = (code) => r(Object.assign(job, { code, exited: true, ended: Date.now() }))
+    child.on('error', (e) => (fs.appendFileSync(file, `\n${e.message}\n`), end('error')))
+    child.on('exit', (code, sig) => end(code ?? sig))
+  })
   child.unref()
   log('background', `#${id} started: ${command} (pid ${child.pid})`)
-  await new Promise((r) => setTimeout(r, wait))
-  return { job, output: newOutput(job) }
+  return job
+}
+
+// Until it exits, `ms` pass or `signal` aborts, whichever comes first.
+export function waitFor(job, ms, signal) {
+  if (job.exited || signal?.aborted) return Promise.resolve()
+  return new Promise((r) => {
+    const done = () => (clearTimeout(t), signal?.removeEventListener('abort', done), r())
+    const t = setTimeout(done, ms)
+    job.over.then(done)
+    signal?.addEventListener('abort', done, { once: true })
+  })
 }
 
 // What it printed since the last look (the last `most` characters of it).
@@ -79,11 +93,15 @@ export function stopJob(job) {
   return true
 }
 
-// Stopped (if it still runs) and taken off the list; its log file stays.
+// Stopped (if it still runs) and taken off the list; its log file stays. True when it had exited
+// but left processes running (`server &`): those are stopped too.
 export function removeJob(job) {
+  const left = job.exited && group && kill(job, 0)
+  if (left) kill(job, 'SIGTERM')
   stopJob(job)
   jobs.delete(job.id)
   log('background', `#${job.id} removed: ${job.command}`)
+  return left
 }
 
 // The ones that ended since they were last told about (for the model's next step).

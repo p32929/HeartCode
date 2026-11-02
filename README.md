@@ -55,6 +55,14 @@ tried did what I needed:
 - **Logs each request and its reply** in a file of its own when you switch logging on, so you can
   see what went wrong.
 - **Takes skills, MCP servers and hooks** in Claude Code's formats; `/import` brings yours over.
+- **Knows what each of your models is good at**: the first time it meets a model it looks up its
+  strengths and weaknesses (a web search, summed up in two lines), keeps that in
+  `~/.heart/model-strengths.json` for every project, and gives each part of a job to the model best at it.
+- **Works with discipline by default**: its built-in `discipline` skill (from Karpathy's guidelines,
+  Grill Me, Superpowers, Ponytail and Caveman) has it ask before building, write the least code
+  that works, change only what the task needs, prove it before saying done, then stop, and answer
+  short. A skill with `use: always` is in every message; make your own copy in `/settings` → Skills
+  to change it or turn it off.
 - **Tabs** (`Alt+T`), each with its own conversation, and git worktrees for work kept apart.
 - **Servers and watchers in the background**: the model starts one and goes on working, reads its
   output when it needs to, and stops it. `Alt+B` (or `/background`) shows their logs live above the input,
