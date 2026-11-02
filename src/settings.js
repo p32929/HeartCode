@@ -22,6 +22,10 @@ import { installSkill, findImports } from './importer.js'
 import { capabilities } from './capabilities.js'
 import { connect, sendTelegram, tokenHint, tgReady, EVENTS } from './telegram.js'
 import { searchSettings, testSearxng, ENGINE_NAMES } from './web.js'
+import { loadRankings, rankings, rankIn } from './rankings.js'
+// a model's places in the rankings shown on Your models: { coding, web, vision } as { rank, of, as }
+const RANKED_ON = { coding: 'text:coding', web: 'webdev:webdev', vision: 'vision:overall' }
+const ranksOf = (model, data) => (data ? Object.fromEntries(Object.entries(RANKED_ON).map(([k, list]) => [k, rankIn(model, list, data)])) : null)
 import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays, logSize, clearLogs, LOG_KINDS, kindsOn, listLogRuns, readLog } from './log.js'
 
 const PAGE = new URL('./settings.html', import.meta.url)
@@ -358,7 +362,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     }
   }
 
-  const state = () => ({
+  const state = (ranked = loadRankings()) => ({
     providers: Object.entries(byName(cfg.providers))
       .filter(([n]) => n !== cfg.adhoc)
       .map(([name, p]) => ({ name, baseUrl: p.baseUrl, key: mask(p.apiKey), list: p.list !== false, off: p.off === true, added: p.models ?? [] })),
@@ -366,7 +370,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     model: cfg.model ?? null,
     version: VERSION,
     update: (({ latest } = {}) => (cfg.updateCheck !== false && latest && newer(latest, VERSION) ? latest : null))(readJson(path.join(HOME, 'update-check.json'), {})), // the day's answer from npm: no request here
-    order: [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then].map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t) })),
+    order: [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then].map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t), ranks: ranksOf(t.model, ranked) })),
+    rankings: ranked && { fetched: ranked.fetched, source: ranked.source },
     rotation: (({ then, ...opts }) => opts)(rotationOf(cfg)),
     settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), logs: kindsOn(cfg), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg), testTimeout: Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10, modelChoice: cfg.modelChoice === 'fit' ? 'fit' : 'order', replyStart: Number(cfg.replyStart) > 0 ? Number(cfg.replyStart) : 60 },
     logs: { runs: tilde(path.join(LOGS, 'runs')), requests: tilde(REQUESTS) },
@@ -387,6 +392,11 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
 
   const routes = {
     'GET /api/state': () => state(),
+    // the public rankings, fetched now (Get rankings / Refresh on Your models)
+    'POST /api/rankings': async () => {
+      if (!(await rankings({ now: true }))) throw new Error("couldn't get the rankings (huggingface.co)")
+      return state()
+    },
     'GET /api/log-size': () => logSize(),
     'POST /api/prefs': ({ key, value }) => {
       if (!PREF_KEYS.includes(key)) throw new Error(`no such choice: ${key}`)

@@ -565,24 +565,18 @@ Put them together now: read what they changed, make what's still needed between 
 <!-- Added to the todo tool's result once a message, when a plan has three or more open parts and none runs side by side or on another model. -->
 (Could any of these parts run side by side, or go to one of your models that's better at it? If so, mark them (parallel, model, files) and save the list again; if not, go on.)
 
-## pick-models
+## pick-skills
 
-<!-- Its own request at the start of a message, in "best fit" mode (models picked by strengths, not the list's order). {{task}}: the user's message; {{choices}}: what they said about how to do it; {{list}}: the models that can do the job, numbered, with what each can do, is good and weak at, and how it did in the user's test; {{seers}}: the models that can see images, numbered. -->
-Pick which AI models should handle this coding task. The task:
+<!-- Its own request at the start of a message, in "best fit" mode: the skills the task needs, so your models can be ranked for it (rankings.js). {{task}}: the user's message; {{choices}}: their answers about how to do it; {{skills}}: the skills to choose from, one per line. -->
+Which skills does this coding task need most? The task:
 {{task}}
 {{#if choices}}How the user wants it: {{choices}}
 {{/if}}
-The models that can do it (numbered):
-{{list}}
+The skills:
+{{skills}}
 
-The models that can look at images (numbered on their own):
-{{seers}}
-
-Choose by what this task needs most (UI, a hard bug, reasoning, a long file, speed for a simple job) and by what each is good and weak at; a model that failed its test, last. Reply with exactly four lines and nothing else:
-work: the numbers of the first list, best first (the first does the task; the next take over if it fails) — 3 to 5 of them
-review: 2 numbers of the first list, the best at checking code (not the first of "work")
-look: 1 or 2 numbers of the second list, the best at judging how a page looks
-why: a few words on what the task needs
+Name the 1 to 3 that matter most for doing it well, most important first (a browser game: webdev-html, coding; a bug in a server: coding, hard; a big refactor: coding, long-input). Reply with one line and nothing else:
+skills: name, name
 
 ## same-spot
 

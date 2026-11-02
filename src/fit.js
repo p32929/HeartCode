@@ -1,12 +1,15 @@
-// "Best fit" (modelChoice: 'fit'): your models are a pool, not a ranking. For each new message one
-// short request to the model in use ranks the ones that can do the job (tools, images, room for the
-// conversation: checked here) by what each is good and weak at and how it did in your tests: who
-// works on it (and who next when that one fails), who reviews the work, who looks at pages. Your
-// list's order only breaks ties. A message that only says to go on keeps the last pick.
+// "Best fit" (modelChoice: 'fit'): for each new message, your models ranked by how good each is at
+// what this message needs — by public rankings (rankings.js), not by a model's opinion of models.
+// One short request names the skills the task needs (web pages, code, images…); the rest is
+// arithmetic: who leads the work (and who next when one fails), who reviews the code (not the
+// lead), who judges the pages (one that sees, not the lead). A model the rankings don't know comes
+// after those they do, in your order. A message that only says to go on keeps the last pick.
+// "Your order" (the default): none of this — your list as you set it.
 import { prompt } from './prompts.js'
 import { loadStrengths, strengthKey } from './strengths.js'
 import { readJson, HOME } from './config.js'
 import { log } from './log.js'
+import { rankings, score, SKILLS } from './rankings.js'
 import path from 'node:path'
 
 const name = (t) => `${t.provider} ${t.model}`
@@ -27,40 +30,53 @@ export function modelFacts(t) {
     .join('; ')
 }
 
+// The skills this task needs, from SKILLS: { work: [...] } — asked of the model in use (naming
+// what a task needs is easy; judging models is what the rankings are for). ['coding'] when it can't say.
+async function skillsFor(s, task, signal) {
+  const ask = prompt('agent/pick-skills', { task: task.slice(0, 1500), choices: (s.chat.choices ?? []).join('; '), skills: Object.entries(SKILLS).map(([k, [, , what]]) => `${k}: ${what}`).join('\n') })
+  const was = s.client.purpose
+  s.client.purpose = 'pick-skills'
+  try {
+    const said = (await s.client.chat({ messages: [{ role: 'user', content: ask }] }, { signal: AbortSignal.any([AbortSignal.timeout(30_000), ...(signal ? [signal] : [])]) })).content
+    const line = /^\W*skills?\W*:\s*(.+)$/im.exec(said)?.[1] ?? said
+    const named = Object.keys(SKILLS).filter((k) => new RegExp(`(^|[^\\w-])${k}($|[^\\w-])`, 'i').test(line))
+    return named.length ? named : ['coding']
+  } catch (e) {
+    if (signal?.aborted) throw e
+    log('fit', `no skills named (${e.message}): coding`)
+    return ['coding']
+  } finally {
+    s.client.purpose = was
+  }
+}
+
 // { work, review, look, why } (names, best first), kept in chat.fit; null when there's nothing to choose.
 export async function pickModels(s, task, signal, { images = 0, size = 0 } = {}) {
   const all = s.allModels?.() ?? []
   const can = all.filter((t) => t.tools && (!images || t.images) && (!size || !t.context || t.context > size * 1.2))
   if (can.length < 2) return null
   if (GO_ON.test(task) && s.chat.fit) return s.chat.fit // the same work: the same models (and the provider's cache still holds)
-  const list = can.map((t, i) => `${i + 1}. ${name(t)}: ${modelFacts(t)}`).join('\n')
-  const seers = all.filter((t) => t.images)
-  const ask = prompt('agent/pick-models', { task: task.slice(0, 1500), choices: (s.chat.choices ?? []).join('; '), list, seers: seers.map((t, i) => `${i + 1}. ${name(t)}: ${modelFacts(t)}`).join('\n') })
-  s.ui.spinner('picking the best of your models for this')
-  const was = s.client.purpose
-  s.client.purpose = 'pick-models'
-  let said = ''
-  try {
-    said = (await s.client.chat({ messages: [{ role: 'user', content: ask }] }, { signal })).content
-  } catch (e) {
-    if (signal?.aborted) throw e
-    log('fit', `no pick (${e.message}): your order`)
-    return null
-  } finally {
-    s.client.purpose = was
-    s.ui.stopSpin()
+  const data = await rankings({ signal, onWait: () => s.ui.spinner('getting the model rankings (once a week)') })
+  s.ui.stopSpin()
+  if (!data) return null
+  s.ui.spinner('what does this task need')
+  const skills = await skillsFor(s, task, signal)
+  s.ui.stopSpin()
+  if (images && !skills.includes('vision')) skills.push('vision')
+  // best first by score; not ranked: after, in your order
+  const ranked = (models, wanted) =>
+    models
+      .map((t, i) => ({ t, i, sc: score(t.model, wanted, data) }))
+      .sort((a, b) => (a.sc ?? 2) - (b.sc ?? 2) || a.i - b.i)
+  const order = ranked(can, skills)
+  const lead = name(order[0].t)
+  const fit = {
+    work: order.map((x) => name(x.t)),
+    review: ranked(can, ['coding', 'hard']).filter((x) => x.sc != null).map((x) => name(x.t)).filter((n) => n !== lead).slice(0, 2),
+    look: ranked(all.filter((t) => t.images), ['vision']).filter((x) => x.sc != null).map((x) => name(x.t)).filter((n) => n !== lead).slice(0, 2),
+    why: skills.join(', '),
   }
-  const line = (w) => new RegExp(`^\\W*${w}\\W*:\\s*(.+)$`, 'im').exec(said)?.[1] ?? ''
-  const numbers = (w, from) => [...new Set([...line(w).matchAll(/\d+/g)].map((m) => from[Number(m[0]) - 1]).filter(Boolean).map(name))]
-  const byName = (w, from) => from.filter((t) => line(w).toLowerCase().includes(t.model.toLowerCase())).map(name)
-  const pick = (w, from) => (numbers(w, from).length ? numbers(w, from) : byName(w, from))
-  const work = pick('work', can)
-  if (!work.length) {
-    log('fit', `no usable pick: ${said.slice(0, 200)}`)
-    return null
-  }
-  const fit = { work, review: pick('review', can), look: /\d/.test(line('look')) ? [...new Set([...line('look').matchAll(/\d+/g)].map((m) => seers[Number(m[0]) - 1]).filter(Boolean).map(name))] : byName('look', seers), why: line('why').slice(0, 120) }
-  log('fit', fit)
+  log('fit', { skills, scores: order.slice(0, 8).map((x) => `${x.t.model} ${x.sc == null ? 'not ranked' : x.sc.toFixed(2)}`), review: fit.review, look: fit.look })
   s.chat.fit = fit
   return fit
 }

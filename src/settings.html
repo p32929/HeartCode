@@ -407,9 +407,9 @@
   .pill .again:hover:not(:disabled) { color: var(--text); }
   .pill.on { border-color: var(--accent); background: var(--accent-soft); }
   .pill.on .again { border-left-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-  .mt-h, .mtable li { display: grid; grid-template-columns: 14px 18px 44px minmax(240px, 1fr) 110px 62px 52px 70px 58px 116px 84px 132px; /* the last: Test · Request · Edit · ✕, as wide as they are */ align-items: center; column-gap: 6px; padding: 8px 18px; }
+  .mt-h, .mtable li { display: grid; grid-template-columns: 14px 18px 44px minmax(240px, 1fr) 110px 62px 52px 70px 58px 58px 58px 58px 116px 84px 132px; /* the last: Test · Request · Edit · ✕, as wide as they are */ align-items: center; column-gap: 6px; padding: 8px 18px; }
   .mt-h button.mid, .mtable .mid { text-align: center; }
-  .mt-h > :nth-child(11), .mtable .try { padding-left: 12px; } /* Works?: a little room after the right-aligned price */
+  .mt-h > :nth-child(14), .mtable .try { padding-left: 12px; } /* Works?: a little room after the right-aligned price */
   .mtable li .acts { justify-content: flex-start; }
   .mt-h { border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 500; color: var(--faint); padding-top: 10px; padding-bottom: 10px; background: var(--panel2); }
   .mt-h button { display: inline; border: 0; background: none !important; padding: 0; font: inherit; color: inherit; text-align: left; white-space: nowrap; transform: none !important; }
@@ -428,6 +428,8 @@
   .mtable:not(.drag) .grip { visibility: hidden; }
   .mtable .n { font-weight: 650; color: var(--faint); }
   .mtable li:first-child .n { color: var(--accent); }
+  .mtable .rk { color: var(--muted); }
+  .mtable .rk.top { color: var(--ok); font-weight: 600; }
   .mtable .m { font-family: var(--mono); font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mtable .p { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mtable .yes { color: var(--ok); }
@@ -1304,6 +1306,7 @@ const DOING = {
   '/api/telegram/connect': 'Checking the token with Telegram',
   '/api/telegram/test': 'Sending a test message',
   '/api/search/test': 'Trying a search on your SearXNG',
+  '/api/rankings': 'Getting the public model rankings',
   '/api/models-dev': null, // its own strip
 }
 let acting = 0
@@ -2209,6 +2212,8 @@ const COLS = {
   tools: { label: 'Tools', first: 'down', get: (t) => can(t).tools, words: ['without first', 'with first'] },
   thinking: { label: 'Thinking', first: 'down', get: (t) => can(t).thinking, words: ['without first', 'with first'] },
   images: { label: 'Images', first: 'down', get: (t) => can(t).images, words: ['without first', 'with first'] },
+  // its place in a public ranking (LMArena), by its share of the list: not ranked, last
+  ...Object.fromEntries([['coding', 'Coding'], ['web', 'Web apps'], ['vision', 'Vision']].map(([k, label]) => [k, { label, first: 'up', get: (t) => (t.ranks?.[k] ? t.ranks[k].rank / t.ranks[k].of : null), words: ['best first', 'worst first'] }])),
   input: { label: 'In $/M', first: 'up', get: (t) => t.price?.input ?? null, words: ['cheapest first', 'priciest first'] },
   output: { label: 'Out $/M', first: 'up', get: (t) => t.price?.output ?? null, words: ['cheapest first', 'priciest first'] },
   // in and out together, per million tokens
@@ -2434,8 +2439,8 @@ function drawMine(s) {
   const cell = (label, about, ...control) => h('label', { className: 'mt-set', title: about }, h('span', { className: 'mt-setl', textContent: label }), h('span', { className: 'mt-setc' }, ...control))
   const fit = S.settings.modelChoice === 'fit'
   const settings = h('div', { className: 'mt-sets' },
-    cell('HeartCode picks the model by', fit ? 'for each new message, the models that suit it best (what each is good and weak at, and your tests); your order breaks ties' : 'your order: #1 works, the next takes over when it fails',
-      h('select', { onchange: (e) => act('/api/setting', { name: 'modelChoice', value: e.target.value }, e.target.value === 'fit' ? 'models picked for each task by their strengths' : 'models used in your order') },
+    cell('HeartCode picks the model by', fit ? 'for each new message, your models ranked by public rankings (LMArena, fetched once a week) on the skills it needs: web pages, code, images…; models not ranked come after, in your order' : 'your order: #1 works, the next takes over when it fails',
+      h('select', { onchange: (e) => act('/api/setting', { name: 'modelChoice', value: e.target.value }, e.target.value === 'fit' ? 'models picked for each task by public rankings' : 'models used in your order') },
         [['order', 'your order'], ['fit', 'best fit per task']].map(([v, t]) => h('option', { value: v, textContent: t, selected: S.settings.modelChoice === v })))),
     cell('When a model fails', ro.on === 'retries' ? 'a rate limit or outage: that model is tried again that many times first; any other error moves on at once' : "any error moves on at once, to another provider's model first",
       h('select', { onchange: (e) => saveOrder(S.order, 'saved', { on: e.target.value }) },
@@ -2467,6 +2472,7 @@ function drawMine(s) {
       testingAll && SORT.some((x) => x.key === 'works') ? h('span', { className: 'sort-live', textContent: 'tests running: the order moves as results come in' }) : null,
       filtering() || SORT.length ? h('button', { className: 'small ghost', textContent: 'Clear all', title: 'every filter and the sort off: your whole list, in your order', onclick: clearView }) : null),
     h('div', { className: 'mt-do' },
+      h('button', { className: 'small', textContent: S.rankings ? 'Refresh rankings' : 'Get rankings', title: `${S.rankings ? `rankings from ${new Date(S.rankings.fetched).toLocaleDateString()}; ` : ''}each model's place in LMArena's public rankings (coding, web apps, vision): best fit picks by them, and gets them again once a week`, onclick: () => act('/api/rankings', {}, 'rankings updated') }),
       h('button', { className: 'small', textContent: filtered ? `Test ${n(shown.length)} shown` : 'Test all', disabled: testingAll || !shown.length, title: `send ${filtered ? 'the models shown' : 'each model'} a short message to see which really answer`, onclick: () => tryAll(filtered ? shown : order) }),
       h('button', { className: 'small primary', textContent: filtered ? `Use these ${n(view.length)}` : 'Save list', disabled: !view.length || order.length < 2, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : 'save the list in the order shown (#1 first)', onclick: saveList })))
 
@@ -2488,7 +2494,7 @@ function drawMine(s) {
           h('button', { className: 'small ghost', textContent: 'Invert', title: "select the ones shown that aren't selected, unselect the ones that are", onclick: () => (view.forEach((t) => (PICKED.has(keyOf(t)) ? PICKED.delete(keyOf(t)) : PICKED.add(keyOf(t)))), (lastPicked = null), drawMine(S)) }),
           h('button', { className: 'small ghost', textContent: 'Select none', onclick: () => (PICKED.clear(), drawMine(S)) })))
     : h('div', { className: 'mt mt-h' }, h('span'), selectAll,
-        h('span', { textContent: '#', title: 'its place in your list' }), head('model'), head('provider'), head('context', 'num'), head('tools', 'mid'), head('thinking', 'mid'), head('images', 'mid'), head('price', 'num'), head('works'), h('span', { className: 'num', textContent: '' }))
+        h('span', { textContent: '#', title: 'its place in your list' }), head('model'), head('provider'), head('context', 'num'), head('tools', 'mid'), head('thinking', 'mid'), head('images', 'mid'), head('coding', 'num'), head('web', 'num'), head('vision', 'num'), head('price', 'num'), head('works'), h('span', { className: 'num', textContent: '' }))
   const table = view.length ? h('ol', { className: 'mtable' + (view.length < 2 ? '' : ' drag') }) : null
   // ticked or not; with Shift, every row from the last one ticked to this one
   const pick = (i, e) => {
@@ -2536,6 +2542,12 @@ function drawMine(s) {
 }
 // the table's cells: yes or no; where what it can do comes from
 const yes = (v) => h('span', { className: (v ? 'yes' : 'no') + ' mid', textContent: v ? '✓' : '–' })
+// its place in LMArena's ranking of that skill (#1 is the best of all models there); the top tenth stands out
+const RANK_OF = { coding: 'coding', web: 'web apps (WebDev)', vision: 'vision' }
+const rankCell = (t, k) => {
+  const r = t.ranks?.[k]
+  return h('span', { className: 'num rk' + (r && r.rank / r.of <= 0.1 ? ' top' : ''), textContent: r ? `#${r.rank}` : '–', title: r ? `#${r.rank} of ${r.of} models in LMArena's ${RANK_OF[k]} ranking (as "${r.as}")` : S.rankings ? `not in LMArena's ${RANK_OF[k]} ranking` : 'no rankings yet: Get rankings, above the list' })
+}
 const src = (t) => {
   const x = t.tested
   if (!x) return h('div', { className: 'src', textContent: 'looking it up…' })
@@ -2563,6 +2575,7 @@ function tableRow(t, at, pick) {
     h('span', { className: 'p', textContent: isOff(t.provider) ? `${t.provider} · off` : t.provider, title: t.provider }),
     h('span', { className: 'num', textContent: ctx ? `${t.tested?.sure === false ? '~' : ''}${kTok(ctx)}` : '–', title: ctx ? `${ctx.toLocaleString()} tokens${t.tested?.sure === false ? ' (assumed: the server and models.dev don\'t say)' : ''}` : '' }),
     yes(c.tools), yes(c.thinking), yes(c.images),
+    rankCell(t, 'coding'), rankCell(t, 'web'), rankCell(t, 'vision'),
     h('span', { className: 'num price', textContent: priceOf(t), title: t.price ? `in ${money(t.price.input)} · out ${money(t.price.output)} per million tokens` : 'price not known' }),
     triedCell(t),
     h('span', { className: 'acts' },

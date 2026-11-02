@@ -715,6 +715,7 @@ export class Client {
           if (tc.id) call.id = tc.id
           if (tc.function?.name) call.function.name ||= tc.function.name
           if (tc.function?.arguments) call.function.arguments += tc.function.arguments
+          if (tc.extra_content) call.extra_content = { ...call.extra_content, ...tc.extra_content } // Gemini's thought_signature: refused next time without it
           onToolDelta?.(call.function.name, call.function.arguments)
           watch(`call ${i}`, call.function.arguments)
         }

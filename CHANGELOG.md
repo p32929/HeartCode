@@ -2,6 +2,21 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.39 (2026-11-03)
+
+- **Best fit picks by public rankings**, not by a model's opinion of models: for each new message,
+  one short request names the skills the task needs (web pages, code, images, long inputs…), and
+  your models are ranked by their places in LMArena's rankings of those skills (people comparing
+  two models' answers, per skill). The best becomes the lead, the next take over when it fails; the
+  code review and the page review go to the best-ranked others (not the lead). Models the rankings
+  don't know come after, in your order. The rankings are fetched once a week into
+  ~/.heart/rankings.json, and only in best fit: with "your order", your list is followed as it is.
+- **Your models shows each model's ranks**: Coding, Web apps and Vision columns (its place in
+  LMArena's ranking; the top tenth in green), sortable like the others, with Get rankings /
+  Refresh rankings above the list.
+- **Gemini 3.x works with tools**: the thought signature Gemini sends with each tool call is kept
+  and sent back, so its second step is no longer refused (400 "missing a thought_signature").
+
 ## 0.1.38 (2026-11-02)
 
 - **Asks what you want before building**: the questions whose answers change the result (what it's
