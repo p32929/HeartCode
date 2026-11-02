@@ -105,7 +105,7 @@ setTheme()
 
 // keybindings.json: { "ctrl+o": "cycle_permissions", "ctrl+g": "/toggle_thinking", "shift+tab": "none" }.
 // Actions: stop, send_first, send_all, queue_mode, cycle_permissions, newline, clear_input, scroll_up, scroll_down (a page),
-// scroll_line_up, scroll_line_down (3 lines), voice, new_tab,
+// scroll_line_up, scroll_line_down (3 lines), scroll_top, scroll_bottom, voice, new_tab,
 // close_tab, next_tab, prev_tab, tab_1…tab_9, none (turns a
 // built-in key off); anything else is sent as typed (a /command or a message). Ctrl+C stays Ctrl+C.
 const CONTROL_KEYS = { '\x1c': 'ctrl+\\', '\x1d': 'ctrl+]', '\x1e': 'ctrl+^', '\x1f': 'ctrl+_' } // no name from readline
@@ -117,8 +117,9 @@ export const keyId = (key, s = '') => CONTROL_KEYS[key.sequence ?? s] ?? [key.ct
 // Alt+A all of them (as one message); Alt+M switches what goes when an answer is done (all or the
 // next one). /voice records (Space in an empty box, or a key in keybindings.json); Alt+T, Alt+W,
 // Alt+N/P (or Ctrl+PgDn/PgUp), Alt+1…9: tabs; Shift+↑↓ and Alt+↑↓ scroll the conversation (as
-// PgUp/PgDn and the mouse wheel do). keybindings.json can move any of them.
-export const DEFAULT_KEYS = { 'alt+b': 'background_log', 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', 'ctrl+pagedown': 'next_tab', 'ctrl+pageup': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
+// PgUp/PgDn and the mouse wheel do), Alt+Shift+↑↓ (or Ctrl+Home/End) to its top and bottom.
+// keybindings.json can move any of them.
+export const DEFAULT_KEYS = { 'alt+b': 'background_log', 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+shift+up': 'scroll_top', 'alt+shift+down': 'scroll_bottom', 'ctrl+home': 'scroll_top', 'ctrl+end': 'scroll_bottom', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', 'ctrl+pagedown': 'next_tab', 'ctrl+pageup': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
 export function loadKeys(file = path.join(HOME, 'keybindings.json')) {
   let raw = {}
   try {
@@ -1036,7 +1037,7 @@ export class UI {
   // The conversation scrolls (rows up, negative: down); the tabs, the input and the status bar stay.
   scrollBy(n) {
     if (!this.full || this.out.hidden) return
-    this.scroll = Math.max(0, this.scroll + n)
+    this.scroll = Math.max(0, this.scroll + n) // Infinity: the top (render keeps it in range)
     this.render()
   }
   page() {
@@ -1124,7 +1125,7 @@ export class UI {
       bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(this.#label())}`, cols))
       if (timer) bottom.push(fit(`  ${c.faint(timer)}`, cols))
     }
-    if (this.scroll) bottom.push(c.dim(`  ↓ ${this.scroll} more lines below · scroll down, Shift+↓ or PgDn`))
+    if (this.scroll) bottom.push(c.dim(`  ↓ ${Number.isFinite(this.scroll) ? this.scroll : 'more'} lines below · held here while you read · Alt+Shift+↓ to the bottom`))
     if (this.ahead.length) {
       const key = (k, d) => `${c.muted(k)} ${c.faint(d)}`
       const sep = c.ghost(' · ')
@@ -1139,6 +1140,9 @@ export class UI {
     const inputTop = rows - below.length - inputRows + 1 // first row of the input
     const avail = Math.max(0, inputTop - 1 - bottom.length - head.length)
     const all = this.#rows(cols)
+    // scrolled up: what you're reading stays put while new lines come in below (back at the bottom: it follows again)
+    if (this.scroll && this.rowsWere && this.rowsCols === cols && all.length > this.rowsWere) this.scroll += all.length - this.rowsWere
+    ;[this.rowsWere, this.rowsCols] = [all.length, cols]
     this.scroll = Math.min(this.scroll, Math.max(0, all.length - avail))
     const top = Math.max(0, all.length - avail - this.scroll)
     const view = all.slice(top, top + avail)
@@ -1452,6 +1456,9 @@ export class UI {
       case 'scroll_line_up':
       case 'scroll_line_down':
         return this.scrollBy(what === 'scroll_line_up' ? 3 : -3)
+      case 'scroll_top':
+      case 'scroll_bottom':
+        return this.scrollBy(what === 'scroll_top' ? Infinity : -Infinity)
     }
     if (!this.asking) {
       this.ahead.push(what)

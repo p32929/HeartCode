@@ -7,6 +7,7 @@ import { probe, loadProfile, strategy, describe, profilePath, profileFrom } from
 import { learnFromUsage, LIMIT_MS } from '../src/context.js'
 import { Session, transcript, contextReport } from '../src/agent.js'
 import { listJobs, getJob, stopJob, removeJob, runningJobs, tailLines, ago as ranFor } from '../src/background.js'
+import { checkUpdate, installKind, UPDATE_COMMANDS, packageDir, whatsNew } from '../src/update.js'
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
 import { UI, c, PERMISSIONS, duration, copyText, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width } from '../src/ui.js'
 import { listFiles, runCommand, clip } from '../src/tools.js'
@@ -80,6 +81,7 @@ ${c.bold('headless')} (for other programs; flags and output as in Claude Code's 
       --skills-dir <dir>             more skills (repeatable)
       --allowedTools <list>          only these tools (HeartCode's or Claude Code's names: Read, Edit, Bash…)
       --disallowedTools <list>       never these tools
+      --model-choice <order|fit>     your models' order (#1, then the next), or the best fit for each task
       --permission-mode <m>          all, commands, ask, plan (or bypassPermissions, acceptEdits, default);
                                      --dangerously-skip-permissions = all. Nothing is asked: the rest is declined
       --session-id <id>              start (or continue) the session with this id
@@ -93,7 +95,7 @@ ${c.bold('headless')} (for other programs; flags and output as in Claude Code's 
 ${c.bold('editors')}  heartcode --acp   the Agent Client Protocol on stdin/stdout (Zed, JetBrains, Neovim)
 
 ${c.bold('env')}  HEART_BASE_URL, HEART_MODEL, HEART_API_KEY (or OPENAI_BASE_URL / OPENAI_API_KEY)
-     HEART_LOG=<file>  where heart logs everything it does (default: ~/.heart/logs/, one per run; off: none)
+     HEART_LOG=<file>  every kind of log of this run in that one file, whatever is switched on (off: none)
 
 ${c.bold('in a session')}  attach an image with @path/to/shot.png · /help for commands`
 
@@ -126,6 +128,7 @@ const SECTIONS = [
     ['/import', 'bring commands, skills, MCP servers and memory from other CLIs'],
     ['/install_skill', 'install a skill from a GitHub repo or a SKILL.md URL (add --project for this folder only)', true],
     ['/doctor', 'check the outside tools HeartCode features need (voice, browser, git) and what to install'],
+    ['/update', 'install the newest HeartCode (shows what changed first)'],
     ['/mcp', 'your MCP servers and whether each needs signing in'],
     ['/login_mcp', 'sign in (again) to a remote MCP server', true],
     ['/compact', 'summarize the conversation to free up context (add what to keep)', true],
@@ -171,6 +174,7 @@ function keysHelp(keys = {}) {
     [forAct('send_all'), 'queue: send all now'],
     [forAct('queue_mode'), 'queue: one by one, or all together'],
     [[forAct('scroll_up'), forAct('scroll_down')].filter(Boolean).join(' / '), 'scroll the conversation a page'],
+    [[forAct('scroll_top'), forAct('scroll_bottom')].filter(Boolean).join(' / '), 'to the top / bottom of the conversation (scrolled up, it stays put while the answer comes in)'],
     [[forAct('scroll_line_up'), forAct('scroll_line_down')].filter(Boolean).join(' / '), 'scroll a few lines'],
     ['Ctrl+C', 'stop · twice quits HeartCode'],
     ['Drag', 'select and copy: the conversation, a dialog, the folder, the input, the status bar'],
@@ -374,6 +378,7 @@ class App {
     // to the window (a command can run for minutes). Nothing goes on with an old copy.
     client.refresh = () => {
       syncSettings()
+      client.startMs = 1000 * (Number(this.cfg.replyStart) > 0 ? Number(this.cfg.replyStart) : 60) // a reply must start within this, else the next model
       if (stampOf(profilePath(client)) !== stamp) client.onUse({ provider: client.provider, model: client.model })
     }
     // What this run learned about the model, onto its file as it is now: the rest (what you set up for
@@ -674,7 +679,7 @@ class App {
     const rotated = rot && rot.at > 0
     const name = rotated ? c.yellow('↻ ' + now.model) : c.info(now.model)
     const model =
-      count === 1 ? name : cfg.session ? `${name} ${c.faint(`(${count} chosen)`)}` : `${c.muted('auto')} ${c.faint('(')}${name}${c.faint(')')} ${c.faint(`(${count})`)}`
+      count === 1 ? name : cfg.session ? `${name} ${c.faint(`(${count} chosen)`)}` : `${c.muted(fitMode(cfg) ? 'best fit' : 'auto')} ${c.faint('(')}${name}${c.faint(')')} ${c.faint(`(${count})`)}`
     const key = `${now.provider}/${now.model}`
     if (this.profileKey !== key) [this.profileKey, this.profile] = [key, this.s?.profile ?? loadProfile(this.client(now.provider, now.model))]
     const profile = this.s?.profile ?? this.profile
@@ -692,6 +697,7 @@ class App {
       autocompact: cfg.autoCompact === false ? c.faint('auto-compact off') : null,
       worktree: this.worktree ? c.info(`⎇ ${this.worktree.branch}`) : null,
       background: runningJobs(this.root).length ? c.info(`⚙ ${runningJobs(this.root).length} running`) + c.faint(' Alt+B') : null,
+      update: this.update?.newer ? c.green(`⬆ ${this.update.latest}`) + c.faint(' /update') : null,
       permissions: { all: c.green('⏵⏵ all allowed'), commands: c.yellow('ask before commands'), ask: c.yellow('ask before changes'), plan: c.info('⏸ plan mode') }[ui.permission],
     }
     if (strat) {
@@ -707,8 +713,8 @@ class App {
     const sep = c.ghost(' │ ')
     const vis = (str) => width(str.replace(/\x1b\[[0-9;]*m/g, ''))
     let layout = Array.isArray(cfg.statusBar) && cfg.statusBar.length ? cfg.statusBar : DEFAULT_STATUS
-    // commands running in the background are shown also on a bar laid out before there was this item
-    if (parts.background && !JSON.stringify(layout).includes('"background"')) layout = [...layout.slice(0, -1), ...layout.slice(-1).map((row) => (Array.isArray(row) ? { left: row, right: ['background'] } : { ...row, right: ['background', ...(row.right ?? [])] }))]
+    // background commands and a newer HeartCode are shown also on a bar laid out before there were these items
+    for (const id of ['update', 'background']) if (parts[id] && !JSON.stringify(layout).includes(`"${id}"`)) layout = [...layout.slice(0, -1), ...layout.slice(-1).map((row) => (Array.isArray(row) ? { left: row, right: [id] } : { ...row, right: [id, ...(row.right ?? [])] }))]
     const line = (row) => {
       const names = (g) => (g ?? []).map((t) => parts[t]).filter(Boolean).join(sep)
       const left = names(Array.isArray(row) ? row : row?.left)
@@ -772,6 +778,8 @@ class App {
     Object.assign(this.s, { noFormat: cfg.format === false, noLsp: cfg.lsp === false })
     Object.assign(this.s, { mcp: this.mcp, memory: this.memory, skills: this.skills, director: this.director })
     this.s.team = () => this.team() // your other models: a job this one can't do goes to one of them
+    this.s.allModels = () => this.sessionModels().map((t) => ({ ...t, ...this.abilities(t) })) // all of them, for a best-fit pick
+    this.s.fitMode = () => fitMode(this.cfg) // models picked by strengths per message, not by the list's order
     this.s.engineFor = (t) => this.engine(t.provider, t.model, ui, undefined, { quiet: true })
     // A model's context window, read from its saved profile (no probe, no network): so the agent can
     // see, before compacting, whether another model in the list has room for the whole conversation.
@@ -1169,6 +1177,10 @@ let settingsPage = null
 
 // The browser, with a page. Windows: its URL handler (cmd's start mangles a URL whose arguments
 // it reads as its own, and wants a quoted empty title first).
+// How HeartCode picks your models: "fit" (by strengths, per message) or your order; --model-choice for this run wins.
+let modelChoiceFlag
+const fitMode = (cfg) => (modelChoiceFlag ?? cfg.modelChoice) === 'fit'
+
 function openBrowser(url) {
   if (process.env.HEART_NO_BROWSER) return
   const [cmd, ...args] = process.platform === 'darwin' ? ['open', url] : process.platform === 'win32' ? ['rundll32', 'url.dll,FileProtocolHandler', url] : ['xdg-open', url]
@@ -1182,7 +1194,7 @@ function applySettings(apps, cfg, what) {
   const before = themeCodes()
   if (what === 'theme' || what === 'setting:theme') setTheme(cfg.theme)
   if (what === 'prompts') reloadPrompts()
-  if (['setting:log', 'setting:logRequests', 'setting:logDetail'].includes(what)) useRequestLog(cfg) // the run's log and the requests', on or off now
+  if (['setting:logs', 'setting:log', 'setting:logRequests', 'setting:logDetail'].includes(what)) useRequestLog(cfg) // each kind of log, on or off now
   if (what === 'setting:logDays') pruneLogs(logDays(cfg))
   settingsSeen(what) // the watcher (watchSettings) mustn't take it in a second time
   for (const app of apps) {
@@ -1441,6 +1453,28 @@ async function slash(app, line, working = false) {
     }
     case 'help':
       return ui.showText('Commands and keys', app.help())
+    case 'update': {
+      ui.spinner('asking npm for the newest HeartCode')
+      const u = await checkUpdate({ force: true })
+      ui.stopSpin()
+      if (!u) return ui.warn("couldn't reach npm to check for a newer HeartCode")
+      app.update = u
+      ui.render?.()
+      if (!u.newer) return ui.print(c.dim(`HeartCode ${u.current} is the newest`))
+      const kind = installKind()
+      const notes = await whatsNew(u.current, u.latest)
+      if (kind === 'git') return ui.showText(`HeartCode ${u.latest} is out (you have ${u.current})`, `${notes || '(no changelog found)'}\n\nThis HeartCode runs from a git checkout (${packageDir}): update it there with git pull.`)
+      const cmd = UPDATE_COMMANDS[kind]
+      ui.showText(`HeartCode ${u.latest} is out (you have ${u.current})`, notes || '(no changelog found)')
+      if ((await ui.confirm(`Update now with ${c.bold(cmd)}?`, 'command')) !== true) return ui.print(c.dim('not updated'))
+      ui.spinner(`running ${cmd}`)
+      const r = await runCommand(process.cwd(), cmd, { timeout: 300_000 })
+      ui.stopSpin()
+      if (r.code !== 0) return ui.warn(`the update failed (exit ${r.code}): ${r.output.trim().split('\n').slice(-3).join(' · ')}`)
+      app.update = { ...u, newer: false }
+      ui.render?.()
+      return ui.print(`${c.green('✓')} HeartCode ${u.latest} installed ${c.dim('· restart HeartCode to use it (/exit, then heart)')}`)
+    }
     case 'select_model':
       return app.pickModel(args, working)
     case 'rename': {
@@ -1805,6 +1839,16 @@ async function repl(app, f = {}) {
   // models this folder picked earlier (/select_model): said, with the way back to your whole list
   if (app.folderModels && cfg.session?.length) ui.print(`${c.muted('this folder uses')} ${c.cyan(cfg.session.map((t) => t.model).join(', '))} ${c.faint(`(picked earlier) · ${c.cyan('/select_model auto')} for your whole list again`)}`)
   app.tabs?.onChange?.() // the conversation it opened with
+  // a newer HeartCode: asked in the background (once a day at most), said once and kept in the status bar
+  if (cfg.updateCheck !== false)
+    checkUpdate()
+      .then((u) => {
+        if (!u?.newer) return
+        app.update = u
+        ui.print(`${c.green('⬆')} ${c.muted('HeartCode')} ${c.green(u.latest)} ${c.muted(`is out (you have ${u.current})`)} ${c.faint('·')} ${c.cyan('/update')}`)
+        ui.render?.()
+      })
+      .catch(() => {})
   for (;;) {
     const line = await ui.ask(` ${c.magenta('♥')} `, { suggest: true, initial: app.nextInput, history: true })
     app.nextInput = undefined
@@ -1892,6 +1936,7 @@ async function main() {
       disallowedTools: { type: 'string', multiple: true },
       'disallowed-tools': { type: 'string', multiple: true },
       'permission-mode': { type: 'string' },
+      'model-choice': { type: 'string' },
       'dangerously-skip-permissions': { type: 'boolean' },
       'session-id': { type: 'string' },
       effort: { type: 'string' },
@@ -1914,6 +1959,8 @@ async function main() {
   if (f.context && !(Number(f.context) > 0)) throw new Error('--context must be a number of tokens')
   for (const k of ['output-format', 'input-format']) if (f[k] && !['text', 'json', 'stream-json'].includes(f[k])) throw new Error(`--${k} must be text, json or stream-json`)
   if (f['permission-mode'] && !PERMISSION_MODES[f['permission-mode']]) throw new Error(`--permission-mode must be one of ${Object.keys(PERMISSION_MODES).join(', ')}`)
+  if (f['model-choice'] && !['order', 'fit'].includes(f['model-choice'])) throw new Error('--model-choice must be order or fit')
+  modelChoiceFlag = f['model-choice']
 
   const cfg = loadConfig({ baseUrl: f['base-url'], model: f.model, apiKey: f['api-key'], context: f.context })
   setTheme(cfg.theme)

@@ -1,0 +1,59 @@
+// A newer HeartCode: asked of npm at most once a day (in the background, never waited on), shown in
+// the status bar, installed with /update the way HeartCode was installed. A git checkout (npm link)
+// isn't npm-installed over: it's told to git pull.
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { HOME, VERSION, readJson, writeJson } from './config.js'
+
+const FILE = path.join(HOME, 'update-check.json')
+const DAY = 24 * 60 * 60 * 1000
+const PKG = fileURLToPath(new URL('..', import.meta.url))
+
+// "0.1.38" > "0.1.37": numbers compared part by part (a pre-release tag isn't offered)
+export const newer = (a, b) => {
+  const [x, y] = [a, b].map((v) => String(v).split('-')[0].split('.').map(Number))
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0)
+  return false
+}
+
+// { current, latest, newer }, or null when npm can't be reached. force: ask now, not from the day's answer.
+export async function checkUpdate({ force = false } = {}) {
+  const was = readJson(FILE, {})
+  let latest = was.latest
+  if (force || !latest || Date.now() - (was.checked ?? 0) > DAY) {
+    try {
+      const r = await fetch('https://registry.npmjs.org/heartcode/latest', { signal: AbortSignal.timeout(8000) })
+      latest = (await r.json()).version
+      writeJson(FILE, { checked: Date.now(), latest })
+    } catch {
+      if (!latest) return null
+    }
+  }
+  return { current: VERSION, latest, newer: Boolean(latest) && newer(latest, VERSION) }
+}
+
+// How HeartCode was installed: 'git' (a checkout, linked), or the package manager that put it there.
+export function installKind() {
+  if (fs.existsSync(path.join(PKG, '.git')) || !PKG.split(path.sep).includes('node_modules')) return 'git'
+  if (/[\\/]pnpm[\\/]/.test(PKG)) return 'pnpm'
+  if (/[\\/]\.bun[\\/]/.test(PKG)) return 'bun'
+  if (/[\\/]yarn[\\/]/.test(PKG)) return 'yarn'
+  return 'npm'
+}
+
+export const UPDATE_COMMANDS = { npm: 'npm install -g heartcode@latest', pnpm: 'pnpm add -g heartcode@latest', yarn: 'yarn global add heartcode@latest', bun: 'bun add -g heartcode@latest' }
+export const packageDir = PKG
+
+// The changelog's sections from the newest down to (not including) the one running, or ''.
+export async function whatsNew(current, latest) {
+  try {
+    const r = await fetch('https://raw.githubusercontent.com/p32929/HeartCode/main/CHANGELOG.md', { signal: AbortSignal.timeout(8000) })
+    const text = await r.text()
+    const start = text.indexOf(`## ${latest}`)
+    const end = text.indexOf(`## ${current}`)
+    return start >= 0 ? text.slice(start, end > start ? end : undefined).trim() : ''
+  } catch {
+    return ''
+  }
+}

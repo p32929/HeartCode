@@ -8,7 +8,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import os from 'node:os'
-import { HOME, saveConfig, readJson, writeJson, byName, takeIn, whatOf } from './config.js'
+import { HOME, saveConfig, readJson, writeJson, byName, takeIn, whatOf, VERSION } from './config.js'
+import { newer } from './update.js'
 import { DEFAULT_SERVERS, mcpAuth } from './mcp.js'
 import { sections, BUILTIN_PROMPTS } from './prompts.js'
 import { Client } from './client.js'
@@ -21,13 +22,12 @@ import { installSkill, findImports } from './importer.js'
 import { capabilities } from './capabilities.js'
 import { connect, sendTelegram, tokenHint, tgReady, EVENTS } from './telegram.js'
 import { searchSettings, testSearxng, ENGINE_NAMES } from './web.js'
-import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays, logSize, clearLogs } from './log.js'
+import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays, logSize, clearLogs, LOG_KINDS, kindsOn, listLogRuns, readLog } from './log.js'
 
 const PAGE = new URL('./settings.html', import.meta.url)
 const EFFORTS = ['default', 'low', 'medium', 'high']
-const TOGGLES = { autoCompact: 'compact the conversation when it fills 85% of the model\'s context window', director: 'let the model add skills, MCP servers and change settings when asked', format: "run the project's formatter on every file HeartCode writes", lsp: "show the model a language server's errors after each edit" }
+const TOGGLES = { autoCompact: 'compact the conversation when it fills 85% of the model\'s context window', director: 'let the model add skills, MCP servers and change settings when asked', format: "run the project's formatter on every file HeartCode writes", lsp: "show the model a language server's errors after each edit", updateCheck: 'check once a day whether a newer HeartCode is out (shown in the status bar; /update installs it)' }
 // The Logging page's: both off unless switched on; how much of each request ("full" or "summary")
-const LOG_SWITCHES = ['log', 'logRequests']
 // The status-bar items the visual editor offers (id must match App.status in bin/heartcode.js).
 // `sample` is shown in the page's live preview.
 const STATUS_ITEMS = [
@@ -42,6 +42,7 @@ const STATUS_ITEMS = [
   { id: 'autocompact', label: 'Auto-compact off', sample: 'auto-compact off' },
   { id: 'worktree', label: 'Git worktree', sample: '⎇ feature' },
   { id: 'background', label: 'Background commands', sample: '⚙ 2 running' },
+  { id: 'update', label: 'Update available', sample: '⬆ 0.1.38 /update' },
   { id: 'permissions', label: 'Permissions', sample: '⏵⏵ all allowed' },
 ]
 const STATUS_IDS = new Set(STATUS_ITEMS.map((i) => i.id))
@@ -363,9 +364,11 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       .map(([name, p]) => ({ name, baseUrl: p.baseUrl, key: mask(p.apiKey), list: p.list !== false, off: p.off === true, added: p.models ?? [] })),
     provider: cfg.provider ?? null,
     model: cfg.model ?? null,
+    version: VERSION,
+    update: (({ latest } = {}) => (cfg.updateCheck !== false && latest && newer(latest, VERSION) ? latest : null))(readJson(path.join(HOME, 'update-check.json'), {})), // the day's answer from npm: no request here
     order: [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then].map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t) })),
     rotation: (({ then, ...opts }) => opts)(rotationOf(cfg)),
-    settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), ...Object.fromEntries(LOG_SWITCHES.map((k) => [k, cfg[k] === true])), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg), testTimeout: Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10 },
+    settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), logs: kindsOn(cfg), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg), testTimeout: Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10, modelChoice: cfg.modelChoice === 'fit' ? 'fit' : 'order', replyStart: Number(cfg.replyStart) > 0 ? Number(cfg.replyStart) : 60 },
     logs: { runs: tilde(path.join(LOGS, 'runs')), requests: tilde(REQUESTS) },
     voice: cfg.voice ? JSON.stringify(cfg.voice, null, 2) : '',
     statusBar: cfg.statusBar === undefined ? null : cfg.statusBar, // false (off), a list of lines, or null (default)
@@ -373,7 +376,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     telegram: (({ token, bot, chatName, chatId, on, events } = {}) => ({ hint: tokenHint(token), bot: bot ?? null, chatName: chatName ?? null, connected: Boolean(token && chatId), on: on !== false, events: Object.fromEntries(Object.keys(EVENTS).map((k) => [k, events?.[k] !== false])), names: EVENTS }))(cfg.telegram),
     search: { ...(({ searxng, order, off }) => ({ searxng, order, off }))(searchSettings()), names: ENGINE_NAMES }, // web search: your SearXNG, the engines' order and switches
     capabilities: capabilities(cfg), // features that need outside tools, and whether they're here
-    choices: { permissions: PERMISSIONS, effort: EFFORTS, theme: Object.keys(THEMES), toggles: TOGGLES, statusItems: STATUS_ITEMS },
+    choices: { permissions: PERMISSIONS, effort: EFFORTS, theme: Object.keys(THEMES), toggles: TOGGLES, statusItems: STATUS_ITEMS, logKinds: Object.fromEntries(Object.entries(LOG_KINDS).map(([k, { label, about }]) => [k, { label, about }])) },
     files: FILES.map(([name, about, json, example]) => ({ name, about, json, example, text: fs.existsSync(path.join(HOME, name)) ? fs.readFileSync(path.join(HOME, name), 'utf8') : '' })),
     skills: [...loadSkills(null).values()].map((s) => ({ name: s.name, description: s.description, use: s.use, mine: s.file.startsWith(skillsDir() + path.sep), builtIn: s.file.startsWith(BUNDLED), text: fs.readFileSync(s.file, 'utf8') })),
     mcp: mcpServers(),
@@ -644,17 +647,36 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       if (name === 'effort' && !EFFORTS.includes(value)) throw new Error(`effort: ${EFFORTS.join(', ')}`)
       if (name === 'theme' && !THEMES[value]) throw new Error(`theme: ${Object.keys(THEMES).join(', ')}`)
       if (name === 'context' && value !== null && !(Number(value) > 0)) throw new Error('context: a number of tokens, or empty for what the model says')
-      if ((name in TOGGLES || LOG_SWITCHES.includes(name)) && typeof value !== 'boolean') throw new Error(`${name}: on or off`)
+      if (name in TOGGLES && typeof value !== 'boolean') throw new Error(`${name}: on or off`)
       if (name === 'logDays' && !(Number.isInteger(value) && value >= 1 && value <= 3650)) throw new Error('logDays: a whole number of days, 1 to 3650')
       if (name === 'logDetail' && !DETAILS.includes(value)) throw new Error(`logDetail: ${DETAILS.join(' or ')}`)
       if (name === 'testTimeout' && !(Number.isInteger(value) && value >= 1 && value <= 600)) throw new Error('test timeout: a whole number of seconds, 1 to 600')
-      if (!['permissions', 'effort', 'theme', 'context', 'logDetail', 'logDays', 'testTimeout', ...Object.keys(TOGGLES), ...LOG_SWITCHES].includes(name)) throw new Error(`no setting "${name}"`)
+      if (name === 'replyStart' && !(Number.isInteger(value) && value >= 5 && value <= 600)) throw new Error('a reply must start within: a whole number of seconds, 5 to 600')
+      if (!['permissions', 'effort', 'theme', 'context', 'logDetail', 'logDays', 'testTimeout', 'modelChoice', 'replyStart', ...Object.keys(TOGGLES)].includes(name)) throw new Error(`no setting "${name}"`)
+      if (name === 'modelChoice' && !['order', 'fit'].includes(value)) throw new Error('modelChoice: order or fit')
       cfg[name] = name === 'effort' && value === 'default' ? undefined : name === 'context' ? (value === null ? undefined : Number(value)) : value
       save(`setting:${name}`)
-      if (name === 'logRequests' || name === 'logDetail') useRequestLog(cfg) // from the next request (a running HeartCode takes it in too: applySettings)
+      if (name === 'logDetail') useRequestLog(cfg) // from the next request (a running HeartCode takes it in too: applySettings)
       if (name === 'logDays') pruneLogs(value) // older ones go now
       return state()
     },
+    // Each kind of log on or off ({ kind, on }), or all of them off ({ all: false }): written as
+    // config.json's "logs" (the older "log" and "logRequests" go), taken in at once by a running HeartCode
+    'POST /api/log-kind': ({ kind, on, all }) => {
+      const now = kindsOn(cfg)
+      if (all === false) for (const k of Object.keys(now)) now[k] = false
+      else if (kind in now && typeof on === 'boolean') now[kind] = on
+      else throw new Error(`no kind of log "${kind}"`)
+      cfg.logs = now
+      delete cfg.log
+      delete cfg.logRequests
+      save('setting:logs')
+      useRequestLog(cfg)
+      return state()
+    },
+    // The text logs: the runs that have some, and one kind of one run (its last megabyte)
+    'GET /api/log-runs': () => ({ runs: listLogRuns() }),
+    'POST /api/log-read': ({ run, kind }) => readLog(run, kind),
     // The requests log: the newest first; one in full
     'GET /api/requests': () => ({ items: listRequests() }),
     'POST /api/request': ({ run, file }) => readRequest(run, file),

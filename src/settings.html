@@ -66,6 +66,9 @@
   .brand { display: flex; align-items: baseline; gap: 8px; font-weight: 650; font-size: 15px; letter-spacing: -.01em; padding: 0 10px 22px; }
   .brand span { color: var(--accent); font-size: 17px; }
   .brand small { color: var(--faint); font-weight: 500; font-size: 13px; }
+  .brand small span { color: var(--faint); font-size: 12px; }
+  .update-note { margin: -14px 10px 16px; padding: 7px 10px; border-radius: 8px; background: color-mix(in srgb, var(--c-green, #22c55e) 14%, transparent); color: var(--text); font-size: 12.5px; }
+  .update-note code { font-size: 12px; }
   nav a { position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: var(--radius-s); color: var(--muted); text-decoration: none; margin-bottom: 1px; font-weight: 500; transition: background .15s, color .15s; }
   nav a:hover { background: var(--hover); color: var(--text); }
   nav a.on { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: var(--shadow), inset 0 0 0 1px var(--line); }
@@ -293,9 +296,21 @@
   .mwrap { padding-left: 16px; align-items: center; }
   .mwrap .pick + .mrow { padding-left: 12px; }
   .mwrap .forget:hover { color: var(--err); }
-  .log-opts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; }
-  .log-opts .opt { border-bottom: 0; padding-bottom: 0; }
-  @media (max-width: 860px) { .log-opts { grid-template-columns: 1fr; } }
+  .kinds-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 24px; }
+  .kinds .opt { border-bottom: 1px solid var(--line); padding: 10px 0; }
+  .kinds .opt, .kinds .opt:first-child { align-items: flex-start; padding: 10px 0; }
+  #l-tools select { width: auto; max-width: 260px; }
+  #l-tools input[type=search] { width: 200px; }
+  .kinds .opt .file { display: block; margin-top: 3px; font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; color: var(--faint); }
+  .kinds .opt select { margin-top: 6px; width: 100%; }
+  .logtext { max-height: 70vh; overflow: auto; font: 12px/1.55 var(--mono, ui-monospace, monospace); padding: 10px 18px 16px; }
+  .logtext .ln { white-space: pre-wrap; word-break: break-word; padding: 1px 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
+  .logtext .ln .ts { color: var(--faint); }
+  .logtext .ln .tp { color: var(--accent); font-weight: 600; }
+  .logtext .ln.bad .tp { color: var(--err, #e5484d); }
+  .logtext mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: inherit; border-radius: 2px; }
+  .logtext .empty { padding: 30px 0; }
   .log-days { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
   .log-days input { width: 90px; }
   .log-days .muted { font-size: 12.5px; flex: 1; min-width: 220px; }
@@ -482,7 +497,7 @@
   /* Your models: the header's buttons, the list's settings, the toolbar (sticky), the table */
   .mt-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   /* Your models: the settings (three cells across), the toolbar (sticky), the table */
-  .mt-sets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
+  .mt-sets { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
   .mt-set { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px; border-left: 1px solid var(--line); min-width: 0; }
   .mt-set:first-child { border-left: 0; }
   .mt-setl { font-size: 12px; font-weight: 600; color: var(--muted); }
@@ -598,6 +613,10 @@
   @keyframes job-slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 
   @media (max-width: 1180px) {
+    .mt-sets { grid-template-columns: repeat(2, minmax(0, 1fr)); } /* the cells: two by two */
+    .mt-set:nth-child(2n+1) { border-left: 0; }
+    .mt-set:last-child:nth-child(odd) { grid-column: span 2; } /* an odd one out: the whole row, no hole beside it */
+    .mt-set:nth-child(n+3) { border-top: 1px solid var(--line); }
     .split { grid-template-columns: 1fr; }
     .work { grid-template-columns: 1fr; height: auto !important; }
     .work .mine { order: -1; }
@@ -741,7 +760,8 @@
 <body>
 <div class="app">
   <aside>
-    <div class="brand"><span>♥</span> HeartCode <small>settings</small></div>
+    <div class="brand"><span>♥</span> HeartCode <small>settings <span id="version"></span></small></div>
+    <div class="update-note" id="update-note" hidden></div>
     <nav id="nav">
       <div class="nav-group" role="separator"></div>
       <a href="#models" data-page="models" data-tabs="models providers"><span class="ic">☰</span> Models <span class="count" id="n-mine"></span></a>
@@ -815,36 +835,22 @@
     <section class="page" id="page-logging">
       <div class="head"><div><h1>Logs</h1><p class="lead">What HeartCode writes down, for finding out what went wrong. Off unless you switch it on.</p></div><div class="disk" id="l-disk"></div></div>
       <div class="card">
-        <div class="log-opts">
-          <div>
-            <h2>The run's log</h2>
-            <p class="sub">Everything each run does, as text: requests, replies, retries, tools, commands, what you typed.</p>
-            <div id="l-run"></div>
-          </div>
-          <div>
-            <h2>Requests</h2>
-            <p class="sub">Each request to a model and its reply or error: which failed, which worked, and which fallback answered.</p>
-            <div id="l-req"></div>
-            <div class="row" style="align-items:center;gap:10px;margin-top:12px">
-              <label class="f" for="l-detail" style="margin:0">Keep</label>
-              <select id="l-detail" style="flex:1">
-                <option value="full">Everything: what was sent and what came back</option>
-                <option value="summary">Only a summary: model, result, error, timings, tokens</option>
-              </select>
-            </div>
-            <div class="hint">Everything can make big files on long conversations. API keys are never written.</div>
-          </div>
+        <div class="kinds-top">
+          <div><h2 style="margin:0">What to log</h2><p class="sub" style="margin:4px 0 0">Each kind on its own, all off unless you switch one on. A running HeartCode takes a change in at once. Written to <span class="mono" id="l-where"></span>, a folder per run.</p></div>
+          <button class="small" id="l-alloff">All off</button>
         </div>
+        <div class="kinds" id="l-kinds"></div>
         <div class="log-days">
           <label for="l-days"><b>Keep logs for</b></label>
-          <input type="number" id="l-days" min="1" max="3650" step="1" value="30">
+          <input type="number" id="l-days" min="1" max="3650" step="1" value="3">
           <span>days</span>
-          <span class="muted">Older ones (both kinds) are deleted when HeartCode starts, and right away when you change this. 3 days unless you change it.</span>
+          <span class="muted">Older ones (every kind) are deleted when HeartCode starts, and right away when you change this. API keys are never written.</span>
         </div>
       </div>
       <div class="card reqs-card">
         <div class="reqs-top">
-          <h2 style="margin:0">Requests logged</h2>
+          <div class="seg" id="l-view"></div>
+          <div id="l-tools" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"></div>
           <div class="seg" id="l-filter">
             <label class="on"><input type="radio" name="l-filter" value="all" checked>All</label><label><input type="radio" name="l-filter" value="failed">Failed</label><label><input type="radio" name="l-filter" value="fallback">Fallbacks</label>
           </div>
@@ -854,6 +860,7 @@
           <div class="req-list" id="l-list"></div>
           <div class="req-detail" id="l-detail-pane"><div class="empty">Click a request to see it in full.</div></div>
         </div>
+        <div class="logtext" id="l-text" hidden></div>
       </div>
     </section>
 
@@ -2422,16 +2429,26 @@ function drawMine(s) {
     h('button', { className: 'small', textContent: 'Provider ranking', disabled: !order.some((t) => t.provider !== order[0]?.provider), title: 'drag your providers into order; the Provider column sorts by it', onclick: openRanking }),
     h('button', { className: 'small', textContent: 'Refresh from models.dev', disabled: !order.length, title: 'ask models.dev again what each model can do: context, tools, thinking, images, price', onclick: () => lookUp() }))
 
-  // --- the list's settings: three cells across, a label over each control ---
+  // --- the list's settings: five cells across, a label over each control ---
   const ro = s.rotation
   const cell = (label, about, ...control) => h('label', { className: 'mt-set', title: about }, h('span', { className: 'mt-setl', textContent: label }), h('span', { className: 'mt-setc' }, ...control))
+  const fit = S.settings.modelChoice === 'fit'
   const settings = h('div', { className: 'mt-sets' },
+    cell('HeartCode picks the model by', fit ? 'for each new message, the models that suit it best (what each is good and weak at, and your tests); your order breaks ties' : 'your order: #1 works, the next takes over when it fails',
+      h('select', { onchange: (e) => act('/api/setting', { name: 'modelChoice', value: e.target.value }, e.target.value === 'fit' ? 'models picked for each task by their strengths' : 'models used in your order') },
+        [['order', 'your order'], ['fit', 'best fit per task']].map(([v, t]) => h('option', { value: v, textContent: t, selected: S.settings.modelChoice === v })))),
     cell('When a model fails', ro.on === 'retries' ? 'a rate limit or outage: that model is tried again that many times first; any other error moves on at once' : "any error moves on at once, to another provider's model first",
       h('select', { onchange: (e) => saveOrder(S.order, 'saved', { on: e.target.value }) },
         [['failure', 'the next one answers'], ['retries', 'try it again first']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.on === v }))),
       ro.on === 'retries' ? h('input', { type: 'number', className: 'tries', 'aria-label': 'tries', title: 'tries of the same model first (rate limits, outages)', min: 1, max: 20, value: ro.retries, onchange: (e) => saveOrder(S.order, 'saved', { retries: Number(e.target.value) }) }) : null),
-    cell('A new message starts with', 'the model a new message goes to first',
-      h('select', { onchange: (e) => saveOrder(S.order, 'saved', { next: e.target.value }) },
+    cell('A reply must start within', "a model that hasn't started answering (text, thinking or a tool call) in this many seconds counts as failed: the next one answers",
+      h('input', { type: 'number', className: 'tries', 'aria-label': 'seconds a reply must start within', title: "a model that hasn't started answering (text, thinking or a tool call) in this many seconds counts as failed: the next one answers", min: 5, max: 600, value: S.settings.replyStart ?? 60, onchange: (e) => {
+        const v = Math.round(Number(e.target.value))
+        if (!(v >= 5 && v <= 600)) return (e.target.value = S.settings.replyStart ?? 60), toast('a whole number of seconds, 5 to 600', true)
+        act('/api/setting', { name: 'replyStart', value: v }, `a model that hasn't started answering in ${v}s counts as failed`)
+      } }), h('span', { className: 'unit', textContent: 'seconds' })),
+    cell('A new message starts with', fit ? 'best fit picks it for each message' : 'the model a new message goes to first',
+      h('select', { disabled: fit, onchange: (e) => saveOrder(S.order, 'saved', { next: e.target.value }) },
         [['first', '#1'], ['stay', 'the last that answered']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.next === v })))),
     cell('A test waits for an answer', 'every model test: Test, Test all, Request',
       h('input', { type: 'number', min: 1, max: 600, step: 1, value: S.settings.testTimeout ?? 10, 'aria-label': 'Test timeout in seconds', onchange: (e) => {
@@ -2444,7 +2461,7 @@ function drawMine(s) {
   const chip = (label, off, cls = '') => h('span', { className: 'chip ' + cls }, label, h('button', { type: 'button', textContent: '✕', 'aria-label': `remove ${label}`, onclick: off }))
   const line = h('div', { className: 'mt-line' },
     h('div', { className: 'mt-status' },
-      h('span', { className: 'count' }, filtered ? [h('b', { textContent: n(shown.length) }), ` of ${n(order.length)} shown`] : [h('b', { textContent: n(order.length) }), ` model${order.length === 1 ? '' : 's'}, in your order`]),
+      h('span', { className: 'count' }, filtered ? [h('b', { textContent: n(shown.length) }), ` of ${n(order.length)} shown`] : [h('b', { textContent: n(order.length) }), ` model${order.length === 1 ? '' : 's'}${fit ? ', the order breaks ties' : ', in your order'}`]),
       ...filterChips().map(([label, off]) => chip(label, () => setFilter(off))),
       ...SORT.map(({ key, dir }, k) => chip(`${SORT.length > 1 ? `${k + 1}. ` : 'Sorted: '}${COLS[key].label} ${COLS[key].words[dir === 'up' ? 0 : 1]}`, () => setSort(SORT.filter((x) => x.key !== key)), 'sort')),
       testingAll && SORT.some((x) => x.key === 'works') ? h('span', { className: 'sort-live', textContent: 'tests running: the order moves as results come in' }) : null,
@@ -2580,7 +2597,7 @@ function drawUsing(s) {
 // --- General ---
 const PERM_INFO = { all: ['Everything', 'Edits files and runs commands without asking'], commands: ['Edits only', 'Edits files; asks before running commands'], ask: ['Ask first', 'Asks before every edit and command'] }
 const THEME_INFO = { dark: ["Your terminal's background", ['#1f2328', '#d4d4d8', '#ff6b9d', '#7aa2f7']], light: ['White background', ['#fafbfc', '#24292f', '#d6336c', '#0969da']], midnight: ['Deep blue background', ['#1a1b26', '#c0caf5', '#ff7ab2', '#7aa2f7']], mono: ['No colors: bold and dim', ['#000000', '#bbbbbb', '#ffffff', '#777777']] }
-const TOGGLE_INFO = { autoCompact: 'Compact long conversations', director: 'Let the model set things up', format: 'Format files after edits', lsp: 'Language server checks' }
+const TOGGLE_INFO = { autoCompact: 'Compact long conversations', director: 'Let the model set things up', format: 'Format files after edits', lsp: 'Language server checks', updateCheck: 'Check for updates' }
 function choices(id, list, cur, name) {
   put($(id), list.map(([v, title, desc, colors]) => h('label', { className: 'choice' + (v === cur ? ' on' : '') },
     h('input', { type: 'radio', name: id, checked: v === cur, onchange: () => act('/api/setting', { name, value: v }, `${title}: saved`) }),
@@ -2780,20 +2797,106 @@ async function clearAll() {
   api('/api/requests').then(({ items }) => ((REQS = items), drawReqs()), () => {})
   toast(`deleted: logs on disk now ${bytes(r.size.total)}`)
 }
+// The kinds of log: requests (their own viewer), then the text logs (choices.logKinds)
+const logKindsOf = (s) => ({ requests: { label: 'Requests', about: 'each request to a model and its reply or error: which failed, which worked, which fallback answered' }, ...s.choices.logKinds })
 function drawLogging(s) {
   drawDisk()
-  put($('l-run'), logSwitch(s, 'log', 'Keep a log of every run', `From now on: a folder per run in ${s.logs.runs}, a file per tab (tab-1.log, tab-2.log…).`))
-  put($('l-req'), logSwitch(s, 'logRequests', 'Log every request and reply', `Right away: a file per request in ${s.logs.requests}, a folder per run.`))
-  $('l-detail').value = s.settings.logDetail
+  const on = s.settings.logs
+  put($('l-kinds'), Object.entries(logKindsOf(s)).map(([k, { label, about }]) => h('label', { className: 'opt' },
+    h('div', { className: 't' }, h('b', { textContent: label }), h('span', { textContent: about[0].toUpperCase() + about.slice(1) }),
+      h('span', { className: 'file', textContent: k === 'requests' ? 'requests/<run>/ · a file per request' : `runs/<run>/${k}.log` }),
+      k === 'requests' ? h('select', { disabled: !on.requests, 'aria-label': 'how much of each request', onchange: (e) => act('/api/setting', { name: 'logDetail', value: e.target.value }, 'saved: from the next request') },
+        [['full', 'Everything: what was sent and what came back'], ['summary', 'Only a summary: model, result, error, timings, tokens']].map(([v, l]) => h('option', { value: v, textContent: l, selected: s.settings.logDetail === v }))) : null),
+    sw({ checked: on[k], 'aria-label': label, onchange: (e) => act('/api/log-kind', { kind: k, on: e.target.checked }, `${label}: ${e.target.checked ? 'logged from now on' : 'off'}`) }))))
+  $('l-alloff').disabled = !Object.values(on).some(Boolean)
+  $('l-where').textContent = s.logs.runs.replace(/[\\/]runs$/, '')
   if (document.activeElement !== $('l-days')) $('l-days').value = s.settings.logDays
-  $('l-detail').disabled = !s.settings.logRequests
+  drawViewTabs(s)
 }
+$('l-alloff').onclick = () => act('/api/log-kind', { all: false }, 'every log off')
 $('l-days').onchange = (e) => {
   const days = Number(e.target.value)
   if (!Number.isInteger(days) || days < 1) return toast('a whole number of days, 1 or more', true), (e.target.value = S.settings.logDays)
   act('/api/setting', { name: 'logDays', value: days }, `logs kept for ${days} day${days === 1 ? '' : 's'}; older ones deleted`)
 }
-$('l-detail').onchange = (e) => act('/api/setting', { name: 'logDetail', value: e.target.value }, 'saved: from the next request')
+
+// --- reading the logs: a tab per kind; the text ones by run, searched, followed live ---
+let VIEW = 'requests' // the kind shown
+let LOGRUN = null // its run ("day-month-year-…"), the newest when left out
+let LOGRUNS = [] // the runs that have this kind
+let LOGLINES = [] // its lines, as read
+let FIND = ''
+let LIVE = true
+function drawViewTabs(s) {
+  put($('l-view'), Object.entries(logKindsOf(s)).map(([k, { label }]) => h('label', { className: VIEW === k ? 'on' : '' },
+    h('input', { type: 'radio', name: 'l-view', value: k, checked: VIEW === k, onchange: () => ((VIEW = k), (LOGRUN = null), drawViewTabs(S), showView()) }), label)))
+}
+async function showView() {
+  const req = VIEW === 'requests'
+  $('l-filter').style.display = req ? '' : 'none'
+  document.querySelector('#page-logging .reqs').style.display = req ? '' : 'none'
+  $('l-text').hidden = req
+  if (req) return put($('l-tools'))
+  try {
+    LOGRUNS = (await api('/api/log-runs')).runs.filter((r) => r.kinds[VIEW] !== undefined)
+  } catch (e) {
+    LOGRUNS = []
+  }
+  if (!LOGRUNS.some((r) => r.run === LOGRUN)) LOGRUN = LOGRUNS[0]?.run ?? null
+  const cur = LOGRUNS.find((r) => r.run === LOGRUN)
+  put($('l-tools'),
+    LOGRUNS.length ? h('select', { 'aria-label': 'which run', onchange: (e) => ((LOGRUN = e.target.value), showView()) },
+      LOGRUNS.map((r) => h('option', { value: r.run, selected: r.run === LOGRUN, textContent: `${r.current ? 'this run · ' : r.live ? 'running · ' : ''}${new Date(r.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${bytes(r.kinds[VIEW])}` }))) : null,
+    h('input', { type: 'search', id: 'l-find', placeholder: 'search this log', value: FIND, style: 'width:200px', oninput: (e) => ((FIND = e.target.value), drawText()) }),
+    cur?.live ? h('label', { className: 'row', style: 'gap:6px;align-items:center', title: 'new lines come in as HeartCode writes them' }, h('input', { type: 'checkbox', checked: LIVE, onchange: (e) => (LIVE = e.target.checked) }), 'live') : null)
+  await readText()
+}
+async function readText() {
+  if (!LOGRUN) {
+    LOGLINES = []
+    return drawText()
+  }
+  try {
+    const d = await api('/api/log-read', { run: LOGRUN, kind: VIEW })
+    LOGLINES = d.text.split('\n').filter(Boolean)
+    LOGLINES.cut = d.cut
+  } catch (e) {
+    LOGLINES = []
+  }
+  drawText()
+}
+// A line: "2026-11-02T10:00:00.000Z tab 2 [topic] text" (a long one goes on over several lines)
+function drawText() {
+  const box = $('l-text')
+  const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40
+  const label = logKindsOf(S)[VIEW]?.label ?? VIEW
+  if (!LOGLINES.length) return put(box, h('div', { className: 'empty', textContent: S.settings.logs[VIEW] ? `Nothing logged here yet: "${label}" lines show up as HeartCode writes them.` : `"${label}" is off: switch it on above, and its lines show up here from then on.` }))
+  const groups = []
+  for (const l of LOGLINES) if (/^\d{4}-\d\d-\d\dT/.test(l) || !groups.length) groups.push(l)
+  else groups[groups.length - 1] += '\n' + l
+  const find = FIND.trim().toLowerCase()
+  const shown = (find ? groups.filter((g) => g.toLowerCase().includes(find)) : groups).slice(-3000)
+  const mark = (text) => {
+    if (!find) return [text]
+    const out = []
+    let i = 0
+    for (let j; (j = text.toLowerCase().indexOf(find, i)) >= 0; i = j + find.length) out.push(text.slice(i, j), h('mark', { textContent: text.slice(j, j + find.length) }))
+    return [...out, text.slice(i)]
+  }
+  put(box,
+    LOGLINES.cut ? h('div', { className: 'muted', style: 'padding:4px 0 8px', textContent: 'Only the last part of a long log is shown: the whole file is on disk.' }) : null,
+    shown.length ? shown.map((g) => {
+      const m = /^(\S+?)T(\S+?)Z( tab \d+)? \[([\w-]+)\] ([\s\S]*)$/.exec(g)
+      if (!m) return h('div', { className: 'ln' }, ...mark(g))
+      return h('div', { className: `ln${/^(error|crash|warn)$/.test(m[4]) ? ' bad' : ''}` },
+        h('span', { className: 'ts', textContent: `${new Date(`${m[1]}T${m[2]}Z`).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}${m[3] ?? ''} ` }), h('span', { className: 'tp', textContent: `[${m[4]}] ` }), ...mark(m[5]))
+    }) : h('div', { className: 'empty', textContent: `No line has "${FIND}".` }))
+  if (atEnd) box.scrollTop = box.scrollHeight // following the end, unless you scrolled up to read
+}
+setInterval(() => {
+  if (page() !== 'logging' || VIEW === 'requests' || !LIVE || document.hidden) return
+  if (LOGRUNS.find((r) => r.run === LOGRUN)?.live || !LOGRUN) readText().then(() => !LOGRUN && showView())
+}, 2000)
 
 let REQS = null // the requests logged, newest first
 let reqOpen = null // the one shown in full: "run/file"
@@ -2836,7 +2939,7 @@ function drawReqs() {
   const shown = REQS.filter(reqShown)
   const failed = REQS.filter((r) => r.result === 'failed').length
   $('n-failed').textContent = failed ? `${failed} failed` : ''
-  put($('l-list'), shown.length ? shown.map(reqRow) : h('div', { className: 'empty', textContent: REQS.length ? 'None of these.' : S?.settings.logRequests ? 'Nothing yet: requests show here as HeartCode sends them.' : 'Nothing logged. Switch on "Log every request and reply" above.' }))
+  put($('l-list'), shown.length ? shown.map(reqRow) : h('div', { className: 'empty', textContent: REQS.length ? 'None of these.' : S?.settings.logs?.requests ? 'Nothing yet: requests show here as HeartCode sends them.' : 'Nothing logged. Switch on "Requests" above.' }))
 }
 async function openReq(r) {
   reqOpen = `${r.run}/${r.file}`
@@ -3183,6 +3286,9 @@ function sbSave() {
 }
 
 function render(s) {
+  $('version').textContent = s.version ? `v${s.version}` : ''
+  $('update-note').hidden = !s.update
+  if (s.update) $('update-note').innerHTML = `⬆ <b>${s.update}</b> is out · type <code>/update</code> in HeartCode`
   if (s.prefs) {
     // the page's choices, as kept (also changed on another page: shown here too)
     const p = s.prefs

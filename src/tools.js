@@ -17,7 +17,7 @@ import { runHooks } from './hooks.js'
 import { parsePatch, applyChunks } from './patch.js'
 import { formatFile } from './format.js'
 import { diagnose, lspTool, findCommand } from './lsp.js'
-import { startJob, waitFor, newOutput, listJobs, getJob, stopJob, removeJob, jobLine } from './background.js'
+import { startJob, waitFor, newOutput, listJobs, getJob, stopJob, removeJob, keepLeftovers, jobLine } from './background.js'
 
 const IGNORE = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage', '.venv', 'venv', '__pycache__', 'target', '.cache', '.DS_Store'])
 
@@ -443,12 +443,13 @@ export async function runConfirmed(s, cmd, signal, background = false, wait) {
     s.ui.result(`still running: #${job.id} in the background`)
     return prompt('agent/background-started', { id: job.id, secs, output: newOutput(job).trim() || '(nothing yet)', file: job.file })
   }
-  const left = removeJob(job) // done: not one of the background list
-  const output = newOutput(job, 4000) + (left ? '\n(Processes this command left running were stopped. To keep a server or watcher running, run it with background: true.)' : '')
+  const output = newOutput(job, 4000)
+  const left = keepLeftovers(job) // `server &`: kept running, as a background command
+  if (!left) removeJob(job) // done: not one of the background list
   log('command', `${cmd} → exit ${job.code} in ${job.ended - job.started}ms\n${output}`)
   s.ui.result(`exit ${job.code}`)
   const changed = changesSince(s, before)
-  return `exit code ${job.code}\n${output.trim() || '(no output)'}${changed ? `\nFiles this command changed: ${changed}` : ''}`
+  return `exit code ${left ? 0 : job.code}\n${output.trim() || '(no output)'}${changed ? `\nFiles this command changed: ${changed}` : ''}${left ? `\n${prompt('agent/left-running', { id: job.id })}` : ''}`
 }
 
 // The background tool: what a command still running printed since the last look (after waiting
@@ -551,7 +552,7 @@ export const TOOL_DEFS = [
   { name: 'write_file', description: prompt('agent/tool-write_file'), parameters: obj({ path: str, content: str, append: { type: 'boolean' } }, ['path', 'content']) },
   { name: 'run_command', description: prompt('agent/tool-run_command'), parameters: obj({ command: str, wait: int, background: { type: 'boolean' } }, ['command']) },
   { name: 'background', description: prompt('agent/tool-background'), parameters: obj({ action: { type: 'string', enum: ['output', 'list', 'stop'] }, id: int, wait: int }, ['action']) },
-  { name: 'todo', description: prompt('agent/tool-todo'), parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] } }, ['content', 'status']) } }, ['todos']) },
+  { name: 'todo', description: prompt('agent/tool-todo'), parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] }, parallel: { type: 'boolean' }, model: str, files: { type: 'array', items: str } }, ['content', 'status']) } }, ['todos']) },
   { name: 'web_search', description: prompt('agent/tool-web_search'), parameters: obj({ query: str, fresh: { type: 'boolean' } }, ['query']) },
   { name: 'web_fetch', description: prompt('agent/tool-web_fetch'), parameters: obj({ url: str, look_for: str, start: int }, ['url']) },
   { name: 'ask_user', description: prompt('agent/tool-ask_user'), parameters: obj({ question: str, options: { type: 'array', items: str }, multiple: { type: 'boolean' }, emphasis: { type: 'boolean' } }, ['question']) },
@@ -641,7 +642,7 @@ export function extraTools(s) {
 // todo: the model's checklist for this message, shown to the user each time it changes.
 // Lenient: the list as JSON text, plain strings for items, "done" for completed.
 const MARK = { pending: '☐', in_progress: '◐', completed: '☑' }
-function todoTool(s, args) {
+async function todoTool(s, args, signal, id) {
   let list = args.todos ?? args.items ?? args
   if (typeof list === 'string') {
     try {
@@ -652,16 +653,57 @@ function todoTool(s, args) {
   }
   if (!Array.isArray(list)) return 'error: todos must be a list of {content, status}'
   const todos = list
-    .map((t) => (typeof t === 'string' ? { content: t, status: 'pending' } : { content: String(t?.content ?? t?.task ?? t?.title ?? ''), status: String(t?.status ?? 'pending') }))
+    .map((t) => (typeof t === 'string' ? { content: t, status: 'pending' } : { content: String(t?.content ?? t?.task ?? t?.title ?? ''), status: String(t?.status ?? 'pending'), ...(t?.model && { model: String(t.model) }), ...((t?.parallel === true || t?.parallel === 'true') && { parallel: true }), ...([t?.files ?? []].flat().filter(Boolean).length && { files: [t.files].flat().map(String) }) }))
     .filter((t) => t.content.trim())
     .map((t) => ({ ...t, status: /done|complete/i.test(t.status) ? 'completed' : /progress|doing|active/i.test(t.status) ? 'in_progress' : 'pending' }))
   s.chat.todos = todos
   s.todoTouched = true
   const paint = { pending: c.muted, in_progress: (x) => c.info(c.bold(x)), completed: (x) => c.faint(x) }
   s.ui.print(todos.map((t) => `  ${paint[t.status](`${MARK[t.status]} ${t.content}`)}`).join('\n') || c.faint('  (todo list cleared)'))
+  const parts = await runParts(s, todos, signal, id)
   const done = todos.filter((t) => t.status === 'completed').length
   const next = todos.find((t) => t.status !== 'completed')
-  return `Todo list saved: ${done} of ${todos.length} done.${next ? ` Next: ${next.content}` : ''}`
+  // a plan of several parts with none given to another model or run side by side: asked once a message
+  const open = todos.filter((t) => t.status === 'pending')
+  const askSplit = !parts && !s.isSub && !s.splitAsked && open.length >= 3 && !todos.some((t) => t.parallel || t.model) && s.subagent && s.team?.().length && s.ui.permission !== 'plan'
+  if (askSplit) s.splitAsked = true
+  return `Todo list saved: ${done} of ${todos.length} done.${next ? ` Next: ${next.content}` : ''}${parts ? `\n\n${parts}` : ''}${askSplit ? `\n\n${prompt('agent/split-check')}` : ''}`
+}
+
+// The plan's parts marked parallel (or given to another model): each started at once as a helper
+// on its model, all at the same time, each changing only the files its part owns; marked done when
+// it reports back. What they did, for the model to put together and check. '' when none.
+async function runParts(s, todos, signal, id) {
+  const parts = todos.filter((t) => t.status === 'pending' && (t.parallel || t.model))
+  if (!parts.length || s.isSub || !s.subagent || s.ui.permission === 'plan') return ''
+  // a model that isn't one of yours (a name made up, the product's own name): the part runs on this one
+  const yours = [{ provider: s.client?.provider, model: s.client?.model }, ...(s.team?.() ?? [])]
+  const known = (m) => yours.some((y) => `${y.provider} ${y.model}` === m || y.model === m || m.endsWith(` ${y.model}`))
+  const unknown = [...new Set(parts.filter((t) => t.model && !known(t.model)).map((t) => t.model))]
+  for (const t of parts) if (t.model && !known(t.model)) delete t.model
+  for (const t of parts) t.status = 'in_progress'
+  log('parts', parts.map((t) => `${t.content}${t.model ? ` (${t.model})` : ''}${t.files ? ` [${t.files.join(', ')}]` : ''}`))
+  s.ui.step('parts', `${parts.length} part${parts.length > 1 ? 's' : ''} at once: ${parts.map((t) => `${clip(t.content, 40)}${t.model ? ` (${t.model})` : ''}`).join(' · ')}`)
+  const plan = todos.map((t) => `- ${t.content}`).join('\n')
+  const choices = (s.chat?.choices ?? []).join('; ')
+  const reports = await Promise.all(
+    parts.map(async (t) => {
+      const brief = prompt('agent/part', { task: s.task ?? '', plan, part: t.content, files: (t.files ?? []).join(', '), choices })
+      let out
+      try {
+        out = await s.subagent({ prompt: brief, model: t.model, description: clip(t.content, 40), ownFiles: t.files }, signal, id)
+      } catch (e) {
+        if (e.name === 'AbortError' || signal?.aborted) throw e
+        out = `error: ${e.message}`
+      }
+      t.status = failed(out) ? 'pending' : 'completed'
+      return `## ${t.content}${t.model ? ` (${t.model})` : ''}: ${failed(out) ? 'not done' : 'done'}\n${clip(out, 3000)}`
+    }),
+  )
+  s.chat.todos = todos
+  const paint = { pending: c.muted, in_progress: (x) => c.info(c.bold(x)), completed: (x) => c.faint(x) }
+  s.ui.print(todos.map((t) => `  ${paint[t.status](`${MARK[t.status]} ${t.content}`)}`).join('\n'))
+  return prompt('agent/parts-done', { reports: reports.join('\n\n'), unknown: unknown.join(', '), models: yours.map((y) => `${y.provider} ${y.model}`).join(', ') })
 }
 
 // ask_user: a question for the user mid-task, with choices (and their own answer) or free text.
@@ -1179,11 +1221,23 @@ async function toolRun(name, args, s, signal, id) {
   const hookName = name === 'mcp' && args?.server && args?.tool ? mcpName(String(args.server), String(args.tool)) : name
   const pre = await runHooks(s, 'PreToolUse', { tool_name: hookName, tool_input: args }, signal)
   if (pre.block) return prompt('agent/hook-blocked-tool', { reason: pre.block })
+  const notMine = s.ownFiles && partPaths(name, args).find((f) => !s.ownFiles.includes(path.resolve(s.root, f)))
+  if (notMine) return prompt('agent/part-files', { file: notMine, files: s.ownFiles.map((f) => path.relative(s.root, f)).join(', ') })
   let out = await tool(name, args, s, signal, id)
   const post = await runHooks(s, 'PostToolUse', { tool_name: hookName, tool_input: args, tool_response: out }, signal)
   if (post.block) out += `\n\n${prompt('agent/hook-after-tool', { reason: post.block })}`
   log('tool', `${name} result:`, clip(out, 4000))
   return out
+}
+
+// The files a change would touch (edit_file's edits, write_file's path, a patch's files), for a part
+// of the plan that owns only some.
+function partPaths(name, args) {
+  const a = normalize(args ?? {})
+  if (name === 'edit_file') return [a.path, ...[a.edits ?? []].flat().map((e) => e?.path)].filter(Boolean).map(String)
+  if (name === 'write_file' || name === 'append_file') return [a.path].filter(Boolean).map(String)
+  if (name === 'apply_patch') return [...String(a.input ?? a.patch ?? '').matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => m[1].trim())
+  return []
 }
 
 // Argument names other tools use (Claude Code's file_path, old_string, new_string, …): models
@@ -1270,7 +1324,7 @@ async function tool(name, args, s, signal, id) {
       case 'memory':
         return memoryTool(s, args)
       case 'todo':
-        return todoTool(s, args)
+        return await todoTool(s, args, signal, id)
       case 'web_search':
       case 'web_fetch':
         return await webTool(s, name, args, signal)

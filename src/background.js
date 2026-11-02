@@ -83,25 +83,34 @@ export function tailLines(job, n) {
 
 export const listJobs = (root) => [...jobs.values()].filter((j) => !root || j.root === root)
 export const getJob = (id) => jobs.get(Number(String(id).replace(/^#/, '')))
-export const runningJobs = (root) => listJobs(root).filter((j) => !j.exited)
+// what a command left running has no exit to wait for: it's looked at (gone: marked so)
+const settle = (j) => j.left && !j.exited && !kill(j, 0) && Object.assign(j, { exited: true, code: 'gone', ended: Date.now() })
+export const runningJobs = (root) => listJobs(root).filter((j) => (settle(j), !j.exited))
 
 export function stopJob(job) {
   if (job.exited) return false
   kill(job, 'SIGTERM')
   setTimeout(() => kill(job, 'SIGKILL'), 2000).unref()
+  if (job.left) Object.assign(job, { exited: true, code: 'SIGTERM', ended: Date.now() }) // what a command left running: its shell's exit was long ago, so marked here
   log('background', `#${job.id} stopped: ${job.command}`)
   return true
 }
 
-// Stopped (if it still runs) and taken off the list; its log file stays. True when it had exited
-// but left processes running (`server &`): those are stopped too.
+// A command that ended but left processes running (`server &`, `nohup … &`): they're kept, as this
+// background command (listed, stoppable, stopped when HeartCode exits), not killed — killing them
+// left a model starting server after server. True when there were some.
+export function keepLeftovers(job) {
+  if (!job.exited || !group || !kill(job, 0)) return false
+  Object.assign(job, { exited: false, code: null, left: true })
+  log('background', `#${job.id} left processes running: kept (${job.command})`)
+  return true
+}
+
+// Stopped (if it still runs) and taken off the list; its log file stays.
 export function removeJob(job) {
-  const left = job.exited && group && kill(job, 0)
-  if (left) kill(job, 'SIGTERM')
   stopJob(job)
   jobs.delete(job.id)
   log('background', `#${job.id} removed: ${job.command}`)
-  return left
 }
 
 // The ones that ended since they were last told about (for the model's next step).

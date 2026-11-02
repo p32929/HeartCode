@@ -11,6 +11,7 @@ import { est, estMessages, Client, writtenBy, tokensOf, COMPACT_SHARE } from './
 import { runGuided } from './guided.js'
 import { markUsed, removeResearch, findResearch } from './research.js'
 import { learnStrengths, loadStrengths, strengthKey } from './strengths.js'
+import { pickModels, byPick, modelFacts } from './fit.js'
 import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, noteNamedPaths } from './tools.js'
 import { serversNote } from './lsp.js'
 import { newlyEnded, jobLine } from './background.js'
@@ -185,9 +186,16 @@ export class Session {
       else this.ui.warn(`${this.client.model} can't read images (per its probe); ignoring ${images.length} image(s)`)
       images = []
     }
+    // "best fit": the models that suit this message most, by their strengths (your order breaks ties)
+    if (!this.isSub && this.fitMode?.()) {
+      const fit = await pickModels(this, text, signal, { images: images.length, size: this.messages ? size(this.messages) : 0 })
+      if (fit && this.client.orderBy?.(fit.work)) ui.step('models', `${this.client.model}${fit.why ? ` · picked for: ${fit.why}` : ''}`)
+    } else if (!this.isSub) this.client.orderBy?.(null) // your order (best fit was switched off)
+    if (!this.isSub) log('rotate', `this message starts on ${this.client.provider ?? ''} · ${this.client.model}${this.client.rotation ? ` (#${this.client.rotation.at + 1} of ${this.client.rotation.list.length}${this.fitMode?.() ? ', best fit' : ', your order'})` : ''}`)
     log('task', `${text} (${this.strat.actions} mode, ${images.length} image(s))`)
     const answer = this.strat.actions === 'tools' ? await runNative(this, text, images, signal) : await runGuided(this, text, images, signal)
-    log('task', 'answer:', answer)
+    log('answer', answer) // the conversation's log
+    log('task', `answered (${String(answer ?? '').length} characters)`)
     this.history.push({ task: text, answer })
     return answer
   }
@@ -226,7 +234,7 @@ export class Session {
     for (const [i, t] of order.entries()) {
       let answer = ''
       try {
-        answer = (await this.#helper(t, task, images, args.description, id, signal))?.trim()
+        answer = (await this.#helper(t, task, images, args.description, id, signal, args.ownFiles))?.trim()
       } catch (e) {
         if (e.name === 'AbortError' || signal?.aborted) throw e
         failed.push(`${t.model}: ${clip(e.message, 150)}`)
@@ -244,7 +252,7 @@ export class Session {
   // One helper on one model (t: this one, or another of yours), with its own connection (a helper's
   // failure moves no one else on to another model) that gives up after a few tries (then the next
   // model gets the job).
-  async #helper(t, task, images, description, id, signal) {
+  async #helper(t, task, images, description, id, signal, ownFiles) {
     let { client, profile, strat } = this
     if (this.engineFor) {
       ;({ client, profile, strat } = await this.engineFor(t))
@@ -253,6 +261,7 @@ export class Session {
     }
     const label = clip(`${client.model}: ${String(description ?? '').trim() || task.split('\n')[0]}`, 60)
     const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
+    if (ownFiles?.length) helper.ownFiles = ownFiles.map((f) => path.resolve(this.root, f)) // a part of the plan: changes only its own files
     Object.assign(helper, { isSub: true, research: this.research, ran: this.ran, noResearch: this.noResearch, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
     helper.track = (rel, before) => this.track(rel, before)
     helper.mcpGate = async () => (await this.#gate(helper), () => {})
@@ -541,7 +550,7 @@ const teamPrompt = (s) => {
   const known = loadStrengths()
   const at = (model) => (/^unknown/i.test(known[strengthKey(model)]?.good ?? '') ? null : known[strengthKey(model)]) // nothing published: kept, so not looked up again, but not shown
   const strong = (model) => (at(model) ? `; good at: ${at(model).good}${at(model).weak ? `; weak at: ${at(model).weak}` : ''}` : '')
-  const can = (t) => [t.tools ? 'tool calls' : 'no tool calls', t.images && 'images', t.thinking && 'thinking', `${Math.round(t.context / 1000)}k context`, fails(t)].filter(Boolean).join(', ') + strong(t.model)
+  const can = (t) => [modelFacts(t), fails(t)].filter(Boolean).join('; ') // what it can do, is good and weak at, how it did in your tests
   const you = [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking'].filter(Boolean).join(', ') + strong(s.client.model)
   return prompt('agent/team', { models: team.map((t) => `- ${t.provider} ${t.model}: ${can(t)}`).join('\n'), you })
 }
@@ -813,7 +822,8 @@ async function runNative(s, task, images, signal) {
   if (!s.isSub && s.chat.todos?.every((t) => t.status === 'completed')) s.chat.todos = []
   s.todoTouched = false
   s.task = task // the user's message, for the page review (lookAtUi)
-  noteNamedPaths(task) // folders outside the project it names: readable (and cd there is no wrong turn)
+  for (const turn of s.chat.turns ?? []) noteNamedPaths(turn.task) // folders outside the project any message here names (a resumed chat's too): readable, and cd there is no wrong turn
+  noteNamedPaths(task)
   if (!s.isSub) s.choicesFresh = false // a question about how to do it, this message: replaces the earlier answers (s.chat.choices)
   s.uiTouched = new Set() // pages (and styles) written in this message: looked at before it ends
   s.uiLooks = 0
@@ -824,8 +834,9 @@ async function runNative(s, task, images, signal) {
   let nudged = 0 // reminders sent this message about open todo items, a premature stop, or a Stop hook
   let sinceNudge = true // a tool call made since the last reminder: one that changed nothing isn't sent again (no count: it goes on while the model gets on)
   s.planAsked = false // asked for a plan before its first change, this message
+  s.splitAsked = false // asked whether a plan's parts could run side by side, this message
   // what changed and when it was last checked, this message: a change not run/tested since isn't done
-  Object.assign(s, { changed: new Set(), seq: 0, lastChangeAt: -1, lastCheckAt: -1, reviewedAt: -1, checksSince: 0 })
+  Object.assign(s, { changed: new Set(), seq: 0, lastChangeAt: -1, lastCheckAt: -1, reviewedAt: -1, checksSince: 0, spots: new Map() })
 
   let empty = 0 // replies in a row with neither text nor tool calls
   let looping = 0 // replies cut for going into a loop, this message
@@ -1033,6 +1044,14 @@ async function runNative(s, task, images, signal) {
         if (EDITS.has(name) && !failed(out)) {
           s.lastChangeAt = s.seq
           s.checksSince = 0
+          // the same spot changed again and again (and what it checks still comes out the same): told
+          // at the third time that the cause is likely elsewhere
+          const at = Number(/\nNow:\n\s*(\d+)\|/.exec(out)?.[1])
+          if (args.path && at) {
+            const spot = `${args.path}:${Math.round(at / 10)}`
+            const n = (s.spots ??= new Map()).set(spot, (s.spots.get(spot) ?? 0) + 1).get(spot)
+            if (n === 3) out += `\n\n${prompt('agent/same-spot', { file: String(args.path), line: at })}`
+          }
           if (args.path) s.changed.add(String(args.path))
         } else if (CHECKS.has(name)) {
           s.lastCheckAt = s.seq // ran something: a check of what changed (the model judges its result)
@@ -1395,7 +1414,8 @@ async function lookAtUi(s, signal) {
     // reviewed in a request of its own (the screenshots and the user's request, nothing else): a
     // model checking its own work in its own conversation tends to call it fine
     const self = { provider: s.client.provider, model: s.client.model, images: s.strat.vision }
-    const reviewers = [...(self.images ? [self] : []), ...(s.team?.() ?? []).filter((t) => t.images && !(t.provider === self.provider && t.model === self.model))]
+    const seers = [...(self.images ? [self] : []), ...(s.team?.() ?? []).filter((t) => t.images && !(t.provider === self.provider && t.model === self.model))]
+    const reviewers = s.fitMode?.() && s.chat.fit?.look?.length ? byPick(seers, s.chat.fit.look) : seers // best fit: the best at judging a page first
     const ask = prompt('agent/ui-review', { task: s.task ?? '', emphasis: (s.chat?.choices ?? []).join('; '), shots: shots.map((x, i) => `${i + 1}. ${x.label}`).join('\n') })
     for (const t of reviewers) {
       s.ui.spinner(`${t.model} is reviewing ${shown.join(', ')}`)
@@ -1547,7 +1567,8 @@ export async function review(s, task, answer, signal) {
   const ask = prompt('agent/review', { request: requestsOf(s.chat, 1200), emphasis: (s.chat?.choices ?? []).join('; '), plan: plan || '(none)', answer: clip(String(answer ?? ''), 3000), changes: diffs.join('\n\n'), ran: ran || '(nothing)' })
   const self = { provider: s.client.provider, model: s.client.model, self: true }
   const fails = (t) => s.failures?.[`${t.provider} ${t.model}`] ?? 0
-  const others = (s.team?.() ?? []).filter((t) => t.tools !== false && !(t.provider === self.provider && t.model === self.model)).sort((a, b) => fails(a) - fails(b))
+  const team = (s.team?.() ?? []).filter((t) => t.tools !== false && !(t.provider === self.provider && t.model === self.model)).sort((a, b) => fails(a) - fails(b))
+  const others = s.fitMode?.() && s.chat.fit?.review?.length ? byPick(team, s.chat.fit.review) : team // best fit: the best at checking code first
   for (const t of [...others.slice(0, 2), self]) {
     s.ui.spinner(`${t.model} is reviewing the work`)
     try {

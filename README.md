@@ -52,9 +52,13 @@ tried did what I needed:
 - **Set up in a web page** on your own machine (`/settings`), not by editing config files.
 - **Usable by other tools and AI agents**: `heart -p` runs one task headless, like `claude -p`
   (see [SKILL.md](SKILL.md)).
-- **Logs each request and its reply** in a file of its own when you switch logging on, so you can
-  see what went wrong.
+- **Logs what you need, nothing else**: seven kinds, each switched on by itself (all off by
+  default): requests, tools & commands, model choices, the agent's decisions, errors, the
+  conversation, debug. Read them on the settings page, searched and live.
 - **Takes skills, MCP servers and hooks** in Claude Code's formats; `/import` brings yours over.
+- **Tells you when a newer version is out** (a check with npm at most once a day, in the status bar):
+  `/update` shows what changed and installs it the way you installed HeartCode. Switch it off in
+  `/settings` → General.
 - **Knows what each of your models is good at**: the first time it meets a model it looks up its
   strengths and weaknesses (a web search, summed up in two lines), keeps that in
   `~/.heart/model-strengths.json` for every project, and gives each part of a job to the model best at it.
@@ -116,7 +120,7 @@ The sidebar, in four groups:
   effort, voice input, web search: your own SearXNG and the engines' order, and which outside tools are ready) and *Status bar* (drag and drop what the
   bottom lines show, with a live preview). **Notifications**: Telegram.
 - **Skills**, **MCP servers** and **System prompt**: what HeartCode can do and how it's told.
-- **Advanced**: *Logs* (requests and runs) and *Files* (the rest of the settings, as files).
+- **Advanced**: *Logs* (seven kinds, each on or off, and a viewer) and *Files* (the rest of the settings, as files).
 
 ### 4. Add a provider and pick models
 
@@ -153,7 +157,8 @@ HeartCode what it can do.
 - **Notifications**: a Telegram message when a task finishes, fails or waits for you. Make a bot
   with [@BotFather](https://t.me/BotFather), paste its token, press Start in the bot, and
   HeartCode finds your chat.
-- **Advanced → Logs**: a log of each run, and each request with its reply, in files of their own.
+- **Advanced → Logs**: switch on only the kinds you need (requests, tools & commands, model choices,
+  the agent's decisions, errors, the conversation, debug), and read them there: by run, searched, live.
   Logs older than 3 days are deleted (you can change that).
 
 ### 7. Back to HeartCode

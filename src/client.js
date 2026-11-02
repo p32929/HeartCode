@@ -157,6 +157,9 @@ export class Client {
     // how long a streamed reply may go without sending anything before it counts as stalled (then
     // tried again, or the next model asked); a reply that keeps coming has no limit, however long
     this.idleMs = 150_000
+    // how long a streamed reply may take to start (text, thinking or a tool call; a provider's
+    // keep-alive pings while it queues don't count): then it's a failure, and the next model goes on
+    this.startMs = 60_000
     this.tokenRatio = 1 // the server's token count / est(): calibrated from usage (context.js)
     this.knownGood = 0 // the biggest request known to work, in tokens
     this.onUsage = null // (prompt tokens the server counted, estimate of what was sent): learns the window
@@ -230,6 +233,27 @@ export class Client {
       i = (r.at + 1) % n
     }
     return i
+  }
+  // "Best fit": these models first ("provider model", best first), the others after in your list's
+  // order; this message starts with the first, and a failure goes on to the next best. false: no list.
+  // null: your order again (best fit switched off).
+  orderBy(names) {
+    const r = this.rotation
+    if (!r) return false
+    if (!names) {
+      if (!r.base) return false // never reordered: nothing to undo (and "stay on the last that answered" holds)
+      ;[r.list, r.base, r.at] = [r.base, null, 0]
+      this.#use(r.list[0])
+      return true
+    }
+    r.base ??= [...r.list] // your order, kept for when best fit is switched off
+    const first = names.map((n) => r.list.find((t) => `${t.provider} ${t.model}` === n)).filter(Boolean)
+    if (!first.length) return false
+    r.list = [...new Set([...first, ...r.base])]
+    r.at = 0
+    log('rotate', `best fit: ${first.map((t) => t.model).join(', ')} first`)
+    this.#use(r.list[0])
+    return true
   }
   // A new message: back to #1 (unless it stays on the one that worked)
   newMessage() {
@@ -492,6 +516,9 @@ export class Client {
   // One request. Without `once`, rate limits and server errors get three quiet retries.
   async #chat(body, { onToken, onReasoning, onToolDelta, signal, once } = {}) {
     const req = { model: this.model, ...body }
+    // a request that doesn't say (a review, a pick, a summary…) is streamed too, when it has no tools:
+    // a model that goes silent is then given up on after idleMs, not after the whole timeout
+    if (body.stream === undefined && !body.tools?.length && !this.quirks.noStream) req.stream = true
     const can = this.can && { ...this.can, vision: this.can.vision && !this.quirks.noImages }
     if (can && req.messages) req.messages = fitFor(req.messages, can, this.model)
     if (can?.actions === 'guided') delete req.tools
@@ -521,6 +548,10 @@ export class Client {
       timer.unref?.()
     }
     const stop = idle ? (signal ? AbortSignal.any([signal, idle.signal]) : idle.signal) : signal
+    // not started answering in startMs: given up on like a failure (the next model of the list takes it)
+    let startTimer = idle && setTimeout(() => idle.abort(Object.assign(new Error(`${this.model} didn't start answering within ${Math.round(this.startMs / 1000)}s`), { name: 'TimeoutError', notStarted: true })), this.startMs)
+    startTimer?.unref?.()
+    const started = () => startTimer && (clearTimeout(startTimer), (startTimer = null))
     try {
       for (let attempt = 0; ; attempt++) {
         sent = Date.now()
@@ -539,7 +570,7 @@ export class Client {
         }
       }
     } catch (e) {
-      clearTimeout(timer)
+      clearTimeout(timer), started()
       // A provider that refuses one part of the request (400, or 422 from the ones that check
       // requests against a schema): the same request without that part. Learned (onLearn: kept in
       // the model's profile) only when that works; else it's put back and the refusal stands. The
@@ -566,6 +597,7 @@ export class Client {
       if (/reasoning_effort/.test(said) && 'reasoning_effort' in req && !this.quirks.noEffort) return without('noEffort')
       if (/stream_options/.test(said) && req.stream_options && !this.quirks.noStreamUsage) return without('noStreamUsage')
       if (/parallel_tool_calls/.test(said) && req.parallel_tool_calls && !this.quirks.noParallel) return without('noParallel')
+      if (/stream/i.test(said) && req.stream && body.stream === undefined && !this.quirks.noStream) return without('noStream') // streamed by HeartCode's choice: not again
       if (reasoningSent && /reasoning(?!_effort)/i.test(said)) return without('noReasoningBack')
       if (imagesSent && /image|vision|multimodal|modalit|content.{0,20}(type|part)/i.test(said)) return without('noImages')
       if (req.tools?.length && !this.quirks.simpleSchemas && /schema|function_declarations|parameters|additionalProperties|exclusiveM|minItems|unknown name|invalid.{0,40}(tool|function)|tools\[/i.test(said)) return without('simpleSchemas')
@@ -590,7 +622,7 @@ export class Client {
       this.#record(req, sent, { reply: r, firstAt })
       return r
     }
-    if (!body.stream) {
+    if (!req.stream) {
       const data = await res.json()
       const choice = data.choices?.[0] ?? {}
       const msg = choice.message ?? {}
@@ -631,7 +663,7 @@ export class Client {
       try {
         ;({ value, done: end } = await reader.read())
       } catch (e) {
-        clearTimeout(timer)
+        clearTimeout(timer), started()
         throw e
       }
       poke()
@@ -655,7 +687,7 @@ export class Client {
         if (chunk.error) {
           // an error sent in the stream: its status from its code, else a "too large" one as 400
           // (sent smaller, not again as it is), else a server error (tried again, a few times)
-          clearTimeout(timer)
+          clearTimeout(timer), started()
           const said = chunk.error.message ?? JSON.stringify(chunk.error)
           const code = Number(chunk.error.code ?? chunk.error.status)
           const err = Object.assign(new Error(`server error: ${said}`), { body: payload })
@@ -666,6 +698,7 @@ export class Client {
         if (chunk.usage) usage = chunk.usage
         const ch = chunk.choices?.[0]
         if (!ch) continue
+        started() // it answers (a keep-alive or an empty frame doesn't get here)
         if (ch.finish_reason) finishReason = ch.finish_reason
         const d = ch.delta ?? ch.message ?? {} // some proxies send the whole message in a chunk
         this.#reasoningField(d)
@@ -702,7 +735,7 @@ export class Client {
         break
       }
     }
-    clearTimeout(timer)
+    clearTimeout(timer), started()
     if (looped) {
       log('reply', `${this.model}: went into a loop in its ${looped.what} (cut after ${looped.at} characters): "${looped.sample}"`)
       if (looped.what === 'reasoning') reasoning = reasoning.slice(0, looped.at)

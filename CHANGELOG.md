@@ -2,6 +2,46 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.38 (2026-11-02)
+
+- **Asks what you want before building**: the questions whose answers change the result (what it's
+  for, looks, testing, robustness, scope), in rounds, each with a recommended answer; again for a
+  new message that leaves things open. The answers are kept with the conversation and steer the
+  checks and reviews: a demo isn't sent back for polish or tests nobody asked for. The UI guide and
+  the page review only go for looks when looks were asked for. When it made something that runs, it
+  ends with how to run it.
+- **The discipline skill**, built in and always on (from Karpathy's guidelines, Grill Me,
+  Superpowers, Ponytail and Caveman): think first, ask in rounds, root cause first, done-when and
+  non-goals, the least code that works, surgical changes, test first when tests are wanted, evidence
+  before claims, stop when proven, answers kept short. Skills with `use: always` go in every message;
+  Make my own copy on the settings page to change it or turn it off.
+- **Your models, by strength**: what each model is good and weak at is learned once (a web search,
+  kept in model-strengths.json for every project) and shown to the model with your test results.
+  The plan's parts can go to other models at the same time (parallel, model, files), each helper
+  changing only its own files. **Best fit** (Your models → HeartCode picks the model by): for each
+  new message the models that suit it best do the work, review it and check pages; your order breaks
+  ties. `--model-choice order|fit` for one run.
+- **Nothing hangs**: every command can carry on in the background, the model choosing how long to
+  wait and checking back; processes a command leaves running (`server &`) are kept as background
+  commands instead of killed. A reply must start within 60 seconds (Your models: A reply must start
+  within), then the next model answers; reviews, picks and summaries are streamed too, so a silent
+  model is given up on.
+- **Nothing lost**: the conversation is saved after every step, so a crash or kill mid-task loses
+  nothing and "continue" picks it up; the answers to its questions and folders named earlier come
+  back too.
+- **Logs, kind by kind**: requests, tools & commands, model choices, the agent's decisions, errors,
+  the conversation, debug, each switched on by itself (all off by default), a file per kind per run;
+  read on the settings page by run, searched and live.
+- **Updates**: a newer HeartCode is shown at start and in the status bar (asked of npm once a day);
+  `/update` shows what changed and installs it the way you installed HeartCode (a git checkout:
+  git pull). Check for updates on General.
+- Reads folders your message names (read only, outside the project); MCP arguments mended from the
+  tool's schema (a missing page id, msgId for msgid, a value for a list…); page syntax errors with
+  their line; "enough checks" after five with nothing changed; a nudge at the third change to the
+  same spot; plan-first holds back the whole reply.
+- Scrolled up, the conversation stays where you're reading while the answer comes in;
+  Alt+Shift+↑/↓ (or Ctrl+Home/End) to its top and bottom.
+
 ## 0.1.37 (2026-11-02)
 
 - Settings page, Your models: filters (search, provider, test result with counts, context, tools,

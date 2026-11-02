@@ -8,11 +8,11 @@
 //                             your config.json (providers, keys), the models' test results and
 //                             prices copied in; deleted when the last of them quits; your own is
 //                             never written to
-// Logs, when they're switched on (the settings page: Logging): each run's log in
-// ~/.heart/logs/runs/<day-month-year-hour-min-sec>/, a file per tab ("log": true in config.json);
-// each request to a model in ~/.heart/logs/requests/<same>/, a file per request ("logRequests").
-// Kept for logDays days (3 unless changed). HEART_LOG=/path/file.log logs this run in that one file
-// anyway; HEART_LOG=off: no run log.
+// Logs, each kind switched on by itself (the settings page: Logs; "logs" in config.json), all off
+// by default: text logs in ~/.heart/logs/runs/<day-month-year-hour-min-sec>/, a file per kind
+// (tools.log, models.log, agent.log, errors.log, conversation.log, debug.log); each request to a
+// model in ~/.heart/logs/requests/<same>/, a file per request. Kept for logDays days (3 unless
+// changed). HEART_LOG=/path/file.log logs everything of this run in that one file; HEART_LOG=off: none.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -75,26 +75,13 @@ if (first && !first.startsWith('-') && !SUBCOMMANDS.includes(first)) {
   // else: words, a task to run (heart "fix the failing test")
 }
 
-// the run's log, if switched on (not for -p/--print: its callers set HEART_LOG themselves if they
-// want one; nor for --help and --version); requests are logged by HeartCode itself (src/log.js)
-const logOn = (() => {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(process.env.HEART_HOME || realHome, 'config.json'), 'utf8')).log === true
-  } catch {
-    return false
-  }
-})()
+// where the logs go, and this run's name for its folders (src/log.js: each kind of log is switched on
+// by itself in config.json's "logs", also while HeartCode runs)
 const logs = temp ? path.join(os.tmpdir(), 'heart-temp-logs') : path.join(realHome, 'logs')
 process.env.HEART_LOGS ??= logs
 let runStamp = stamp
 for (let n = 2; ['runs', 'requests'].some((d) => fs.existsSync(path.join(logs, d, runStamp))); n++) runStamp = `${stamp}-${n}` // two runs in the same second
 process.env.HEART_LOG_STAMP ??= runStamp
-// The run's folder is set aside either way (made with its first line): the Logging page's switch
-// turns the log on or off while HeartCode runs (src/log.js, HEART_LOG_RUN).
-if (!process.env.HEART_LOG && !process.env.HEART_LOG_DIR && !args.some((a) => ['-p', '--print', '-h', '--help', '-v', '--version'].includes(a))) {
-  process.env.HEART_LOG_DIR = path.join(logs, 'runs', runStamp) // old ones: deleted after logDays (src/log.js)
-  process.env.HEART_LOG_RUN = logOn ? 'on' : 'off' // how it starts
-}
 
 process.argv = [process.argv[0], fileURLToPath(new URL('./heartcode.js', import.meta.url)), ...args]
 await import('./heartcode.js')

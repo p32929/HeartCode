@@ -212,6 +212,11 @@ Still running after {{secs}}s, now in the background as #{{id}}. Its output so f
 {{output}}
 (All of it goes to {{file}}. Check on it with background action "output" (wait: the seconds to give it), or "stop" it if it hangs.)
 
+## left-running
+
+<!-- Added to a command's result when it ended but left processes running (`server &`): they're kept as background command #{{id}}, not killed. -->
+(It left processes running (a server started with &?): they keep running, as background command #{{id}}. Use that one — don't start another; background action "stop" stops it, and it stops when HeartCode exits.)
+
 ## background-ended
 
 <!-- Told to the model at its next step when commands it started in the background have ended. {{jobs}}: one line each. -->
@@ -236,6 +241,11 @@ Load a skill: instructions for a kind of task. Use it when the task matches one:
 
 <!-- The todo tool: the model's checklist, shown to the user. -->
 Keep a todo list for a task with several steps: send the whole list each time (content and status: pending, in_progress or completed), and update it as you go: one item in_progress at a time, marked completed as soon as it's done. Skip it for small tasks.
+Your other models can do parts of it for you. For each part, ask:
+1. Faster: does it stand on its own (needs no other part's result, touches no file another part touches)? A game's physics, sound and HUD; a server and its page; researching three libraries; tests written while the code is built.
+2. Better: is another of your models better at it (by what each is good at)? A UI part, a hard bug, a huge file, images.
+3. Unsure: a bug whose cause isn't clear, a design choice? Two or three parts that each investigate or propose it, on different models; you compare and pick.
+Such a part: parallel: true, model (exactly as "Your other models" lists it, "provider model"; left out: your own), files (the files it alone changes). Only parts that truly stand alone: a part that needs another's result (tests of it, a README of it, a final check) waits and is yours, after. HeartCode starts those parts at once, each as a helper on its model, as soon as you save the list, and gives you what each did: you put it together and check it. Steps that build on each other, one file, a small fix with a clear cause, or a job quicker done than explained: yours, no parallel.
 
 ## tool-web_search
 
@@ -357,7 +367,7 @@ Carry on with them. If one is no longer needed or can't be done, update the list
 ## plan-first
 
 <!-- The result of the first file change in a message when there's no plan yet: the change is not made. -->
-Not changed yet: plan first. Write your plan with the todo tool — the end result in one line, then every step, each with how you'll check it works ("… — check: run npm test", "… — check: open it, no console errors"). A single small change: one item is enough. Then make this change again.
+Not changed yet: plan first. Write your plan with the todo tool — the end result in one line, then every step, each with how you'll check it works ("… — check: run npm test", "… — check: open it, no console errors"). A single small change: one item is enough. For each part, decide who does it: you, or one of your other models at the same time (parallel, model, files — see the todo tool) when it stands on its own or another model is better at it. Then make this change again (or leave it to the part that owns it).
 
 ## unchecked
 
@@ -521,6 +531,63 @@ weak: …
 
 <!-- Added to a check's result (a command, a browser call, a helper) when it's the {{n}}th check since the last change to the files: once per change. {{choices}}: what the user said about how to do it, if asked. -->
 (That's {{n}} checks since your last change.{{#if choices}} The user asked for: {{choices}}.{{/if}} You know by now whether it works. Works: stop checking and give your answer. Broken: fix the cause, then check it once. One script that reads the state (values, positions, counts) proves more than watching it with sleeps and screenshots.)
+
+## part
+
+<!-- The job of a helper doing one part of the plan (a todo item marked parallel or given a model). {{task}}: the user's request; {{plan}}: the whole plan; {{part}}: this part; {{files}}: the files it alone changes; {{choices}}: what the user said about how to do it. -->
+You do one part of a bigger job, beside other helpers doing the other parts at the same time.
+The user asked: {{task}}
+{{#if choices}}How they want it: {{choices}}
+{{/if}}The whole plan:
+{{plan}}
+
+Your part: {{part}}
+{{#if files}}You change only these files: {{files}}. Other parts own the rest: read them if you need to, never change them.
+{{/if}}Do your part completely, check that it works as far as it can on its own, and stop. Reply with what you did, the names (functions, ids, events) other parts will use, and anything another part must still do.
+
+## part-files
+
+<!-- A helper doing one part of the plan tried to change a file its part doesn't own. {{file}}: that file; {{files}}: the ones it owns. -->
+Not changed: {{file}} belongs to another part of the plan. Your part changes only {{files}}. If {{file}} needs something, say what in your reply: whoever puts the parts together will do it.
+
+## parts-done
+
+<!-- The todo tool's result after HeartCode ran the plan's parallel parts. {{reports}}: what each helper replied. -->
+These parts were done at the same time, each by a helper:
+{{reports}}
+{{#if unknown}}
+({{unknown}}: not one of your models, so those parts ran on yours. Your models are: {{models}}.)
+{{/if}}
+Put them together now: read what they changed, make what's still needed between them (what one says another must do), then check the whole thing once. A part not done: do it yourself or give it again.
+
+## split-check
+
+<!-- Added to the todo tool's result once a message, when a plan has three or more open parts and none runs side by side or on another model. -->
+(Could any of these parts run side by side, or go to one of your models that's better at it? If so, mark them (parallel, model, files) and save the list again; if not, go on.)
+
+## pick-models
+
+<!-- Its own request at the start of a message, in "best fit" mode (models picked by strengths, not the list's order). {{task}}: the user's message; {{choices}}: what they said about how to do it; {{list}}: the models that can do the job, numbered, with what each can do, is good and weak at, and how it did in the user's test; {{seers}}: the models that can see images, numbered. -->
+Pick which AI models should handle this coding task. The task:
+{{task}}
+{{#if choices}}How the user wants it: {{choices}}
+{{/if}}
+The models that can do it (numbered):
+{{list}}
+
+The models that can look at images (numbered on their own):
+{{seers}}
+
+Choose by what this task needs most (UI, a hard bug, reasoning, a long file, speed for a simple job) and by what each is good and weak at; a model that failed its test, last. Reply with exactly four lines and nothing else:
+work: the numbers of the first list, best first (the first does the task; the next take over if it fails) — 3 to 5 of them
+review: 2 numbers of the first list, the best at checking code (not the first of "work")
+look: 1 or 2 numbers of the second list, the best at judging how a page looks
+why: a few words on what the task needs
+
+## same-spot
+
+<!-- Added to an edit's result when it's the third change to the same spot (the same file, within a few lines) in this message. {{file}}, {{line}}: where. -->
+(That's the third change to {{file}} around line {{line}}. If what you check still comes out the same, the cause is probably somewhere else: stop changing this spot, find where the wrong value actually comes from (read the code that produces it, log it at each step), fix it there, then check once.)
 
 ## looped
 
