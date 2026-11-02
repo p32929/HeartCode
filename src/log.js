@@ -20,7 +20,7 @@ export const runLog = { on: Boolean(LOG_FILE || (LOG_DIR && (!AUTO || process.en
 // Where the logs go: bin/heart.js says (the system's temp folder with --temp)
 export const LOGS = path.resolve(process.env.HEART_LOGS || path.join(process.env.HEART_HOME || path.join(os.homedir(), '.heart'), 'logs'))
 export const REQUESTS = path.join(LOGS, 'requests')
-export const DAYS = 30 // how long logs are kept, unless config.json's logDays says otherwise
+export const DAYS = 3 // how long logs are kept, unless config.json's logDays says otherwise
 const STAMP = process.env.HEART_LOG_STAMP || stamp()
 
 export function stamp(d = new Date()) {

@@ -11,7 +11,7 @@
 // Logs, when they're switched on (the settings page: Logging): each run's log in
 // ~/.heart/logs/runs/<day-month-year-hour-min-sec>/, a file per tab ("log": true in config.json);
 // each request to a model in ~/.heart/logs/requests/<same>/, a file per request ("logRequests").
-// Kept for logDays days (30 unless changed). HEART_LOG=/path/file.log logs this run in that one file
+// Kept for logDays days (3 unless changed). HEART_LOG=/path/file.log logs this run in that one file
 // anyway; HEART_LOG=off: no run log.
 import fs from 'node:fs'
 import os from 'node:os'

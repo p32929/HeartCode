@@ -256,9 +256,9 @@
   .mrow.flash { animation: flash 1.6s ease-out; }
   @keyframes flash { from { background: var(--brand-soft); box-shadow: inset 3px 0 0 var(--brand); } to { background: none; box-shadow: none; } }
   .mrow .id { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .rows > .mrow, .rows > .mwrap { height: 56px; } /* one height: a long list only draws what's in view */
+  .rows > .mrow, .rows > .mwrap { height: 40px; } /* one height: a long list only draws what's in view */
   .mwrap .mrow { height: 100%; }
-  .mrow .can { display: block; margin-top: 2px; color: var(--muted); font-family: system-ui, sans-serif; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
+  .mrow .can { display: inline; margin-left: 12px; color: var(--muted); font-family: var(--sans); font-size: 11.5px; } /* on the name's line: one line a model */
   .mrow .add { color: var(--accent); font-size: 12.5px; font-weight: 600; white-space: nowrap; opacity: .55; transition: opacity .12s; }
   .mwrap:hover .mrow .add, .mrow:focus-visible .add { opacity: 1; }
   .mrow.taken .id { color: var(--muted); }
@@ -392,7 +392,7 @@
   .pill .again:hover:not(:disabled) { color: var(--text); }
   .pill.on { border-color: var(--accent); background: var(--accent-soft); }
   .pill.on .again { border-left-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-  .mt-h, .mtable li { display: grid; grid-template-columns: 14px 18px 44px minmax(200px, 1fr) 100px 60px 50px 70px 58px 112px 84px 186px; /* the last: Test · Request · Edit · ✕, as wide as they are */ align-items: center; column-gap: 6px; padding: 8px 18px; }
+  .mt-h, .mtable li { display: grid; grid-template-columns: 14px 18px 44px minmax(240px, 1fr) 110px 62px 52px 70px 58px 116px 84px 132px; /* the last: Test · Request · Edit · ✕, as wide as they are */ align-items: center; column-gap: 6px; padding: 8px 18px; }
   .mt-h button.mid, .mtable .mid { text-align: center; }
   .mt-h > :nth-child(11), .mtable .try { padding-left: 12px; } /* Works?: a little room after the right-aligned price */
   .mtable li .acts { justify-content: flex-start; }
@@ -680,6 +680,62 @@
   .opt.tg-off { opacity: .5; }
   .imp-row .imp-label { font-weight: 500; font-family: var(--mono); font-size: 12.5px; flex: none; }
   .imp-row .imp-desc { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ===== The look: icons, a color for each part, room used (no empty bands) ===== */
+  :root {
+    --c-blue: #2563eb; --c-violet: #7c3aed; --c-amber: #b45309; --c-teal: #0f766e; --c-pink: #db2777; --c-slate: #475569; --c-gray: #6b7280; --c-green: #15803d; --c-red: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme=light]) {
+    --c-blue: #60a5fa; --c-violet: #a78bfa; --c-amber: #fbbf24; --c-teal: #2dd4bf; --c-pink: #f472b6; --c-slate: #94a3b8; --c-gray: #9ca3af; --c-green: #4ade80; --c-red: #f87171;
+  } }
+  :root[data-theme=dark] { --c-blue: #60a5fa; --c-violet: #a78bfa; --c-amber: #fbbf24; --c-teal: #2dd4bf; --c-pink: #f472b6; --c-slate: #94a3b8; --c-gray: #9ca3af; --c-green: #4ade80; --c-red: #f87171; }
+  .icon { width: 16px; height: 16px; flex: none; display: inline-block; vertical-align: -3px; }
+  .icon svg { width: 100%; height: 100%; display: block; }
+  /* a tile: an icon on its color, soft */
+  .tile { display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 7px; color: var(--tc, var(--c-slate)); background: color-mix(in srgb, var(--tc, var(--c-slate)) 14%, transparent); }
+  .tile .icon { width: 15px; height: 15px; }
+  .tile.lg { width: 38px; height: 38px; border-radius: 10px; }
+  .tile.lg .icon { width: 20px; height: 20px; }
+  [data-tone=blue] { --tc: var(--c-blue); } [data-tone=violet] { --tc: var(--c-violet); } [data-tone=amber] { --tc: var(--c-amber); } [data-tone=teal] { --tc: var(--c-teal); }
+  [data-tone=pink] { --tc: var(--c-pink); } [data-tone=slate] { --tc: var(--c-slate); } [data-tone=gray] { --tc: var(--c-gray); } [data-tone=green] { --tc: var(--c-green); } [data-tone=red] { --tc: var(--c-red); }
+  /* the sidebar: each part with its tile */
+  nav a { padding: 6px 10px; }
+  nav a .tile { width: 24px; height: 24px; }
+  nav a:not(.on) .tile { filter: saturate(.75); }
+  nav a.on .tile { background: var(--tc); color: var(--panel); }
+  /* the page: less room around it; its title with its tile */
+  main { padding-top: 22px; }
+  .head { margin-bottom: 16px; align-items: center; }
+  .head h1 { display: flex; align-items: center; gap: 10px; margin-bottom: 2px; }
+  .page > .head:first-child { padding-right: 54px; } /* the theme button sits up there */
+  .mcp-row { align-items: flex-start; }
+  .mcp-row > .tile { margin-top: 2px; }
+  .subtabs { margin-bottom: 14px; }
+  .card:not(.mt-card):not(.reqs-card):not(.work > .card) { padding: 16px 18px 18px; } /* the ones that set their own (edge to edge) keep it */
+  .card > h2:first-child, .card > .card-h, h2[data-ic] { display: flex; align-items: center; gap: 9px; }
+  /* buttons: their icon, colored by what they do */
+  button .icon { width: 15px; height: 15px; margin-left: -2px; }
+  button.small .icon { width: 14px; height: 14px; }
+  button .icon.k-save, button .icon.k-add { color: var(--c-green); }
+  button.primary .icon { color: inherit; }
+  button .icon.k-test { color: var(--c-blue); }
+  button .icon.k-del { color: var(--c-red); }
+  button .icon.k-refresh { color: var(--c-amber); }
+  button .icon.k-edit { color: var(--c-violet); }
+  button .icon.k-info { color: var(--c-slate); }
+  button:disabled .icon { opacity: .55; }
+  /* General: the cards packed in two columns, no gaps under the short ones */
+  .settings-col { display: block; columns: 2; column-gap: 16px; }
+  .settings-col > .card { break-inside: avoid; display: block; width: 100%; margin: 0 0 16px; }
+  .settings-col > .card.wide { column-span: all; }
+  @media (max-width: 1280px) { .settings-col { columns: 1; } }
+  /* Your models: a row's actions as icon buttons */
+  .mtable li .acts .ib { width: 30px; height: 28px; padding: 0; justify-content: center; }
+  .mtable li .acts .ib .icon { margin: 0; width: 15px; height: 15px; }
+  .mtable li .acts .ib.k-test { color: var(--c-blue); }
+  .mtable li .acts .ib.k-info { color: var(--c-slate); }
+  .mtable li .acts .ib.k-edit { color: var(--c-violet); }
+  .mtable li .acts .ib.k-del { color: var(--c-red); }
 </style>
 </head>
 <body>
@@ -783,7 +839,7 @@
           <label for="l-days"><b>Keep logs for</b></label>
           <input type="number" id="l-days" min="1" max="3650" step="1" value="30">
           <span>days</span>
-          <span class="muted">Older ones (both kinds) are deleted when HeartCode starts, and right away when you change this. 30 days unless you change it.</span>
+          <span class="muted">Older ones (both kinds) are deleted when HeartCode starts, and right away when you change this. 3 days unless you change it.</span>
         </div>
       </div>
       <div class="card reqs-card">
@@ -1046,6 +1102,115 @@ const h = (tag, props = {}, ...kids) => {
   el.append(...kids.flat(Infinity).filter((x) => x != null && x !== false))
   return el
 }
+// Icons: simple line drawings (24×24, drawn with the text's color), no files or fonts to load.
+const ICON = {
+  list: 'M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01',
+  sliders: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+  bell: 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0',
+  sparkles: 'M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2zM19 3v4M17 5h4',
+  plug: 'M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4',
+  message: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 9h8M8 13h5',
+  wrench: 'M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z',
+  save: 'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8',
+  play: 'M7 4l13 8-13 8z',
+  refresh: 'M21 12a9 9 0 1 1-2.6-6.4L21 8M21 3v5h-5',
+  plus: 'M12 5v14M5 12h14',
+  trash: 'M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6',
+  pencil: 'M17 3l4 4L7 21H3v-4z',
+  search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-4.3-4.3',
+  x: 'M18 6L6 18M6 6l12 12',
+  check: 'M20 6L9 17l-5-5',
+  bars: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
+  download: 'M12 3v12M7 10l5 5 5-5M5 21h14',
+  eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+  send: 'M22 2L11 13M22 2l-7 20-4-9-9-4z',
+  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+  palette: 'M12 3a9 9 0 1 0 0 18c1 0 1.5-.8 1.5-1.5 0-1.5 1-2 2.5-2H18a3 3 0 0 0 3-3c0-5-4-8.5-9-8.5zM7.5 11h.01M10 7h.01M15 7h.01',
+  toggle: 'M7 7h10a5 5 0 0 1 0 10H7A5 5 0 0 1 7 7zM7 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',
+  cpu: 'M7 7h10v10H7zM10 10h4v4h-4zM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3',
+  mic: 'M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 11a7 7 0 0 1-14 0M12 18v4',
+  globe: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2c3 3 4 6.5 4 10s-1 7-4 10c-3-3-4-6.5-4-10s1-7 4-10z',
+  server: 'M3 4h18v7H3zM3 13h18v7H3zM7 7.5h.01M7 16.5h.01',
+  file: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h5',
+  activity: 'M22 12h-4l-3 9L9 3l-3 9H2',
+  link: 'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1',
+  layout: 'M3 3h18v18H3zM3 15h18M8 18h.01',
+  stop: 'M6 6h12v12H6z',
+  swap: 'M7 4L3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7',
+  filter: 'M3 4h18l-7 8v6l-4 2v-8z',
+  key: 'M15 7a4 4 0 1 1-3.9 4.9L3 20v1h3l1-1v-2h2v-2h2l1.1-1.1A4 4 0 0 1 15 7zM16 8h.01',
+  clock: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 6v6l4 2',
+  tool: 'M4 20l6-6M14 4l6 6-8 8-6-6zM15 9l-6 6',
+  folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+  terminal: 'M4 17l6-5-6-5M12 19h8',
+  upload: 'M12 21V9M7 14l5-5 5 5M5 3h14',
+  arrow: 'M5 12h14M13 6l6 6-6 6',
+}
+const ic = (name, cls = '') => {
+  const el = document.createElement('span')
+  el.className = `icon ${cls}`.trim()
+  el.setAttribute('aria-hidden', 'true')
+  el.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="${ICON[name] ?? ICON.check}"/></svg>`
+  return el
+}
+const tile = (name, tone, big = false) => {
+  const t = h('span', { className: `tile${big ? ' lg' : ''}` }, ic(name))
+  t.dataset.tone = tone
+  return t
+}
+// each part of the page: its icon and its color (the sidebar, the page's title)
+const PART = { models: ['list', 'blue'], providers: ['server', 'blue'], general: ['sliders', 'slate'], statusbar: ['layout', 'slate'], notify: ['bell', 'amber'], skills: ['sparkles', 'violet'], mcp: ['plug', 'teal'], prompts: ['message', 'pink'], logging: ['wrench', 'gray'], files: ['folder', 'gray'] }
+// a button's icon, by what it says: [words it starts with, icon, kind (its color)]
+const BUTTON_ICONS = [
+  [/^save|^keep only/i, 'save', 'k-save'], [/^\+|^add|^new /i, 'plus', 'k-add'], [/^install/i, 'download', 'k-save'], [/^import/i, 'download', 'k-info'],
+  [/^test|^send a test/i, 'play', 'k-test'], [/^request|^show the raw/i, 'eye', 'k-info'], [/^edit|^set up/i, 'pencil', 'k-edit'],
+  [/^remove|^delete|^disconnect/i, 'trash', 'k-del'], [/^stop/i, 'stop', 'k-del'], [/^refresh|^retry|^get from models|^look it up|^reset/i, 'refresh', 'k-refresh'],
+  [/^provider ranking/i, 'bars', 'k-info'], [/^clear|^select none/i, 'x', 'k-info'], [/^invert/i, 'swap', 'k-info'], [/^connect|^sign in/i, 'link', 'k-test'],
+  [/^your models/i, 'list', 'k-info'], [/^collapse|^expand/i, 'list', 'k-info'], [/^turn off/i, 'x', 'k-del'],
+]
+// card titles: their icon and color
+const TITLE_ICONS = [
+  [/^permissions/i, 'shield', 'green'], [/^terminal colors/i, 'palette', 'pink'], [/^behavior/i, 'toggle', 'blue'], [/^model$/i, 'cpu', 'violet'], [/^voice/i, 'mic', 'amber'],
+  [/^external tools/i, 'tool', 'slate'], [/^web search/i, 'globe', 'teal'], [/^telegram/i, 'send', 'blue'], [/^when to send/i, 'bell', 'amber'], [/^servers/i, 'server', 'teal'],
+  [/^install from/i, 'download', 'violet'], [/^the run's log/i, 'file', 'gray'], [/^requests logged/i, 'activity', 'blue'], [/^requests$/i, 'activity', 'blue'], [/^lines/i, 'layout', 'slate'],
+  [/^items/i, 'list', 'slate'], [/^show the status bar/i, 'layout', 'slate'],
+]
+// Icons put where they belong, as things are drawn (one pass: a button or title that has one is left alone)
+function decorate(root = document.body) {
+  for (const b of root.querySelectorAll('button:not([data-ic])')) {
+    if (b.closest('.acts, .mt-h:not(.mt-hpick), .chip, .pill, .seg, .subtabs, .theme-btn, .f-tog, .sw, nav, [data-no-ic]') || b.querySelector('.icon')) continue
+    const text = b.textContent.trim()
+    const hit = BUTTON_ICONS.find(([re]) => re.test(text))
+    if (!hit || text.length < 3) continue
+    b.dataset.ic = '1'
+    if (/^\+\s*/.test(text)) b.textContent = text.replace(/^\+\s*/, '')
+    b.prepend(ic(hit[1], hit[2]))
+  }
+  for (const t of root.querySelectorAll('.card h2:first-child:not([data-ic]), .card h2:first-of-type:not([data-ic])')) {
+    const hit = TITLE_ICONS.find(([re]) => re.test(t.textContent.trim()))
+    if (!hit) continue
+    t.dataset.ic = '1'
+    t.prepend(tile(hit[1], hit[2]))
+  }
+}
+let decorating = false
+new MutationObserver(() => {
+  if (decorating) return
+  decorating = true
+  queueMicrotask(() => ((decorating = false), decorate()))
+}).observe(document.documentElement, { childList: true, subtree: true, characterData: true })
+// the sidebar's parts and the pages' titles: their tiles
+addEventListener('DOMContentLoaded', () => {
+  for (const a of document.querySelectorAll('nav a[data-page]')) {
+    const [name, tone] = PART[a.dataset.page] ?? ['list', 'slate']
+    a.querySelector('.ic')?.replaceWith(tile(name, tone))
+  }
+  for (const sec of document.querySelectorAll('section.page')) {
+    const [name, tone] = PART[sec.id.replace(/^page-/, '')] ?? ['list', 'slate']
+    sec.querySelector('.head h1')?.prepend(tile(name, tone, true))
+  }
+  decorate()
+})
 // an element's content, without the null/false parts (left out on purpose)
 const put = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter((x) => x != null && x !== false))
 let S = null
@@ -1441,7 +1606,8 @@ $('dev-all').onclick = async () => {
 $('m-search').oninput = (e) => ((modelQuery = e.target.value), (searchOpen = true), S && drawProviders(S), applyFolds())
 // A model's tooltip: its full name and what's known about it (from the provider, HeartCode's price
 // list and its own test), and what a click does. Shown on hover and on keyboard focus.
-const kTok = (n) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n))
+// a token count, short: 1M, 1.05M (two decimals, not rounded up to 1.1M), 131k
+const kTok = (n) => (n >= 1e6 ? `${Number((n / 1e6).toFixed(2))}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n))
 const usd = (x) => (x === 0 ? 'free' : `$${x < 0.01 ? x.toFixed(4) : x < 1 ? x.toFixed(3).replace(/0$/, '') : x.toFixed(2)}`)
 // where what a model can do comes from (the Your models table)
 const FROM = { 'models.dev': 'from models.dev', you: 'set by you', tested: 'tested' }
@@ -1487,7 +1653,7 @@ function showTried(t) {
   const li = document.querySelector(`#mt li[data-key="${CSS.escape(keyOf(t))}"]`)
   li?.querySelector('.try')?.replaceWith(triedCell(t))
   const btn = li?.querySelector('.row-test')
-  if (btn) (btn.disabled = Boolean(TRIES[keyOf(t)]?.going)), (btn.textContent = btn.disabled ? '…' : 'Test')
+  if (btn) (btn.disabled = Boolean(TRIES[keyOf(t)]?.going)), btn.replaceChildren(ic(btn.disabled ? 'clock' : 'play'))
   if (!TRIES[keyOf(t)]?.going) mineSoon() // a result: the counts by result (and a sort by it) change
 }
 let mineFrame = 0
@@ -1899,7 +2065,7 @@ async function clearAdded(p) {
   if (inList.length && !(await saveOrder(S.order.filter((t) => !inList.includes(t))))) return
   act('/api/provider/added', { name: p.name, all: true }, `${p.name}: the models you added are forgotten`)
 }
-const CAT_ROW = 56 // a model's row on the left: its name, and what it can do under it
+const CAT_ROW = 40 // a model's row: its name, and what it can do beside it
 // The models ticked (provider → Set of ids): kept while you search, so ones ticked for one search
 // and the next are added (or taken off) together. SHOWN: each provider's models shown now (the
 // search's matches).
@@ -2379,15 +2545,15 @@ function tableRow(t, at, pick) {
     h('span', { className: 'n', textContent: `#${at + 1}`, title: SORT.length || filtering() ? 'its place in your list' : '' }),
     h('span', { className: 'm' }, h('span', { className: 'name', textContent: t.model, title: t.model }), tag),
     h('span', { className: 'p', textContent: isOff(t.provider) ? `${t.provider} · off` : t.provider, title: t.provider }),
-    h('span', { className: 'num', textContent: ctx ? `${t.tested?.sure === false ? '~' : ''}${kTok(ctx)}` : '–' }),
+    h('span', { className: 'num', textContent: ctx ? `${t.tested?.sure === false ? '~' : ''}${kTok(ctx)}` : '–', title: ctx ? `${ctx.toLocaleString()} tokens${t.tested?.sure === false ? ' (assumed: the server and models.dev don\'t say)' : ''}` : '' }),
     yes(c.tools), yes(c.thinking), yes(c.images),
     h('span', { className: 'num price', textContent: priceOf(t), title: t.price ? `in ${money(t.price.input)} · out ${money(t.price.output)} per million tokens` : 'price not known' }),
     triedCell(t),
     h('span', { className: 'acts' },
-      h('button', { type: 'button', className: 'small ghost row-test', textContent: going ? '…' : 'Test', disabled: going, title: 'send it a short message to see that it really answers', 'aria-label': `test ${t.model}`, onclick: () => tryModel(t) }),
-      h('button', { type: 'button', className: 'small ghost', textContent: 'Request', title: 'send it "Hello" and see exactly what was sent and what came back', 'aria-label': `raw request to ${t.model}`, onclick: () => hello(t.provider, t.model) }),
-      h('button', { type: 'button', className: 'small ghost', textContent: 'Edit', title: 'what it can do: context, tool calls, thinking, images (or look it up in models.dev again)', 'aria-label': `edit ${t.model}`, onclick: () => openSetup(t) }),
-      h('button', { type: 'button', className: 'small ghost danger', textContent: '✕', title: 'take it off your list (it stays under its provider)', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) })))
+      h('button', { type: 'button', className: 'small ghost ib k-test row-test', disabled: going, title: going ? 'testing…' : 'Test: send it a short message to see that it really answers', 'aria-label': `test ${t.model}`, onclick: () => tryModel(t) }, ic(going ? 'clock' : 'play')),
+      h('button', { type: 'button', className: 'small ghost ib k-info', title: 'Request: send it "Hello" and see exactly what was sent and what came back', 'aria-label': `raw request to ${t.model}`, onclick: () => hello(t.provider, t.model) }, ic('eye')),
+      h('button', { type: 'button', className: 'small ghost ib k-edit', title: 'Edit what it can do: context, tool calls, thinking, images (or look it up in models.dev again)', 'aria-label': `edit ${t.model}`, onclick: () => openSetup(t) }, ic('pencil')),
+      h('button', { type: 'button', className: 'small ghost ib k-del', title: 'Remove it from your list (it stays under its provider)', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) }, ic('trash'))))
 }
 
 // your list changed: the rows and counts it touches, in place
@@ -2567,6 +2733,7 @@ function drawNotify(s) {
         h('button', { className: 'ghost', type: 'button', textContent: 'Disconnect', onclick: () => confirm('Stop sending notifications to Telegram and forget the bot token?') && act('/api/telegram/remove', {}, 'Telegram disconnected') })))
   }
   put($('tg-events'), Object.entries(t.names ?? {}).map(([k, label]) => h('label', { className: 'opt' + (t.connected ? '' : ' tg-off') },
+    tile(...({ done: ['check', 'green'], failed: ['x', 'red'], waiting: ['clock', 'amber'] }[k] ?? ['bell', 'amber'])),
     h('div', { className: 't' }, h('b', { textContent: label }), h('span', { textContent: TG_EVENT_INFO[k] ?? '' })),
     sw({ checked: t.events?.[k] !== false, disabled: !t.connected, 'aria-label': label, onchange: (e) => act('/api/telegram/set', { event: k, value: e.target.checked }, `${label}: ${e.target.checked ? 'on' : 'off'}`) }))))
 }
@@ -2749,7 +2916,8 @@ $('c-cancel').onclick = () => $('c-form').close()
 function drawMcp(s) {
   const authTag = (a) => (a === 'in' ? h('span', { className: 'tag ok', textContent: 'signed in' }) : h('span', { className: 'tag need', textContent: 'sign-in needed' }))
   put($('c-list'), h('h2', { textContent: 'Servers' }), h('p', { className: 'sub', textContent: 'Built in, and yours. Remote ones (a URL) may need signing in; local ones don\'t. Switch one off to keep it without using it.' }),
-    s.mcp.length ? s.mcp.map((m) => h('div', { className: 'opt' },
+    s.mcp.length ? s.mcp.map((m) => h('div', { className: 'opt mcp-row' },
+      tile(m.remote ? 'globe' : m.name.includes('chrome') || m.name.includes('browser') ? 'globe' : m.name.includes('computer') ? 'cpu' : 'plug', m.on ? 'teal' : 'gray'),
       h('div', { className: 't' }, h('b', {}, m.name, ' ', h('span', { className: 'tag', textContent: m.from }), m.remote ? authTag(m.auth) : null), m.description ? h('span', { textContent: m.description }) : null, h('div', { className: 'mono muted', style: 'word-break:break-all;margin-top:3px', textContent: m.what })),
       m.remote ? h('button', { className: 'small', textContent: m.auth === 'in' ? 'Sign in again' : 'Sign in', onclick: () => act('/api/mcp/login', { name: m.name }, `signed in to ${m.name}`) }) : null,
       m.from === 'yours' ? h('button', { className: 'small danger', textContent: 'Remove', onclick: () => confirm(`Remove the MCP server ${m.name}?`) && act('/api/mcp/remove', { name: m.name }, `removed ${m.name}`) }) : null,

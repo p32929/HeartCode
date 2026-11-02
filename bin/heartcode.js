@@ -198,7 +198,7 @@ const ARGS = {
 // Terminal.app can't report Shift+Enter; Option+Enter works there ("Use Option as Meta key").
 const NEWLINE_KEY = process.env.TERM_PROGRAM === 'Apple_Terminal' ? 'Option+Enter' : 'Shift+Enter'
 
-const kTokens = (n) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n))
+const kTokens = (n) => (n >= 1e6 ? `${Number((n / 1e6).toFixed(2))}M` : n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n)) // 1.05M, not rounded up to 1.1M
 
 const mask = (k) => (k ? (k.length > 12 ? `${k.slice(0, 4)}…${k.slice(-4)}` : '…') : c.dim('no key'))
 

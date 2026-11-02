@@ -146,7 +146,7 @@ HeartCode what it can do.
   with [@BotFather](https://t.me/BotFather), paste its token, press Start in the bot, and
   HeartCode finds your chat.
 - **Advanced → Logs**: a log of each run, and each request with its reply, in files of their own.
-  Logs older than 30 days are deleted (you can change that).
+  Logs older than 3 days are deleted (you can change that).
 
 ### 7. Back to HeartCode
 
