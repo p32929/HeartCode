@@ -2,6 +2,24 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.37 (2026-11-02)
+
+- Settings page, Your models: filters (search, provider, test result with counts, context, tools,
+  thinking, images, free) that combine and are kept. Filtered, **Use these N** makes the models shown
+  the only ones HeartCode uses, in the order shown (asked first; the others stay under Providers);
+  Test N shown tests just them; dragging works while filtered. The page laid out in full-width rows:
+  the list's settings in three cells, filters on one line, what's shown and the list's actions on
+  one line, the column names (or the selection's actions) sticky above aligned rows.
+- The whole settings page with icons and colors: each part's icon on its own color in the sidebar
+  and on its title, buttons with icons colored by what they do, card titles with icons, less room
+  around pages and cards, General's cards packed in two columns, rows' actions as icon buttons,
+  Providers one line a model.
+- Saving the list builds the page's state once, not three times (the server skips its own writes);
+  a sort or filter changed on the page isn't undone by an older state.
+- Contexts with two decimals (1.05M, not rounded up to 1.1M), on the page and in the status bar;
+  the exact count on hover. Checked against models.dev for every model: the data is right.
+- Logs are kept 3 days by default instead of 30 (Advanced → Logs changes it).
+
 ## 0.1.36 (2026-11-02)
 
 - Voice: Space in an empty box (or /voice) starts listening at once, no second key; what you say

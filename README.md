@@ -133,9 +133,9 @@ On **Models → Your list**:
    Each test waits up to 10 seconds; the **Timeout** box next to it changes that.
 4. **Filter them** (optional): by name, provider, test result (works, doesn't, not tested, or one
    error like 402), context, tools, thinking, images or free. **Test all** then tests only the ones
-   shown. **Save list** puts the ones shown first, in the order you see (the rest after them);
-   **Keep only these** makes them your whole list. Filter to the working ones, sort by Works?, save:
-   your fastest working models come first.
+   shown, and **Use these N** makes them the models HeartCode uses, in the order you see (the others
+   stay under Providers). Filter to the working ones, sort by Works?, Use these: HeartCode uses your
+   working models, fastest first.
 
 If a model says *not found* in models.dev, **Retry** looks it up again, or **Set up** tells
 HeartCode what it can do.

@@ -2402,10 +2402,10 @@ function drawMine(s) {
     slots.forEach((k, m) => (all[k] = list[m]))
     return keep(all, true)
   }
-  // Save list: what's shown, in the order shown; filtered, the others after them as they were
-  const saveList = () => keep(filtered ? [...view, ...order.filter((t) => !view.includes(t))] : view)
-  const keepOnly = () => {
-    if (!confirm(`Keep only these ${n(view.length)} as your list, in this order? The other ${n(order.length - view.length)} come off it (they stay under their providers: you can add them back).`)) return
+  // Save list: the models HeartCode uses become the ones shown, in the order shown. Filtered: only
+  // those (asked first; the others stay under Providers, to add back any time)
+  const saveList = () => {
+    if (filtered && !confirm(`HeartCode will use only these ${n(view.length)}, in this order.\n\nThe other ${n(order.length - view.length)} stay under Providers: add any back whenever you like.`)) return
     return keep(view)
   }
   const removePicked = () => {
@@ -2451,8 +2451,7 @@ function drawMine(s) {
       filtering() || SORT.length ? h('button', { className: 'small ghost', textContent: 'Clear all', title: 'every filter and the sort off: your whole list, in your order', onclick: clearView }) : null),
     h('div', { className: 'mt-do' },
       h('button', { className: 'small', textContent: filtered ? `Test ${n(shown.length)} shown` : 'Test all', disabled: testingAll || !shown.length, title: `send ${filtered ? 'the models shown' : 'each model'} a short message to see which really answer`, onclick: () => tryAll(filtered ? shown : order) }),
-      filtered ? h('button', { className: 'small', textContent: `Keep only these ${n(view.length)}`, disabled: !view.length, title: 'your list becomes the models shown, in this order; the others come off it (they stay under their providers)', onclick: keepOnly }) : null,
-      h('button', { className: 'small primary', textContent: 'Save list', disabled: !view.length || order.length < 2, title: filtered ? `save these ${n(view.length)} first, in the order shown; the other ${n(order.length - view.length)} after them, as they are` : 'save the list in the order shown (#1 first)', onclick: saveList })))
+      h('button', { className: 'small primary', textContent: filtered ? `Use these ${n(view.length)}` : 'Save list', disabled: !view.length || order.length < 2, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : 'save the list in the order shown (#1 first)', onclick: saveList })))
 
   // --- the table ---
   const all = view.length > 0 && view.every((t) => PICKED.has(keyOf(t)))
