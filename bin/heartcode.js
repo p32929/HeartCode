@@ -808,6 +808,7 @@ class App {
       .filter((t) => cfg.providers[t.provider] && t.model && !seen.has(`${t.provider}/${t.model}`) && seen.add(`${t.provider}/${t.model}`))
       .map((t) => ({ ...t, baseUrl: cfg.providers[t.provider].baseUrl, apiKey: cfg.providers[t.provider].apiKey }))
     this.s?.client.setRotation(list, cfg.rotation ?? {})
+    if (fitMode(cfg)) this.s?.client.orderBy(this.orchestrators().map((t) => `${t.provider} ${t.model}`)) // the first orchestrator answers first (and the status bar shows it)
   }
 
   async use(name, model) {
@@ -868,7 +869,7 @@ class App {
     const rot = this.s?.client.rotation
     if (rot) return rot.list[rot.at]
     if (this.s) return { provider: this.s.client.provider, model: this.s.client.model }
-    return this.sessionModels()[0] ?? null
+    return (fitMode(cfg) ? this.orchestrators()[0] : null) ?? this.sessionModels()[0] ?? null
   }
 
   // your list has models, but the providers of all of them are switched off
@@ -1218,8 +1219,8 @@ function applySettings(apps, cfg, what) {
       if (app.s && !(cfg.providers[cfg.provider] && cfg.model)) now(() => ((app.s = null), ui.print(c.dim('settings: no model chosen'))))
       else if (app.s && !app.myModels().length) now(() => ((app.s = null), ui.print(c.dim('settings: the providers of all your models are switched off'))))
     }
-    // your model list: into the running session now, its next request goes to the new #1
-    if ((what === 'model' || what === 'setting:rotation') && !app.cfg.session && app.s && cfg.providers[cfg.provider] && cfg.model) {
+    // your model list: into the running session now, its next request goes to the new #1 (or orchestrator)
+    if (['model', 'setting:rotation', 'setting:modelChoice', 'setting:orchestrators'].includes(what) && !app.cfg.session && app.s && cfg.providers[cfg.provider] && cfg.model) {
       const was = `${app.s.client.provider} · ${app.s.client.model}`
       app.useRotation()
       const is = `${app.s.client.provider} · ${app.s.client.model}`

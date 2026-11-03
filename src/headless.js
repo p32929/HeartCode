@@ -90,7 +90,7 @@ export async function runHeadless(app, opts) {
   }
   s.appendSystem = opts.appendSystem || undefined
   const session_id = app.chat.id
-  const model = `${app.cfg.provider}/${s.client.model}`
+  const model = `${s.client.provider ?? app.cfg.provider}/${s.client.model}`
 
   // usage and request count, over everything this message sends (tool loop, compaction, memory)
   // (also your other models', when this one hands them a job: modelUsage has each)

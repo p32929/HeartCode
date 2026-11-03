@@ -2,6 +2,17 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.44 (2026-11-03)
+
+- **Orchestrators first**: with Pick on "an orchestrator hands it out", the model shown (status bar,
+  headless `init`) is the first orchestrator, the one that answers first. With several, they go in
+  your list's order. Your models lists them at the top. Changing Pick or the orchestrators reaches a
+  running HeartCode at once.
+- **Tooltips at once**: every tooltip on the settings page shows the moment you point at it (or tab
+  to it), in the page's own style, not the browser's slow one. A **?** beside Mark as orchestrator(s)
+  says what it does.
+- A headless run that started on another provider's model named the wrong provider in its `init` line.
+
 ## 0.1.43 (2026-11-03)
 
 - **An orchestrator in place of best fit**: with Pick on "an orchestrator hands it out", each

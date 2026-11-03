@@ -585,6 +585,12 @@
   /* a model's tooltip: shown at once on hover (or keyboard focus), next to the row */
   #tip { position: fixed; z-index: 30; max-width: 380px; padding: 13px 15px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow-pop); font-size: 12.5px; pointer-events: none; opacity: 0; transition: opacity .08s; }
   #tip.show { opacity: 1; }
+  /* every other tooltip (titles): at once, the page's own look */
+  #hint { position: fixed; z-index: 31; max-width: 340px; padding: 7px 10px; border-radius: 8px; background: var(--text); color: var(--bg); font-size: 12px; line-height: 1.45; box-shadow: var(--shadow-pop); pointer-events: none; opacity: 0; transition: opacity .06s; white-space: pre-line; }
+  #hint.show { opacity: 1; }
+  .with-q { display: inline-flex; align-items: center; gap: 5px; }
+  .q { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 700; cursor: help; }
+  .q:hover, .q:focus-visible { color: var(--text); border-color: var(--muted); outline: none; }
   #tip .tid { font-family: var(--mono); font-weight: 700; font-size: 13px; word-break: break-all; }
   #tip .tname { color: var(--muted); margin-top: 1px; }
   #tip dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 10px 0 0; }
@@ -1821,6 +1827,46 @@ function withTip(el, content) {
 }
 addEventListener('scroll', () => $('tip').classList.remove('show'), true)
 
+// Every other tooltip (an element's title): shown at once in a box of the page's own, not the
+// browser's (which waits a second and can't be styled). The title moves to data-tip on first hover,
+// so the browser's own doesn't show as well; a title set again later is taken in the same way.
+const hint = h('div', { id: 'hint', role: 'tooltip' })
+document.body.append(hint)
+let hintFor = null
+const tipOf = (el) => {
+  for (; el && el !== document.body; el = el.parentElement) {
+    const title = el.getAttribute('title')
+    if (title !== null) {
+      el.removeAttribute('title') // set again to '' later: no tooltip now
+      if (title) (el.dataset.tip = title), el.getAttribute('aria-label') || el.setAttribute('aria-description', title)
+      else delete el.dataset.tip
+    }
+    if (el.dataset?.tip) return el
+  }
+  return null
+}
+const hideHint = () => ((hintFor = null), hint.classList.remove('show'))
+const showHint = (el) => {
+  hintFor = el
+  hint.textContent = el.dataset.tip
+  hint.classList.add('show')
+  const r = el.getBoundingClientRect()
+  const t = hint.getBoundingClientRect()
+  const below = r.bottom + 8 + t.height < innerHeight
+  hint.style.top = `${below ? r.bottom + 6 : Math.max(8, r.top - t.height - 6)}px`
+  hint.style.left = `${Math.min(Math.max(8, r.left + r.width / 2 - t.width / 2), innerWidth - t.width - 8)}px`
+}
+const hintAt = (e) => {
+  const el = document.body.classList.contains('sorting') ? null : tipOf(e.target)
+  if (el === hintFor) return
+  el ? showHint(el) : hideHint()
+}
+document.addEventListener('mouseover', hintAt)
+document.addEventListener('focusin', hintAt)
+document.addEventListener('focusout', hideHint)
+document.addEventListener('mousedown', hideHint)
+addEventListener('scroll', hideHint, true)
+
 function drawProviders(s) {
   const order = s.order
   const none = !s.providers.length
@@ -2205,6 +2251,7 @@ const leads = (s = S) => {
   const picked = able.filter((t) => (s.orchestrators ?? []).some((o) => o.provider === t.provider && o.model === t.model))
   return picked.length ? picked : able.slice(0, 1)
 }
+const ORCH_ABOUT = 'Makes the selected models your orchestrators, in place of the ones you have now. Every message then goes to one of them first: it replies on its own when it can (a hello, a quick question), and hands real work to the other models it picks. They only orchestrate and do no work themselves. A model that can\'t call tools is skipped.'
 const isLead = (t) => leads().some((o) => o.provider === t.provider && o.model === t.model)
 const setLeads = (list, done) => act('/api/orchestrators', { list: list.map(({ provider, model }) => ({ provider, model })) }, done)
 const can = (t) => ({ tools: t.tested ? t.tested.mode === 'tools' : t.known?.tools !== false, thinking: Boolean(t.tested ? t.tested.thinking : t.known?.thinking), images: Boolean(t.tested ? t.tested.vision : t.known?.images) })
@@ -2385,7 +2432,9 @@ function drawMine(s) {
   const order = shownOrder() // a provider switched off: its models aren't shown (nor tested, sorted, ranked)
   $('n-mine').textContent = order.length || ''
   const shown = filtering() ? order.filter((t) => passes(t)) : order
-  const view = sorted(shown)
+  // an orchestrator: they come first (they answer first), in your order; the rest as sorted
+  const first = new Set(S.settings.modelChoice === 'fit' ? leads().map(keyOf) : [])
+  const view = ((v) => (first.size ? [...v.filter((t) => first.has(keyOf(t))), ...v.filter((t) => !first.has(keyOf(t)))] : v))(sorted(shown))
   const filtered = shown.length !== order.length
   for (const k of PICKED) if (placeOf(...k.split(/\/(.*)/s)) === undefined) PICKED.delete(k) // gone from the list
   const n = (x) => x.toLocaleString()
@@ -2489,12 +2538,12 @@ function drawMine(s) {
         h('div', { className: 'mt-pickbar' },
           h('b', { textContent: `${n(PICKED.size)} selected` }),
           h('button', { className: 'small', textContent: 'Test', disabled: testingAll, onclick: () => tryAll(pickedList) }),
-          S.settings.modelChoice === 'fit' ? h('button', { className: 'small', textContent: PICKED.size === 1 ? 'Mark as orchestrator' : 'Mark as orchestrators', title: 'Make the selected models your orchestrators, in place of the ones you have now. Every message then goes to one of them first: it replies on its own when it can (a hello, a quick question), and hands real work to the other models it picks. They only orchestrate and do no work themselves. A model that can\'t call tools is skipped', onclick: () => {
+          S.settings.modelChoice === 'fit' ? h('span', { className: 'with-q' }, h('button', { className: 'small', textContent: PICKED.size === 1 ? 'Mark as orchestrator' : 'Mark as orchestrators', title: ORCH_ABOUT, onclick: () => {
             const list = pickedList.filter((t) => can(t).tools)
             if (!list.length) return toast("none of these can call tools, and an orchestrator hands work out with a tool call", true)
             PICKED.clear()
             setLeads(list, `${list.length} orchestrator${list.length === 1 ? '' : 's'}: ${list.map((t) => t.model).join(', ')}`)
-          } }) : null,
+          } }), h('span', { className: 'q', tabIndex: 0, textContent: '?', title: ORCH_ABOUT, 'aria-label': 'what Mark as orchestrator does' })) : null,
           h('button', { className: 'small danger', textContent: 'Remove', onclick: removePicked }),
           h('button', { className: 'small ghost', textContent: 'Invert', title: "select the ones shown that aren't selected, unselect the ones that are", onclick: () => (view.forEach((t) => (PICKED.has(keyOf(t)) ? PICKED.delete(keyOf(t)) : PICKED.add(keyOf(t)))), (lastPicked = null), drawMine(S)) }),
           h('button', { className: 'small ghost', textContent: 'Select none', onclick: () => (PICKED.clear(), drawMine(S)) })))
