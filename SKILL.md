@@ -123,7 +123,9 @@ goes to stderr. Logs never go to stdout.
 
 ## Continue the same conversation
 
-Pass the `session_id` from the last result:
+Every run is saved as a session in `~/.heart/sessions/` (and logged, for the kinds of logs the user
+switched on), as when the user works in HeartCode; `--temp` keeps nothing. Pass the `session_id`
+from the last result:
 
 ```sh
 heart -p --output-format json --resume 20261027-… "now add a test for the empty case"
@@ -178,6 +180,10 @@ the next capable model until one does the job. A helper works until its job is d
 limit; `--max-turns` applies to it too). Their tokens are in `usage`, and each model's in
 `modelUsage`.
 
+A long run that fills the model's context window is compacted: the model first writes down what it
+has found, then the conversation so far is replaced by a summary that starts with those notes. That
+is two extra requests, counted in `usage`, and not in the stream.
+
 ## Setting up a model
 
 Ask the user which provider and model to use, and for the key. Never invent one. Then:
@@ -191,7 +197,8 @@ HEART_API_KEY=… heart -u https://api.groq.com/openai/v1 -m openai/gpt-oss-120b
 ```
 
 A model server on this machine (Ollama on :11434, LM Studio on :1234, llama.cpp on :8080) is
-found on its own. The user can also set everything up in a browser: `heart settings`, where
+found on its own. The user can also set everything up in a browser: `heart settings` (its link has
+the machine's network address, so it opens from another device too, for HeartCode on a server), where
 **Test** (or **Test all**) under *Your models* sends a model a short message to show it really
 answers. A run that fails with a wrong key or an unknown model: ask the user to test it there.
 
