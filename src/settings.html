@@ -1295,6 +1295,7 @@ const DOING = {
   '/api/provider/list': 'Saving the model list setting',
   '/api/provider/on': 'Switching the provider',
   '/api/order': 'Saving your models',
+  '/api/orchestrators': 'Saving the orchestrators',
   '/api/mcp/login': 'Signing in — your browser will open',
   '/api/telegram/connect': 'Checking the token with Telegram',
   '/api/telegram/test': 'Sending a test message',
@@ -1835,7 +1836,7 @@ function drawProviders(s) {
   const shown = shownOrder()
   $('p-mine').hidden = !shown.length
   $('p-mine').textContent = `Your models (${shown.length}) →`
-  $('p-mine').title = shown.length ? `${S.settings.modelChoice === 'fit' ? 'HeartCode picks the best of them for each task' : `HeartCode uses ${shown[0].provider} · ${shown[0].model}`}. Open the Your models page: the order, tests, and what happens when one fails` : ''
+  $('p-mine').title = shown.length ? `${S.settings.modelChoice === 'fit' ? 'An orchestrator answers each message or hands the work to the others' : `HeartCode uses ${shown[0].provider} · ${shown[0].model}`}. Open the Your models page: the order, tests, and what happens when one fails` : ''
   fillHeight()
 
   // every provider's models, A to Z; one click adds it (the first one becomes #1). Built
@@ -2198,6 +2199,14 @@ function buildCatalog(s) {
 }
 // --- Your models page: the list as a table; sorted by several columns at once (each a tie-break
 // for the ones before it), the sort kept in this browser ---
+// The orchestrators (Pick: "an orchestrator hands it out"): those picked that call tools; none: your first that does
+const leads = (s = S) => {
+  const able = s.order.filter((t) => !isOff(t.provider) && can(t).tools)
+  const picked = able.filter((t) => (s.orchestrators ?? []).some((o) => o.provider === t.provider && o.model === t.model))
+  return picked.length ? picked : able.slice(0, 1)
+}
+const isLead = (t) => leads().some((o) => o.provider === t.provider && o.model === t.model)
+const setLeads = (list, done) => act('/api/orchestrators', { list: list.map(({ provider, model }) => ({ provider, model })) }, done)
 const can = (t) => ({ tools: t.tested ? t.tested.mode === 'tools' : t.known?.tools !== false, thinking: Boolean(t.tested ? t.tested.thinking : t.known?.thinking), images: Boolean(t.tested ? t.tested.vision : t.known?.images) })
 // Every column sorts by the value it shows: up (↑) smallest first, down (↓) largest first. first: the
 // direction of the first click (the useful one). get: the value; null when there's none (no price, no
@@ -2419,24 +2428,23 @@ function drawMine(s) {
 
   // --- the page's header: how a model is picked (left), what's known about the models (right) ---
   $('mt-lead').textContent = S.settings.modelChoice === 'fit'
-    ? 'Each message goes to the models that score best for it. Your order breaks ties, and decides among models with no score. Filter, sort or drag, then Save order.'
+    ? 'An orchestrator answers each message at once, or hands the work to the models it picks from the others. To choose them, select models and press Mark as orchestrators (a quick, cheap model is enough).'
     : 'HeartCode uses #1, and the next one when it fails. Filter, sort or drag, then Save order.'
   const busy = locked()
   $('mt-actions').inert = busy
   put($('mt-actions'),
     ((why) => h('span', { title: why ?? '' }, h('button', { className: 'small', textContent: 'Order providers', disabled: Boolean(why), title: why ? '' : 'drag your providers into order; the Provider column sorts by it', onclick: openRanking })))( // disabled: why, on a span (a disabled button shows no tooltip in every browser)
-      S.settings.modelChoice === 'fit' ? 'Not used while Pick is "the best for each task": each message gets the models ranked best for it, whatever their provider. Pick "in your order" to use it'
-        : !order.some((t) => t.provider !== order[0]?.provider) ? 'All your models are from one provider: nothing to order' : null),
-    h('button', { className: 'small', textContent: 'Update model info', disabled: !order.length, title: `what each model can do (context, tools, thinking, images, price) from models.dev, and its scores in LMArena's public rankings (coding, web apps, vision${S.rankings ? `; scores from ${new Date(S.rankings.fetched).toLocaleDateString()}` : ''}). Best fit also gets the scores again once a week`, onclick: () => lookUp() }))
+      !order.some((t) => t.provider !== order[0]?.provider) ? 'All your models are from one provider: nothing to order' : null),
+    h('button', { className: 'small', textContent: 'Update model info', disabled: !order.length, title: `what each model can do (context, tools, thinking, images, price) from models.dev, and its scores in LMArena's public rankings (coding, web apps, vision${S.rankings ? `; scores from ${new Date(S.rankings.fetched).toLocaleDateString()}` : ''}). With an orchestrator they come again once a week`, onclick: () => lookUp() }))
 
   // --- the list's settings: one line, a short label beside each control ---
   const ro = s.rotation
   const cell = (label, about, ...control) => h('label', { className: 'mt-set', title: about }, h('span', { className: 'mt-setl', textContent: label }), h('span', { className: 'mt-setc' }, ...control))
   const fit = S.settings.modelChoice === 'fit'
   const settings = h('div', { className: 'mt-sets', inert: busy },
-    cell('Pick', fit ? 'for each new message, your models ranked by public rankings (LMArena, fetched once a week) on the skills it needs: web pages, code, images…; models not ranked come after, in your order' : 'your order: #1 works, the next takes over when it fails',
-      h('select', { onchange: (e) => act('/api/setting', { name: 'modelChoice', value: e.target.value }, e.target.value === 'fit' ? 'models picked for each task by public rankings' : 'models used in your order') },
-        [['order', 'in your order'], ['fit', 'the best for each task']].map(([v, t]) => h('option', { value: v, textContent: t, selected: S.settings.modelChoice === v })))),
+    cell('Pick', fit ? "each message starts on an orchestrator: it answers itself (a hello), or hands the work to the models it picks from the others (it sees what each can do, and its place in LMArena's public rankings). It only hands work out; the others do it" : 'your order: #1 works, the next takes over when it fails',
+      h('select', { onchange: (e) => act('/api/setting', { name: 'modelChoice', value: e.target.value }, e.target.value === 'fit' ? 'an orchestrator hands each task out' : 'models used in your order') },
+        [['order', 'in your order'], ['fit', 'an orchestrator hands it out']].map(([v, t]) => h('option', { value: v, textContent: t, selected: S.settings.modelChoice === v })))),
     cell('If one fails', ro.on === 'retries' ? 'a rate limit or outage: that model is tried again that many times first; any other error moves on at once' : "any error moves on at once, to another provider's model first",
       h('select', { onchange: (e) => saveOrder(S.order, 'saved', { on: e.target.value }) },
         [['failure', 'go to the next'], ['retries', 'retry it first']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.on === v }))),
@@ -2447,7 +2455,9 @@ function drawMine(s) {
         if (!(v >= 5 && v <= 600)) return (e.target.value = S.settings.replyStart ?? 60), toast('a whole number of seconds, 5 to 600', true)
         act('/api/setting', { name: 'replyStart', value: v }, `a model that hasn't started answering in ${v}s counts as failed`)
       } }), h('span', { className: 'unit', textContent: 'seconds of silence' })),
-    cell('New message to', fit ? 'best fit picks it for each message' : 'the model a new message goes to first',
+    fit ? cell('Orchestrators', 'the models that answer first and hand the work out (the next one when one fails). Select models in the list and press Mark as orchestrators; click a model\'s "orchestrator ✕" tag to unmark it. None chosen: your first model that calls tools',
+      h('span', { className: 'unit', textContent: (S.orchestrators ?? []).length ? leads().map((t) => t.model).join(', ') || 'none that calls tools' : `${leads()[0]?.model ?? 'none'} (your first)` })) : null,
+    cell('New message to', fit ? 'each message starts on an orchestrator' : 'the model a new message goes to first',
       h('select', { disabled: fit, onchange: (e) => saveOrder(S.order, 'saved', { next: e.target.value }) },
         [['first', '#1'], ['stay', 'the last that worked']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.next === v })))),
     cell('Tests wait', 'every model test: Test, Test all, Request',
@@ -2463,7 +2473,7 @@ function drawMine(s) {
     busy ? h('span', { className: 'sort-live', textContent: `${testingAll ? 'testing' : 'updating'}: filters and changes wait until it's done (or Stop)` }) : null,
     filtering() || SORT.length ? h('button', { className: 'small ghost', textContent: 'Clear', title: 'every filter and the sort off: your whole list, in your order', onclick: clearView }) : null,
     h('button', { className: 'small', textContent: filtered ? `Test ${n(shown.length)}` : 'Test all', disabled: testingAll || !shown.length, title: `send ${filtered ? 'the models shown' : 'each model'} a short message to see which really answer`, onclick: () => tryAll(filtered ? shown : order) }),
-    h('button', { className: 'small primary', textContent: filtered ? `Use only these ${n(view.length)}` : 'Save order', disabled: !view.length || order.length < 2, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : S.settings.modelChoice === 'fit' ? 'keep the order shown: it breaks ties between equally scored models' : 'HeartCode uses them in the order shown (#1 first)', onclick: saveList }))
+    h('button', { className: 'small primary', textContent: filtered ? `Use only these ${n(view.length)}` : 'Save order', disabled: !view.length || order.length < 2, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : S.settings.modelChoice === 'fit' ? 'keep the order shown: the orchestrator sees the others in this order, and a failed model goes to the next' : 'HeartCode uses them in the order shown (#1 first)', onclick: saveList }))
 
   // --- the table ---
   const all = view.length > 0 && view.every((t) => PICKED.has(keyOf(t)))
@@ -2479,6 +2489,12 @@ function drawMine(s) {
         h('div', { className: 'mt-pickbar' },
           h('b', { textContent: `${n(PICKED.size)} selected` }),
           h('button', { className: 'small', textContent: 'Test', disabled: testingAll, onclick: () => tryAll(pickedList) }),
+          S.settings.modelChoice === 'fit' ? h('button', { className: 'small', textContent: PICKED.size === 1 ? 'Mark as orchestrator' : 'Mark as orchestrators', title: 'Make the selected models your orchestrators, in place of the ones you have now. Every message then goes to one of them first: it replies on its own when it can (a hello, a quick question), and hands real work to the other models it picks. They only orchestrate and do no work themselves. A model that can\'t call tools is skipped', onclick: () => {
+            const list = pickedList.filter((t) => can(t).tools)
+            if (!list.length) return toast("none of these can call tools, and an orchestrator hands work out with a tool call", true)
+            PICKED.clear()
+            setLeads(list, `${list.length} orchestrator${list.length === 1 ? '' : 's'}: ${list.map((t) => t.model).join(', ')}`)
+          } }) : null,
           h('button', { className: 'small danger', textContent: 'Remove', onclick: removePicked }),
           h('button', { className: 'small ghost', textContent: 'Invert', title: "select the ones shown that aren't selected, unselect the ones that are", onclick: () => (view.forEach((t) => (PICKED.has(keyOf(t)) ? PICKED.delete(keyOf(t)) : PICKED.add(keyOf(t)))), (lastPicked = null), drawMine(S)) }),
           h('button', { className: 'small ghost', textContent: 'Select none', onclick: () => (PICKED.clear(), drawMine(S)) })))
@@ -2556,13 +2572,16 @@ function tableRow(t, at, pick) {
   const tag = !x ? h('span', { className: 'tag', textContent: '…', title: 'looking it up in models.dev' })
     : x.source === 'assumed' ? h('button', { type: 'button', className: 'tag warn', textContent: 'unknown', title: "models.dev doesn't know it: what it can do is a guess. Click to set it up", onclick: () => openSetup(t) })
     : Object.keys(x.set ?? {}).length ? h('button', { type: 'button', className: 'tag', textContent: 'edited', title: 'what it can do: set by you (click to change)', onclick: () => openSetup(t) }) : null
+  const lead = S.settings.modelChoice === 'fit' && isLead(t) && (S.orchestrators ?? []).length
+    ? h('button', { type: 'button', className: 'tag brand', textContent: 'orchestrator ✕', title: 'An orchestrator: every message goes to it first, and it replies or hands the work out. Click to unmark it (it goes back to being one of the models that do the work)', onclick: () => setLeads(leads().filter((o) => o !== t), `${t.model}: not an orchestrator now`) })
+    : S.settings.modelChoice === 'fit' && isLead(t) ? h('span', { className: 'tag brand', textContent: 'orchestrator', title: 'None are marked, so your first model that calls tools orchestrates. To choose them, select models and press Mark as orchestrators' }) : null
   const going = Boolean(TRIES[keyOf(t)]?.going)
   const busy = locked()
   return h('li', { className: 'in' + (picked ? ' picked' : '') + (isOff(t.provider) ? ' off' : ''), 'data-key': `${t.provider}/${t.model}`, title: isOff(t.provider) ? `${t.provider} is switched off: HeartCode skips this model until it's on` : '' },
     h('span', { className: 'grip', textContent: '⋮⋮', 'aria-hidden': 'true' }),
     h('input', { type: 'checkbox', checked: picked, disabled: busy, 'aria-label': `select ${t.model}`, title: 'select (Shift: and every row up to the last one selected)', onclick: (e) => (e.preventDefault(), pick(e)) }),
     h('span', { className: 'n', textContent: `#${at + 1}`, title: SORT.length || filtering() ? 'its place in your list' : '' }),
-    h('span', { className: 'm' }, h('span', { className: 'name', textContent: t.model, title: t.model }), tag),
+    h('span', { className: 'm' }, h('span', { className: 'name', textContent: t.model, title: t.model }), lead, tag),
     h('span', { className: 'p', textContent: isOff(t.provider) ? `${t.provider} · off` : t.provider, title: t.provider }),
     h('span', { className: 'num', textContent: ctx ? `${t.tested?.sure === false ? '~' : ''}${kTok(ctx)}` : '–', title: ctx ? `${ctx.toLocaleString()} tokens${t.tested?.sure === false ? ' (assumed: the server and models.dev don\'t say)' : ''}` : '' }),
     yes(c.tools), yes(c.thinking), yes(c.images),
@@ -2595,8 +2614,8 @@ function markCatalog() {
 function drawUsing(s) {
   const o = s.order.filter((t) => !isOff(t.provider))
   $('using').hidden = page() === 'providers' // there it's on the page itself
-  const fit = s.settings.modelChoice === 'fit' // best fit: no one model is "the one"
-  put($('using'), o.length && fit ? [h('span', { className: 'k', textContent: 'HeartCode picks' }), h('b', { textContent: 'the best for each task' }), h('span', { className: 'k', textContent: `from your ${o.length.toLocaleString()} model${o.length > 1 ? 's' : ''}` })]
+  const fit = s.settings.modelChoice === 'fit' // an orchestrator: no one model is "the one"
+  put($('using'), o.length && fit ? [h('span', { className: 'k', textContent: 'Orchestrated by' }), h('b', { textContent: leads(s).map((t) => t.model).join(', ') || o[0].model }), h('span', { className: 'k', textContent: `with your ${o.length.toLocaleString()} model${o.length > 1 ? 's' : ''}` })]
     : o.length ? [h('span', { className: 'k', textContent: 'HeartCode uses' }), h('b', { textContent: o[0].model }), h('span', { className: 'k', textContent: `${o[0].provider}${o.length > 1 ? ` · ${o.length - 1} fallback${o.length > 2 ? 's' : ''}` : ''}` })] : s.order.length ? [h('span', { className: 'k', textContent: 'The providers of all your models are switched off' }), h('a', { href: '#providers', textContent: 'Switch one on' })] : [h('span', { className: 'k', textContent: 'No model chosen yet' }), h('a', { href: '#providers', textContent: 'Choose one' })])
 }
 

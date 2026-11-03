@@ -1,6 +1,6 @@
 // What each model is good at, from public rankings (LMArena: people comparing two models' answers
-// to the same prompt, by skill): coding, web apps, images, long inputs… Fetched once a week into
-// ~/.heart/rankings.json (best fit only); a model is matched to its entry by name.
+// to the same prompt, by skill): overall, coding, web apps, images. Fetched once a week into
+// ~/.heart/rankings.json (with an orchestrator, or Update model info); a model is matched to its entry by name.
 import path from 'node:path'
 import { HOME, readJson, writeJson } from './config.js'
 import { log } from './log.js'
@@ -11,25 +11,8 @@ const WEEK = 7 * 24 * 3600_000
 const VERSION = 2 // 2: with each model's score; an older file is fetched again
 const FILES = 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main' // one Parquet file per ranking: text, webdev, vision, agent
 
-// The skills a task can need: [ranking, its category, what it's for] (the pick names them).
-export const SKILLS = {
-  coding: ['text', 'coding', 'writing and fixing code'],
-  webdev: ['webdev', 'webdev', 'building web apps (any stack)'],
-  'webdev-html': ['webdev', 'webdev-html', 'plain HTML/CSS/JS pages, canvas and browser games'],
-  'webdev-react': ['webdev', 'webdev-react', 'React apps'],
-  hard: ['text', 'hard_prompts', 'hard, multi-part problems'],
-  instructions: ['text', 'instruction_following', 'following detailed instructions exactly'],
-  'long-input': ['text', 'longer_query', 'long inputs: big files, long specs'],
-  'multi-turn': ['text', 'multi_turn', 'long back-and-forth work'],
-  math: ['text', 'math', 'math and algorithms'],
-  writing: ['text', 'creative_writing', 'prose, docs, copy'],
-  software: ['text', 'industry_software_and_it_services', 'software and IT know-how'],
-  vision: ['vision', 'overall', 'understanding images and screenshots'],
-  ocr: ['vision', 'ocr', 'reading text in images'],
-  diagrams: ['vision', 'diagram', 'reading diagrams and charts'],
-  agent: ['agent', 'overall', 'agent work: tool calls, commands, many steps'],
-}
-const OVERALL = 'text:overall' // a skill a model isn't ranked on: its overall place stands in
+// The lists kept (ranking:category): shown on Your models and to the orchestrator
+const LISTS = ['text:overall', 'text:coding', 'webdev:webdev', 'vision:overall']
 
 export const loadRankings = () => readJson(FILE, null)
 
@@ -49,7 +32,7 @@ export async function rankings({ signal, onWait, now = false } = {}) {
   const have = loadRankings()
   if (have && have.v === VERSION && Date.now() - have.fetched < WEEK && !now) return have
   refreshing ??= (async () => {
-    const wanted = new Set([...Object.values(SKILLS).map(([c, k]) => `${c}:${k}`), OVERALL])
+    const wanted = new Set(LISTS)
     const all = Object.assign({}, ...(await Promise.all([...new Set([...wanted].map((p) => p.split(':')[0]))].map((c) => fetchRanking(c, have ? undefined : signal)))))
     const lists = Object.fromEntries(Object.entries(all).filter(([k]) => wanted.has(k)))
     const out = { v: VERSION, fetched: Date.now(), source: 'LMArena (huggingface.co/datasets/lmarena-ai/leaderboard-dataset)', lists }
@@ -102,14 +85,6 @@ export function place(model, list) {
     return [0, 1].some((from) => theirs.length >= from + mine.length && mine.every((w, i) => theirs[from + i] === w) && theirs.slice(from + mine.length).every((w) => size.test(w)))
   })
   return at.length ? Math.min(...at.map((e) => e.rank)) / list.length : null
-}
-
-// A model's score for some skills, 0 (best) to 1: the average of its places; a skill it isn't
-// ranked on counts as its overall place. null: not ranked at all.
-export function score(model, skills, data) {
-  const overall = place(model, data?.lists[OVERALL])
-  const each = skills.map((k) => place(model, data?.lists[SKILLS[k] && `${SKILLS[k][0]}:${SKILLS[k][1]}`]) ?? overall)
-  return each.every((x) => x == null) ? null : each.reduce((n, x) => n + (x ?? 1), 0) / each.length
 }
 
 // A model's place in one list ('text:coding'…), for showing: { rank, of, as, score, votes } (as: its name there); null when not in it

@@ -59,10 +59,11 @@ tried did what I needed:
 - **Tells you when a newer version is out** (a check with npm each time it starts, in the status bar):
   `/update` shows what changed and installs it the way you installed HeartCode. Switch it off in
   `/settings` → General.
-- **Best fit by public rankings**: with "Pick" set to "the best for each task", each message's
-  lead and code reviewer are your models ranked on the skills that task needs (web
-  pages, code, images…) by LMArena's public rankings, fetched once a week. Your models shows each
-  one's Coding, Web apps and Vision rank.
+- **An orchestrator that hands work out**: with "Pick" set to "an orchestrator hands it out",
+  each message starts on a model you choose for that (a quick, cheap one is enough). It answers
+  at once when it can ("hi" needs no other model), and otherwise hands the work to whichever of
+  your models it thinks suits it. It knows what each one can do and where it stands in LMArena's
+  public rankings. Your models shows each model's Coding, Web apps and Vision scores.
 - **Works with discipline by default**: its rules (from Karpathy's guidelines, Grill Me,
   Superpowers, Ponytail and Caveman) have it ask before building, find a bug's root cause first,
   write the least code that works, change only what the task needs, prove it before saying done,

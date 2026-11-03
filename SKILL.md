@@ -58,7 +58,7 @@ reached has an `error` (in text: a line on stderr) and is skipped; the command s
 
 | `-m` | What runs |
 |---|---|
-| `auto`, or no `-m` | the user's list: #1, and the next one in order when it fails (with the user's "best fit" setting: their models ranked for each task, below). Use this unless you need one particular model. |
+| `auto`, or no `-m` | the user's list: #1, and the next one in order when it fails (with the user's orchestrator setting: an orchestrator model first, below). Use this unless you need one particular model. |
 | `provider/model` (`-m groq/openai/gpt-oss-120b`), or a model of #1's provider alone | that model alone: never another one, also when it fails (a rate limit or an outage is tried again, up to `--max-retries`) |
 | that, plus `--fallback-model provider/model` (repeatable) | that model, then the fallbacks in order when it fails (as `claude -p --fallback-model`) |
 
@@ -80,12 +80,14 @@ image, one that can't call tools gets the tool calls as text.
 
 `--provider <name>` and `-u <url>` (a server for this run) also mean one model, alone.
 
-**Best fit** (the user's setting "Pick: the best for each task", on Your models in `heart settings`): with `auto`,
-each new message first names the skills the task needs (code, web pages, images, long inputs…) in
-one short request, and the user's models are ordered by their places in the public LMArena rankings
-of those skills (fetched once a week); the best leads, the next take over when it fails, and the
-code review goes to the best of the others. Models the rankings don't know come last, in the user's
-order. With "Your order" (the default), the list is the user's order, as is.
+**Orchestrator** (the user's setting "Pick: an orchestrator hands it out", on Your models in
+`heart settings`; `--model-choice fit` for one run): with `auto`, each message starts on one of the
+models the user chose as orchestrators (none chosen: their first that calls tools). It answers
+at once, streaming, when it can (a greeting, a question), and otherwise hands the work to the
+user's other models through its `agent` tool. It picks which one, knowing what each can do and
+its places in the public LMArena rankings. It has no other tool: the models it picks do the work. If no
+orchestrator answers, the list goes on to the next model. With "in your order" (the default), the list
+is the user's order, as is.
 
 A run picks up settings the user changes meanwhile (`heart settings`, another HeartCode, or
 `~/.heart` by hand) without being restarted, from its next request: the model order, prompts,
@@ -173,7 +175,7 @@ assumptions, and the user can set it up on the settings page. Models that can't 
 work, in a slower guided mode.
 
 The model in use knows the user's other models (what each can do, how often it failed this
-session, and in best fit their ranks for code, web apps and vision) and works with them through its `agent` tool: it asks a model that can for what it
+session, and with an orchestrator their ranks overall, for code, web apps and vision) and works with them through its `agent` tool: it asks a model that can for what it
 can't do itself (a model that can't see asks one that can about a screenshot: "which tiles show a
 chair?"), several at once when there are many images or parts, and a helper that fails is handed to
 the next capable model until one does the job. A helper works until its job is done (no step
@@ -261,8 +263,8 @@ Every `assistant` line's `message.model` is the model that wrote it (`provider/m
 fallback, the one that took over, not the one the run started with (the `init` line's `model`).
 `modelUsage` in the `result` has each model that answered.
 
-Not in the stream: HeartCode's own prompts (the system prompt, its nudges), the skill-picking
-request of best fit, the review's verdict and the wrap-up. Their tokens are in `usage` and
+Not in the stream: HeartCode's own prompts (the system prompt, its nudges), the review's verdict
+and the wrap-up. An orchestrator's handoffs are in it: `agent` tool calls, with the helper's lines under them. Their tokens are in `usage` and
 `modelUsage`. Retries and switches to another model go to stderr with `--verbose`.
 
 ## Don't

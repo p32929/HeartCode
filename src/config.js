@@ -19,7 +19,7 @@ export function projectDir(root, what) {
   return dir
 }
 
-const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director', 'theme', 'format', 'lsp', 'voice', 'queue', 'rotation', 'statusBar', 'log', 'logRequests', 'logDetail', 'logDays', 'telegram', 'search', 'testTimeout', 'updateCheck', 'modelChoice', 'logs', 'replyStart', 'mouse']
+const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director', 'theme', 'format', 'lsp', 'voice', 'queue', 'rotation', 'statusBar', 'log', 'logRequests', 'logDetail', 'logDays', 'telegram', 'search', 'testTimeout', 'updateCheck', 'modelChoice', 'orchestrators', 'logs', 'replyStart', 'mouse']
 const LOCAL_NAMES = { 11434: 'ollama', 1234: 'lmstudio', 8080: 'llamacpp' }
 
 export function readJson(file, fallback) {

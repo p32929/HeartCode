@@ -263,9 +263,9 @@ export class Client {
     }
     return i
   }
-  // "Best fit": these models first ("provider model", best first), the others after in your list's
-  // order; this message starts with the first, and a failure goes on to the next best. false: no list.
-  // null: your order again (best fit switched off).
+  // An orchestrator: these models first ("provider model"), the others after in your list's order;
+  // this message starts with the first, and a failure goes on to the next. false: no list.
+  // null: your order again (switched off).
   orderBy(names) {
     const r = this.rotation
     if (!r) return false
@@ -275,12 +275,12 @@ export class Client {
       this.#use(r.list[0])
       return true
     }
-    r.base ??= [...r.list] // your order, kept for when best fit is switched off
+    r.base ??= [...r.list] // your order, kept for when it's switched off
     const first = names.map((n) => r.list.find((t) => `${t.provider} ${t.model}` === n)).filter(Boolean)
     if (!first.length) return false
     r.list = [...new Set([...first, ...r.base])]
     r.at = 0
-    log('rotate', `best fit: ${first.map((t) => t.model).join(', ')} first`)
+    log('rotate', `orchestrators: ${first.map((t) => t.model).join(', ')} first`)
     this.#use(r.list[0])
     return true
   }

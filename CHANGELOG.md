@@ -2,6 +2,17 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.43 (2026-11-03)
+
+- **An orchestrator in place of best fit**: with Pick on "an orchestrator hands it out", each
+  message starts on a model you mark as an orchestrator (a quick, cheap one is enough). It answers
+  at once, streaming, when it can ("hi" needs no other model), and otherwise hands the work to
+  whichever of your other models it thinks suits it best. It sees what each one can do and its places in LMArena's
+  rankings. It only hands work out: its only tools are handing off and asking you. On Your models,
+  select models and press Mark as orchestrator(s); click a model's "orchestrator ✕" tag to unmark it.
+  None marked: your first model that calls tools. The extra request per message that named a task's
+  skills is gone, and nothing assumes a task is about code.
+
 ## 0.1.42 (2026-11-03)
 
 - **Your "no, do this instead" reaches the model as you**: what you type when you decline a command,

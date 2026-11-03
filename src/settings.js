@@ -372,6 +372,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     update: (({ latest } = {}) => (cfg.updateCheck !== false && latest && newer(latest, VERSION) ? latest : null))(readJson(path.join(HOME, 'update-check.json'), {})), // the day's answer from npm: no request here
     order: [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then].map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t), ranks: ranksOf(t.model, ranked) })),
     rankings: ranked && { fetched: ranked.fetched, source: ranked.source },
+    orchestrators: cfg.orchestrators ?? [],
     rotation: (({ then, ...opts }) => opts)(rotationOf(cfg)),
     settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), logs: kindsOn(cfg), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg), testTimeout: Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10, modelChoice: cfg.modelChoice === 'fit' ? 'fit' : 'order', replyStart: Number(cfg.replyStart) > 0 ? Number(cfg.replyStart) : 60 },
     logs: { runs: tilde(path.join(LOGS, 'runs')), requests: tilde(REQUESTS) },
@@ -555,6 +556,15 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       forgetTests()
       return state()
     },
+    // The models that orchestrate when Pick is "an orchestrator hands it out": [{ provider, model }]
+    // (none: your first that calls tools)
+    'POST /api/orchestrators': ({ list }) => {
+      if (!Array.isArray(list)) throw new Error('a list of models is needed')
+      const clean = list.map((t) => ({ provider: String(t?.provider ?? ''), model: String(t?.model ?? '').trim() })).filter((t) => cfg.providers[t.provider] && t.model)
+      cfg.orchestrators = clean.length ? clean : undefined
+      save('setting:orchestrators')
+      return state()
+    },
     // models.dev again (one model, or all of yours): its list fetched anew, and each model's profile
     // takes what it says now (one it didn't know before becomes "from models.dev"; your own settings
     // for it stay above). A running HeartCode takes it at once.
@@ -663,7 +673,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       if (name === 'testTimeout' && !(Number.isInteger(value) && value >= 1 && value <= 600)) throw new Error('test timeout: a whole number of seconds, 1 to 600')
       if (name === 'replyStart' && !(Number.isInteger(value) && value >= 5 && value <= 600)) throw new Error('a reply must start within: a whole number of seconds, 5 to 600')
       if (!['permissions', 'effort', 'theme', 'context', 'logDetail', 'logDays', 'testTimeout', 'modelChoice', 'replyStart', ...Object.keys(TOGGLES)].includes(name)) throw new Error(`no setting "${name}"`)
-      if (name === 'modelChoice' && !['order', 'fit'].includes(value)) throw new Error('modelChoice: order or fit')
+      if (name === 'modelChoice' && !['order', 'fit'].includes(value)) throw new Error('modelChoice: order or fit (an orchestrator)')
       cfg[name] = name === 'effort' && value === 'default' ? undefined : name === 'context' ? (value === null ? undefined : Number(value)) : value
       save(`setting:${name}`)
       if (name === 'logDetail') useRequestLog(cfg) // from the next request (a running HeartCode takes it in too: applySettings)

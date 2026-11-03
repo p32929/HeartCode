@@ -678,9 +678,9 @@ export function extraTools(s) {
   }
   if (!s.isSub && s.subagent) {
     const team = s.team?.() ?? []
-    const model = { type: 'string', description: prompt('agent/tool-agent-model') }
+    const model = { type: 'string', description: prompt(s.orchestrating ? 'agent/tool-hand-model' : 'agent/tool-agent-model') }
     const images = { type: 'array', items: str, description: prompt('agent/tool-agent-images') }
-    out.push({ name: 'agent', description: prompt('agent/tool-agent'), parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }) }, ['description', 'prompt']) })
+    out.push({ name: 'agent', description: prompt(s.orchestrating ? 'agent/tool-hand' : 'agent/tool-agent'), parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }) }, ['description', 'prompt']) })
   }
   return [...out, ...(s.director && !s.appendSystem ? s.director.toolDefs(s) : [])] // manage (director.js); not when a program gives the instructions (--append-system-prompt)
 }
@@ -1320,7 +1320,9 @@ function mcpTarget(s, name) {
 
 // Tools the caller allowed (--allowedTools) or took away (--disallowedTools); all by default. An
 // MCP tool goes by its own name, its server's (mcp__server, as in Claude Code) or "mcp" (all of them).
+// An orchestrator: only handing work out (and asking the user).
 export function allowed(s, name) {
+  if (s.orchestrating && name !== 'agent' && name !== 'ask_user') return false
   const names = name.startsWith('mcp__') ? [name, name.split('__').slice(0, 2).join('__'), 'mcp'] : [name]
   if (names.some((n) => s.denyTools?.has(n))) return false
   if (!s.allowTools) return true

@@ -7,8 +7,7 @@ import path from 'node:path'
 import { est, estMessages, Client, writtenBy, tokensOf, COMPACT_SHARE } from './client.js'
 import { runGuided } from './guided.js'
 import { markUsed, removeResearch, findResearch } from './research.js'
-import { loadRankings, rankIn } from './rankings.js'
-import { pickModels, byPick } from './fit.js'
+import { loadRankings, rankIn, rankings } from './rankings.js'
 import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, noteNamedPaths } from './tools.js'
 import { serversNote } from './lsp.js'
 import { newlyEnded, jobLine } from './background.js'
@@ -209,12 +208,16 @@ export class Session {
       else this.ui.warn(`${this.client.model} can't read images (per its probe); ignoring ${images.length} image(s)`)
       images = []
     }
-    // "best fit": the models that suit this message most, by their strengths (your order breaks ties)
-    if (!this.isSub && this.fitMode?.()) {
-      const fit = await pickModels(this, text, signal, { images: images.length, size: this.messages ? size(this.messages) : 0 })
-      if (fit && this.client.orderBy?.(fit.work)) ui.step('models', `${this.client.model}${fit.why ? ` · picked for: ${fit.why}` : ''}`)
-    } else if (!this.isSub) this.client.orderBy?.(null) // your order (best fit was switched off)
-    if (!this.isSub) log('rotate', `this message starts on ${this.client.provider ?? ''} · ${this.client.model}${this.client.rotation ? ` (#${this.client.rotation.at + 1} of ${this.client.rotation.list.length}${this.fitMode?.() ? ', best fit' : ', your order'})` : ''}`)
+    // An orchestrator: the message starts on one of the models picked for it, which answers at once
+    // or hands the work to your other models (it decides) — only when there are others to hand to.
+    if (!this.isSub) {
+      const lead = this.fitMode?.() ? (this.orchestrators?.() ?? []) : []
+      this.client.orderBy?.(lead.length ? lead.map((t) => `${t.provider} ${t.model}`) : null)
+      this.orchestrating = lead.length > 0 // (then team() leaves the orchestrators out)
+      if (this.orchestrating && !this.team?.().length) this.orchestrating = false // no one to hand to: it does the work itself
+      if (this.orchestrating) rankings().catch(() => {}) // their places, for its list of models: fetched behind (once a week), never waited for
+      log('rotate', `this message starts on ${this.client.provider ?? ''} · ${this.client.model}${this.client.rotation ? ` (#${this.client.rotation.at + 1} of ${this.client.rotation.list.length}${this.orchestrating ? ', orchestrating' : ', your order'})` : ''}`)
+    }
     log('task', `${text} (${this.strat.actions} mode, ${images.length} image(s))`)
     const answer = this.strat.actions === 'tools' ? await runNative(this, text, images, signal) : await runGuided(this, text, images, signal)
     log('answer', answer) // the conversation's log
@@ -242,10 +245,10 @@ export class Session {
     }
     const name = (t) => `${t.provider} ${t.model}`
     const self = { provider: this.client.provider, model: this.client.model, images: this.strat.vision, tools: this.strat.actions === 'tools', self: true }
-    const all = [self, ...(this.team?.() ?? [])]
+    const all = [...(this.orchestrating ? [] : [self]), ...(this.team?.() ?? [])] // an orchestrator hands work out, never to itself
     const want = String(args.model ?? '').trim()
     // only one model available (a pinned model, or you have just one): helpers use it, whatever was asked
-    const first = !want || all.length === 1 ? self : (all.find((t) => name(t) === want) ?? all.find((t) => t.model === want || want.endsWith(` ${t.model}`)))
+    const first = !want || all.length === 1 ? all[0] : (all.find((t) => name(t) === want) ?? all.find((t) => t.model === want || want.endsWith(` ${t.model}`)))
     if (!first) return `error: no model "${want}". Yours: ${all.map(name).join(', ')}`
     // the one asked for first (if it can do the job), then the others that can: those that call
     // tools first, then the ones that failed least this session, in your list's order
@@ -547,6 +550,7 @@ const rootList = (root) => {
 }
 
 const SYSTEM = (s) => {
+  if (s.orchestrating) return prompt('agent/orchestrator', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), ...teamOf(s) })
   const instructions = userInstructions(s.root)
   return [
     prompt('agent/system', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), rootList: rootList(s.root), servers: serversNote(s.root), files: '', more: '', caller: Boolean(s.appendSystem) }),
@@ -565,11 +569,13 @@ const SYSTEM = (s) => {
 }
 
 // Your other models and what each can do, for the agent tool's model (only when there are any): a
-// short line each — in best fit, with its places in the public rankings (rankings.js).
-const RANKED_AS = { code: 'text:coding', web: 'webdev:webdev', vision: 'vision:overall' }
+// short line each — with an orchestrator, with its places in the public rankings (rankings.js).
+const RANKED_AS = { overall: 'text:overall', code: 'text:coding', web: 'webdev:webdev', vision: 'vision:overall' }
 const teamPrompt = (s) => {
   const team = s.team?.() ?? []
-  if (!team.length) return ''
+  return team.length ? prompt('agent/team', teamOf(s, team)) : ''
+}
+const teamOf = (s, team = s.team?.() ?? []) => {
   const data = s.fitMode?.() ? loadRankings() : null
   const ranks = (t) => (data ? Object.entries(RANKED_AS).map(([k, list]) => ((r) => r && `${k} #${r.rank}`)(rankIn(t.model, list, data))).filter(Boolean).join(' ') : '')
   const line = (t) => {
@@ -578,7 +584,7 @@ const teamPrompt = (s) => {
     return `- ${t.provider} ${t.model}${facts.length ? `: ${facts.join(', ')}` : ''}`
   }
   const you = [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking', ranks(s.client) && `ranked ${ranks(s.client)}`].filter(Boolean).join(', ')
-  return prompt('agent/team', { models: team.map(line).join('\n'), you, ranked: Boolean(data) })
+  return { models: team.map(line).join('\n'), you, ranked: Boolean(data) }
 }
 
 const sizeOf = (m) =>
@@ -1356,8 +1362,7 @@ export async function review(s, task, answer, signal) {
   const self = { provider: s.client.provider, model: s.client.model, self: true }
   const fails = (t) => s.failures?.[`${t.provider} ${t.model}`] ?? 0
   const team = (s.team?.() ?? []).filter((t) => t.tools !== false && !(t.provider === self.provider && t.model === self.model)).sort((a, b) => fails(a) - fails(b))
-  const others = s.fitMode?.() && s.chat.fit?.review?.length ? byPick(team, s.chat.fit.review) : team // best fit: the best at checking code first
-  for (const t of [...others.slice(0, 2), self]) {
+  for (const t of [...team.slice(0, 2), ...(s.orchestrating ? [] : [self])]) { // an orchestrator doesn't check the work
     s.ui.spinner(`${t.model} is reviewing the work`)
     try {
       const { client } = t.self ? { client: s.client } : await s.engineFor(t)

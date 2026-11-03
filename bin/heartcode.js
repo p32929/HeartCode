@@ -80,7 +80,7 @@ ${c.bold('headless')} (for other programs; flags and output as in Claude Code's 
       --skills-dir <dir>             more skills (repeatable)
       --allowedTools <list>          only these tools (HeartCode's or Claude Code's names: Read, Edit, Bash…)
       --disallowedTools <list>       never these tools
-      --model-choice <order|fit>     your models' order (#1, then the next), or the best fit for each task
+      --model-choice <order|fit>     your models' order (#1, then the next), or fit: an orchestrator hands each task out
       --permission-mode <m>          all, commands, ask, plan (or bypassPermissions, acceptEdits, default);
                                      --dangerously-skip-permissions = all. Nothing is asked: the rest is declined
       --session-id <id>              start (or continue) the session with this id
@@ -678,7 +678,7 @@ class App {
     const rotated = rot && rot.at > 0
     const name = rotated ? c.yellow('↻ ' + now.model) : c.info(now.model)
     const model =
-      count === 1 ? name : cfg.session ? `${name} ${c.faint(`(${count} chosen)`)}` : `${c.muted(fitMode(cfg) ? 'best fit' : 'auto')} ${c.faint('(')}${name}${c.faint(')')} ${c.faint(`(${count})`)}`
+      count === 1 ? name : cfg.session ? `${name} ${c.faint(`(${count} chosen)`)}` : `${c.muted(fitMode(cfg) ? 'orchestrated' : 'auto')} ${c.faint('(')}${name}${c.faint(')')} ${c.faint(`(${count})`)}`
     const key = `${now.provider}/${now.model}`
     if (this.profileKey !== key) [this.profileKey, this.profile] = [key, this.s?.profile ?? loadProfile(this.client(now.provider, now.model))]
     const profile = this.s?.profile ?? this.profile
@@ -777,8 +777,8 @@ class App {
     Object.assign(this.s, { noFormat: cfg.format === false, noLsp: cfg.lsp === false })
     Object.assign(this.s, { mcp: this.mcp, memory: this.memory, skills: this.skills, director: this.director })
     this.s.team = () => this.team() // your other models: a job this one can't do goes to one of them
-    this.s.allModels = () => this.sessionModels().map((t) => ({ ...t, ...this.abilities(t) })) // all of them, for a best-fit pick
-    this.s.fitMode = () => fitMode(this.cfg) // models picked by strengths per message, not by the list's order
+    this.s.fitMode = () => fitMode(this.cfg) // an orchestrator hands each message's work out, not your list's order
+    this.s.orchestrators = () => this.orchestrators()
     this.s.engineFor = (t) => this.engine(t.provider, t.model, ui, undefined, { quiet: true })
     // A model's context window, read from its saved profile (no probe, no network): so the agent can
     // see, before compacting, whether another model in the list has room for the whole conversation.
@@ -822,11 +822,21 @@ class App {
   // models.dev: nothing is sent to them to find out.
   team() {
     // helpers use this session's models (the set you chose, else your list), minus the one in use —
-    // so a pinned single model gives no team, and a chosen set keeps helpers within it
+    // so a pinned single model gives no team, and a chosen set keeps helpers within it. While one
+    // orchestrates: minus the orchestrators too (they only hand work out)
     const now = this.s?.client.rotation?.list[this.s.client.rotation.at] ?? this.sessionModels()[0]
+    const lead = this.s?.orchestrating ? this.orchestrators() : []
     return this.sessionModels()
-      .filter((t) => !(t.provider === now?.provider && t.model === now?.model))
+      .filter((t) => ![now, ...lead].some((o) => t.provider === o?.provider && t.model === o?.model))
       .map((t) => ({ ...t, ...this.abilities(t) }))
+  }
+
+  // The models that orchestrate (Pick: "an orchestrator hands it out"): those picked on Your models
+  // that are in this session's set and call tools; none picked: your first that calls tools.
+  orchestrators() {
+    const mine = this.sessionModels().filter((t) => this.abilities(t).tools)
+    const picked = mine.filter((t) => (this.cfg.orchestrators ?? []).some((o) => o.provider === t.provider && o.model === t.model))
+    return picked.length ? picked : mine.slice(0, 1)
   }
 
   // What a model can do, from its saved profile or models.dev (guessed: neither knows it).
@@ -1176,7 +1186,7 @@ let settingsPage = null
 
 // The browser, with a page. Windows: its URL handler (cmd's start mangles a URL whose arguments
 // it reads as its own, and wants a quoted empty title first).
-// How HeartCode picks your models: "fit" (by strengths, per message) or your order; --model-choice for this run wins.
+// How HeartCode picks your models: "fit" (an orchestrator hands the work out) or your order; --model-choice for this run wins.
 let modelChoiceFlag
 const fitMode = (cfg) => (modelChoiceFlag ?? cfg.modelChoice) === 'fit'
 
@@ -1200,7 +1210,7 @@ function applySettings(apps, cfg, what) {
     const { ui } = app
     const busy = Boolean(ui.busySince || app.working)
     const now = (fn) => (busy ? app.later.push(fn) : fn())
-    if (app.cfg !== cfg) for (const k of ['providers', 'provider', 'model', 'effort', 'theme', 'context', 'autoCompact', 'director', 'format', 'lsp', 'voice', 'rotation', 'statusBar']) app.cfg[k] = cfg[k]
+    if (app.cfg !== cfg) for (const k of ['providers', 'provider', 'model', 'effort', 'theme', 'context', 'autoCompact', 'director', 'format', 'lsp', 'voice', 'rotation', 'statusBar', 'modelChoice', 'orchestrators']) app.cfg[k] = cfg[k]
     // a model pinned in this CLI (/select_model) is a session choice: a model/order change on the
     // settings page leaves it alone (only /select_model auto here returns it to the list)
     if (what === 'model' && !app.cfg.session) {
