@@ -3,7 +3,7 @@ import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { Client } from '../src/client.js'
 import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, AUTO_MODEL, isAuto, parseModel, takeIn, whatOf, VERSION } from '../src/config.js'
-import { probe, loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
+import { loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
 import { learnFromUsage, LIMIT_MS } from '../src/context.js'
 import { Session, transcript, contextReport } from '../src/agent.js'
 import { listJobs, getJob, stopJob, removeJob, runningJobs, tailLines, ago as ranFor } from '../src/background.js'
@@ -46,7 +46,6 @@ ${c.bold('usage')}
                                      as provider/model, #1 first
   heart models --all [filter]        every provider's models (provider/model)
   heart models --json                as JSON (with --all too), for other programs
-  heart probe                        test the current model for real (otherwise its abilities come from models.dev)
   heart config                       show the config file
   heart settings                     change providers, models and settings in your browser
 
@@ -64,7 +63,6 @@ ${c.bold('options')}
                          copied in), shared by the --temp runs going on at once and deleted
                          after the last; ~/.heart isn't touched
       --context <n>      context window size in tokens
-      --force            re-run the probe
       --save             keep the given -u/-m/--api-key/... in ${CONFIG_FILE}
   -w, --worktree         work in a new git worktree and branch (--worktree=name to name it,
                          or to continue in it); removed on exit if nothing changed
@@ -123,7 +121,6 @@ const SECTIONS = [
     ['/context', "what's in the context now: system prompt, tools, messages, tool results, and the biggest pieces"],
     ['/background', 'commands running in the background (servers, watchers): their logs live, a tab each (Alt+B) · /background stop [id] · /background files', true],
     ['/model_info', 'what the model can do and how HeartCode uses it'],
-    ['/test_model', 'test the model for real (otherwise what it can do comes from models.dev, or your settings)'],
     ['/tidy_memory', 'merge, update and link the memory notes now'],
     ['/import', 'bring commands, skills, MCP servers and memory from other CLIs'],
     ['/install_skill', 'install a skill from a GitHub repo or a SKILL.md URL (add --project for this folder only)', true],
@@ -350,8 +347,7 @@ class App {
       ui.print(c.dim(`↻ ${t.provider} · ${t.model} answered${i ? ` (#${i + 1} in your model list)` : ' (#1 again)'}`))
     }
     if (cfg.maxRetries !== undefined) client.retryIf = (e, attempt) => attempt < cfg.maxRetries // headless: then give up
-    let profile = await getProfile(client, ui, !quiet && cfg.force, signal, quiet)
-    if (!quiet) cfg.force = false
+    let profile = await getProfile(client, ui, quiet)
     const strat = {}
     // The model asked from now on (at first, and when the model list moves on): its own profile,
     // abilities (sees images? calls tools? its window), thinking effort, price, and what its
@@ -689,7 +685,7 @@ class App {
     const parts = {
       provider: `${c.brand('●')} ${c.muted(now.provider)} ${c.faint(`(${on})`)}`,
       model,
-      mode: strat ? c.muted(strat.actions === 'tools' ? 'tools' : 'guided') : c.dim('not probed yet'),
+      mode: strat ? c.muted(strat.actions === 'tools' ? 'tools' : 'guided') : c.dim('not loaded yet'),
       thinking: strat?.thinking ? c.think(`thinking${cfg.effort ? ` · ${cfg.effort}` : ''}`) + (ui.showThinking ? '' : c.faint(' (collapsed)')) : null,
       images: strat?.vision ? c.muted('images') : null,
       ctx: null,
@@ -1305,7 +1301,7 @@ function afterReset(apps, level) {
   setTheme(fresh.theme)
   reloadPrompts()
   for (const app of apps) {
-    for (const k of Object.keys(app.cfg)) if (!['force', 'maxRetries', 'maxTurns', 'mcp', 'adhoc', 'fixed'].includes(k)) delete app.cfg[k]
+    for (const k of Object.keys(app.cfg)) if (!['maxRetries', 'maxTurns', 'mcp', 'adhoc', 'fixed'].includes(k)) delete app.cfg[k]
     Object.assign(app.cfg, fresh)
     const { ui } = app
     ui.permission = fresh.permissions ?? 'all' // not setPermission: that saves it again
@@ -1335,31 +1331,22 @@ function leaveTabWorktree(app) {
 
 // A model's profile: the saved one; else what models.dev says (nothing is sent to the model to
 // find out); a model it doesn't know: plain assumptions, until you set it up on the settings page.
-// force (/test_model, heart probe): test it now instead, with real requests.
-async function getProfile(client, ui, force, signal, quiet = false) {
-  let p = !force && loadProfile(client)
-  if (!p && !force) {
+async function getProfile(client, ui, quiet = false) {
+  let p = loadProfile(client)
+  if (!p) {
     await loadPrices()
     p = profileFrom(client, limitsOf(client.provider, client.baseUrl, client.model))
     writeJson(profilePath(client), p)
   }
   // one models.dev didn't know when it was saved: looked up again (it may have been added, or the list
   // couldn't be had then)
-  if (p?.source === 'assumed') {
+  if (p.source === 'assumed') {
     await loadPrices()
     const known = limitsOf(client.provider, client.baseUrl, client.model)
     if (known) writeJson(profilePath(client), (p = { ...p, known, source: 'models.dev' }))
   }
-  if (p) {
-    if (p.source === 'assumed' && !quiet) ui.warn(`${client.model} isn't in models.dev: assuming it calls tools and streams, with a ~128k window. Set what it can do on /settings`)
-    return p
-  }
-  ui.print(c.dim(`Testing ${client.model}…`))
-  const t0 = Date.now()
-  const tested = await probe(client, (label) => ui.spinner(`testing: ${label}`), signal)
-  ui.stopSpin()
-  ui.print(c.dim(`done in ${duration(Date.now() - t0)} · saved to ${profilePath(client)}`))
-  return tested
+  if (p.source === 'assumed' && !quiet) ui.warn(`${client.model} isn't in models.dev: assuming it calls tools and streams, with a ~128k window. Set what it can do on /settings`)
+  return p
 }
 
 // A setting from its choices: the argument if valid, else a picker. Returns the choice or null.
@@ -1424,8 +1411,8 @@ async function slash(app, line, working = false) {
     }
     case 'settings': {
       settingsPage ??= startSettings({ cfg, root: app.root, onLoginMcp: (name) => signInMcp(app, name, null), apply: (what) => applySettings(app.tabs ? app.tabs.list.map((t) => t.app) : [app], cfg, what) })
-      const { url, close } = await settingsPage
-      openBrowser(url)
+      const { url, local, close } = await settingsPage
+      openBrowser(local)
       ui.print(`${c.info('↗')} ${c.bold('settings')} ${c.muted('opened in your browser:')}\n  ${c.faint(url)}`)
       // a dialog until it's turned off: nothing else meanwhile, in any tab (Esc turns it off too).
       // Not busy meanwhile: what's changed on the page applies at once, here too (opened while a task
@@ -1647,10 +1634,17 @@ async function slash(app, line, working = false) {
     case 'import': {
       const items = findImports(app.root)
       if (!items.length) return ui.print('Nothing to import: no commands, skills, MCP servers, instructions or memory from Claude Code, Codex, Gemini CLI, OpenCode or Cursor found.')
+      for (const it of items) if (it.dup?.()) it.desc = `${c.yellow('already have it')} · ${it.desc}`
       const chosen = await ui.pick(`Import from other CLIs (${items.length} found)`, items, { multi: true })
       if (!chosen) return
       for (const it of chosen) {
         try {
+          // a duplicate (also of one just imported): added only if you say so, under a free name
+          const dup = it.dup?.()
+          if (dup && (await ui.pick(`${it.label}: ${dup}. Add it anyway?`, [{ label: 'No, skip it', value: false }, { label: 'Yes, add it under a new name', value: true }]))?.value !== true) {
+            ui.print(`${c.dim('–')} ${it.label} ${c.dim(`skipped: ${dup}`)}`)
+            continue
+          }
           ui.print(`${c.green('✓')} ${it.run()}`)
         } catch (e) {
           ui.print(`${c.red('✗')} ${it.label}: ${e.message}`)
@@ -1688,7 +1682,7 @@ async function slash(app, line, working = false) {
       ui.showThinking = !ui.showThinking
       return ui.print(c.dim(`thinking ${ui.showThinking ? 'shown' : 'collapsed'}`))
   }
-  if (!['model_info', 'test_model', 'compact'].includes(cmd)) {
+  if (!['model_info', 'compact'].includes(cmd)) {
     app.skills = loadSkills(app.root) // edits to skill files apply right away
     if (app.s) app.s.skills = app.skills
     if (cmd.startsWith('skill:')) {
@@ -1711,13 +1705,6 @@ async function slash(app, line, working = false) {
     }
     case 'model_info':
       return ui.showText(s.client.model, describe(s.profile, s.strat))
-    case 'test_model': {
-      const tested = await getProfile(app.client(s.client.provider, s.client.model), ui, true, app.signal) // tested on a fresh connection (requests not fitted to what it was thought to do), and saved
-      s.reset()
-      app.s = null // built again from the saved profile (one profile and strategy, kept up to date as the model list moves on)
-      await app.session()
-      return ui.print(`${c.cyan(tested.model)}\n${describe(tested, strategy(tested, cfg))}`)
-    }
   }
 }
 
@@ -1860,7 +1847,9 @@ async function repl(app, f = {}) {
     app.signal = ctl.signal // Esc stops whatever this line started (a task, a probe, …)
     ui.escArm = 0 // a fresh task: a first Esc from before doesn't count toward stopping this one
     ui.busy() // the spinner stays until this line's work is done
-    if (app.isCommand(t)) {
+    const command = app.isCommand(t)
+    if (command) {
+      const mark = ui.mark?.() // what it prints goes back out of the conversation when it's done
       try {
         if ((await slash(app, t)) === 'exit') {
           if (app.tabs) app.tabs.quitting = true
@@ -1871,6 +1860,7 @@ async function repl(app, f = {}) {
         log('error', e.stack)
         ui.print(c.red(`error: ${e.message}`))
       }
+      if (mark) ui.unmark(mark, /^\S+/.exec(t)[0])
     } else {
       let ok = await runTask(app, t, ctl)
       // plan mode: the plan is done; go ahead with it?
@@ -1891,7 +1881,7 @@ async function repl(app, f = {}) {
     ctl = null
     app.afterLine()
     app.tabs?.onChange?.() // the conversation may be another now (/resume, /fork, /clear_chat)
-    if (ui.tail) ui.print() // nothing after /clear_chat
+    if (ui.tail && !command) ui.print() // nothing after /clear_chat, nor after a command (it left nothing)
   }
   ui.close()
 }
@@ -1917,7 +1907,6 @@ async function main() {
       'hide-thinking': { type: 'boolean' },
       cwd: { type: 'string', short: 'C' },
       context: { type: 'string' },
-      force: { type: 'boolean' },
       save: { type: 'boolean' },
       continue: { type: 'boolean', short: 'c' },
       resume: { type: 'boolean', short: 'r' },
@@ -1968,7 +1957,6 @@ async function main() {
   useLogs(cfg)
   const safe = { ...cfg, providers: Object.fromEntries(Object.entries(cfg.providers).map(([n, p]) => [n, { ...p, apiKey: p.apiKey && mask(p.apiKey) }])) }
   log('start', `heartcode ${VERSION} · node ${process.version} · ${process.platform} · cwd ${process.cwd()}`, { args: process.argv.slice(2).map((a) => (a === f['api-key'] ? mask(a) : a)), config: safe })
-  cfg.force = f.force
   if (f.provider) {
     if (!cfg.providers[f.provider]) throw new Error(`no provider "${f.provider}" (heartcode providers lists them)`)
     Object.assign(cfg, { provider: f.provider, fixed: true })
@@ -1987,12 +1975,12 @@ async function main() {
     saveConfig(cfg)
     console.log(c.dim(`saved to ${CONFIG_FILE}`))
   }
-  const sub = ['probe', 'models', 'providers', 'config', 'settings'].includes(positionals[0]) && positionals.length <= 2 ? positionals[0] : null
+  const sub = ['models', 'providers', 'config', 'settings'].includes(positionals[0]) && positionals.length <= 2 ? positionals[0] : null
 
   if (sub === 'settings') {
-    const { url } = await startSettings({ cfg })
-    console.log(`${c.brand('♥')} HeartCode settings: ${url}\n${c.dim('opened in your browser · Ctrl+C to stop')}`)
-    openBrowser(url)
+    const { url, local } = await startSettings({ cfg })
+    console.log(`${c.brand('♥')} HeartCode settings: ${url}\n${c.dim('opened in your browser · from another device on this network, open the link above · Ctrl+C to stop')}`)
+    openBrowser(local)
     return new Promise(() => {}) // until Ctrl+C
   }
 
@@ -2085,14 +2073,6 @@ async function main() {
   app.worktree = wt
   if (sub === 'providers') return app.listProviders(), ui.close()
   if (sub === 'models') return await app.listModels(positionals[1] ?? '', { all: f.all, json: f.json }), ui.close()
-  if (sub === 'probe') {
-    cfg.force = true
-    const s = await app.session()
-    if (s) ui.print(describe(s.profile, s.strat))
-    ui.close()
-    process.exitCode = s ? 0 : 1
-    return
-  }
   if (f['no-memory']) app.memory = null
   const chat = f['resume-id'] ? loadChat(f['resume-id']) : f.continue && headless ? listChats(app.root)[0] : f['session-id'] ? (loadChat(f['session-id']) ?? { ...newChat(app.root), id: f['session-id'] }) : null
   if (f['resume-id'] && !chat) throw new Error(`no session ${f['resume-id']}`)

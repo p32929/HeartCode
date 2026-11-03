@@ -7,7 +7,6 @@ Everything HeartCode sends to a model, in four files. Each `## name` heading is 
 | `agent.md` | tool mode (capable models): the system prompt, tool descriptions, memory, notes HeartCode adds |
 | `guided.md` | guided mode (weak models): one question at a time |
 | `compact.md` | `/compact` and auto-compact |
-| `probe.md` | the one-time test of a new model |
 
 In a prompt, `{{name}}` is filled in by HeartCode (the note under each heading lists them),
 `{{#if name}} … {{else}} … {{/if}}` keeps a part only when `name` has a value, and a

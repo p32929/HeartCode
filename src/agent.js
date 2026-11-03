@@ -119,7 +119,7 @@ export class Session {
     // is asked for again once; then the compaction fails (the conversation is trimmed instead).
     const request = (extra) => prompt('compact/summarize', { conversation: cut(), focus }) + extra
     const send = (extra) =>
-      client.chat({ messages: strat.mergeSystem ? [{ role: 'user', content: `${prompt('compact/summarizer')}\n\n${request(extra)}` }] : [{ role: 'system', content: prompt('compact/summarizer') }, { role: 'user', content: request(extra) }] }, { signal })
+      client.chat({ messages: [{ role: 'system', content: prompt('compact/summarizer') }, { role: 'user', content: request(extra) }] }, { signal })
     const ask = (extra = '') => send(extra)
     let summary = notSummary((await ask()).content)
     if (!summary) {
@@ -358,7 +358,7 @@ export class Session {
     const room = Math.floor((strat.context * 0.6 * 3.5) / (strat.ratio ?? 1))
     const text = conversation.length > room ? `[… the earliest part is cut]\n${conversation.slice(-room)}` : conversation
     const request = prompt('compact/branch-summarize', { conversation: text, files: files.join(', ') })
-    const messages = strat.mergeSystem ? [{ role: 'user', content: `${prompt('compact/summarizer')}\n\n${request}` }] : [{ role: 'system', content: prompt('compact/summarizer') }, { role: 'user', content: request }]
+    const messages = [{ role: 'system', content: prompt('compact/summarizer') }, { role: 'user', content: request }]
     const summary = notSummary((await client.chat({ messages }, { signal })).content)
     if (!summary) throw new Error('the model did not write a summary')
     return summary
@@ -730,8 +730,8 @@ async function runNative(s, task, images, signal) {
   // Unchanged, it stays the same text, so a provider's prompt cache still holds.
   const sys = SYSTEM(s)
   if (!s.messages) {
-    s.messages = strat.mergeSystem ? [{ role: 'user', content: sys }, { role: 'assistant', content: prompt('agent/system-acknowledged') }] : [{ role: 'system', content: sys }]
-  } else if (s.messages[0]?.content !== sys && (s.messages[0]?.role === 'system' || strat.mergeSystem)) {
+    s.messages = [{ role: 'system', content: sys }]
+  } else if (s.messages[0]?.content !== sys && s.messages[0]?.role === 'system') {
     s.messages[0] = { ...s.messages[0], content: sys }
   }
   if (s.chat.branchNote && !s.isSub) {
@@ -859,15 +859,15 @@ async function runNative(s, task, images, signal) {
     }
     // the model answering can change mid-message (your model list): the system prompt follows it
     const now = SYSTEM(s)
-    if (s.messages[0]?.content !== now && (s.messages[0]?.role === 'system' || strat.mergeSystem)) s.messages[0] = { ...s.messages[0], content: now }
+    if (s.messages[0]?.content !== now && s.messages[0]?.role === 'system') s.messages[0] = { ...s.messages[0], content: now }
     pairTools(s.messages)
     ui.spinner('thinking')
     const out = ui.response(client.model) // named: helpers think too (theirs are named in helperUI)
-    const stream = strat.toolsStream
+    const stream = strat.stream
     // A long tool call (a whole file) streams in silently: say what's being written.
     const onToolDelta = (name, args) => ui.spinner(`${name === 'run_command' ? 'preparing a command' : `writing ${/"path"\s*:\s*"([^"]+)"/.exec(args)?.[1] ?? name}`} · ${args.length >= 1000 ? `${(args.length / 1000).toFixed(1)}k` : args.length} chars`)
     // the prompts or HEARTCODE.md changed meanwhile (applySettings): the system prompt again, now
-    if (s.refreshSystem && (s.messages[0]?.role === 'system' || strat.mergeSystem)) s.messages[0] = { ...s.messages[0], content: SYSTEM(s) }
+    if (s.refreshSystem && s.messages[0]?.role === 'system') s.messages[0] = { ...s.messages[0], content: SYSTEM(s) }
     s.refreshSystem = false
     let res
     try {
@@ -1507,8 +1507,7 @@ export function contextReport(s) {
   msgs.forEach((m, i) => {
     const n = Math.round(estMessages([m]) * ratio)
     const ago = msgs.length - 1 - i
-    if (i === 0 && (m.role === 'system' || s.strat?.mergeSystem)) return void (parts.system += n)
-    if (i === 1 && s.strat?.mergeSystem && m.role === 'assistant') return void (parts.system += n)
+    if (i === 0 && m.role === 'system') return void (parts.system += n)
     if (m.role === 'tool') {
       const old = typeof m.content === 'string' && /^\[older output/.test(m.content)
       old ? (parts.pointers += n, cut++) : (parts.results += n, whole++)

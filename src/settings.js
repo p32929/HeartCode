@@ -1,4 +1,4 @@
-// The settings page: a small web server on this machine (127.0.0.1 only) where everything but
+// The settings page: a small web server (on this machine, and on its network address for another device) where everything but
 // the chat can be changed: providers and their keys, the model, settings, MCP servers, hooks,
 // keys, colors, skills. Open with `heartcode settings` or /settings. A secret token in
 // the link guards it (another site, or another user on this machine, can't use it); API keys
@@ -61,7 +61,7 @@ const FILES = [
   ['HEARTCODE.md', 'Your instructions for every project (like AGENTS.md, for all of them)', false, '- Answer briefly.\n- Use pnpm, not npm.'],
 ]
 // The prompts the page edits: every section of these files (prompts/*.md); the system prompts first.
-const PROMPT_FILES = ['agent', 'guided', 'compact', 'probe']
+const PROMPT_FILES = ['agent', 'guided', 'compact']
 const FIRST = { 'agent/system': 'System prompt (models with tool calls)', 'guided/system': 'System prompt (guided mode: models without tool calls)' }
 const ownPrompts = (file) => path.join(HOME, 'prompts', `${file}.md`)
 const tilde = (p) => (p.startsWith(os.homedir() + path.sep) ? '~' + p.slice(os.homedir().length) : p)
@@ -392,7 +392,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
 
   const routes = {
     'GET /api/state': () => state(),
-    // the public rankings, fetched now (Get rankings / Refresh on Your models)
+    // the public rankings, fetched now (with models.dev: Update model info on Your models)
     'POST /api/rankings': async () => {
       if (!(await rankings({ now: true }))) throw new Error("couldn't get the rankings (huggingface.co)")
       return state()
@@ -513,7 +513,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
         const profile = loadProfile(new Client({ baseUrl: p.baseUrl, apiKey: p.apiKey, model: id }))
         return [id, {
           ...saved.details[id],
-          tested: profile ? { mode: strategy(profile).actions, context: profile.context, thinking: Boolean(profile.thinking), vision: strategy(profile).vision } : undefined,
+          tested: profile ? ((st) => ({ mode: st.actions, context: profile.context, thinking: st.thinking, vision: st.vision }))(strategy(profile)) : undefined,
           known: limitsOf(name, p.baseUrl, id) ?? undefined,
         }]
       }))
@@ -937,9 +937,9 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       res.end(type === 'application/json' ? JSON.stringify(body) : body)
     }
     try {
-      // only as 127.0.0.1 or localhost (a site renamed to this address can't reach it), and only with the token
+      // only by this machine's own names and addresses (a site renamed to this address can't reach it), and only with the token
       const { port: p } = server.address()
-      if (![`127.0.0.1:${p}`, `localhost:${p}`].includes(req.headers.host)) return send(403, { error: 'wrong host' })
+      if (!['127.0.0.1', 'localhost', ...addresses()].map((h) => `${h}:${p}`).includes(req.headers.host)) return send(403, { error: 'wrong host' })
       const url = new URL(req.url, `http://${req.headers.host}`)
       if (url.pathname === '/favicon.ico') return res.writeHead(204).end() // the browser asks, without the token
       const given = url.pathname === '/' || url.pathname === '/api/events' ? url.searchParams.get('t') : req.headers['x-heart-token']
@@ -972,19 +972,24 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   return new Promise((resolve, reject) => {
     server.on('error', reject)
     forgetTests() // results of models no longer yours, left from before
-    server.listen(port, '127.0.0.1', () => {
-      const url = `http://127.0.0.1:${server.address().port}/?t=${token}`
-      log('web', `settings page at 127.0.0.1:${server.address().port}`)
+    server.listen(port, '0.0.0.0', () => {
+      const at = (host) => `http://${host}:${server.address().port}/?t=${token}`
+      const local = at('127.0.0.1') // for a browser on this machine
+      const url = at(addresses()[0] ?? '127.0.0.1') // its network address when it has one: works from another device too
+      log('web', `settings page at ${new URL(url).host}`)
       // models.dev's list (its sizes for your models, whether their providers' lists are on or not):
       // loaded now, and your models' lines brought up to date when it's in
       loadPrices().then(() => {
         for (const t of state().order) testNews(`${t.provider}/${t.model}`, t)
       test(state().order) // any without a profile yet
       })
-      resolve({ url, server, close: () => (watcher?.close(), server.closeAllConnections?.(), server.close()) })
+      resolve({ url, local, server, close: () => (watcher?.close(), server.closeAllConnections?.(), server.close()) })
     })
   })
 }
+
+// This machine's IPv4 addresses on its networks (Wi-Fi, Ethernet, a VPN), not the loopback one
+const addresses = () => Object.values(os.networkInterfaces()).flat().filter((n) => n && n.family === 'IPv4' && !n.internal).map((n) => n.address)
 
 // What a model costs at this provider, per million tokens, as its own model list says: { input,
 // output } (either may be missing), or undefined. Not models.dev's: the same model costs differently

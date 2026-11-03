@@ -38,8 +38,8 @@ export function capabilities(cfg = {}) {
   const npx = onPath('npx')
   caps.push({
     id: 'browser',
-    name: 'Browser preview & UI review',
-    what: 'HeartCode opens pages it builds in a real browser, reads the console and takes screenshots to check them.',
+    name: 'Browser',
+    what: 'The browser tools: the model opens a page in a real browser, uses it, reads the console and takes screenshots.',
     ok: chrome && npx,
     need: !npx ? 'Node.js' : !chrome ? 'Google Chrome' : '',
   })

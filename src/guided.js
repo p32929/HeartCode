@@ -1,7 +1,7 @@
 // Guided mode, for models without (reliable) tool calls. HeartCode drives the
 // task as a series of single questions; every answer has one trivial shape
 // (a number, a path, or "the whole reply is code") and is checked against
-// reality before use. With constrained output, the server enforces the shape.
+// reality before use.
 import fs from 'node:fs'
 import { log } from './log.js'
 import { prompt, userInstructions } from './prompts.js'
@@ -39,7 +39,7 @@ export function nextActions(st) {
   return [...new Set([...first, ...ACTIONS.map(([n]) => n)])].filter((n) => n !== 'delegate' || st.canDelegate)
 }
 
-// A reply may be plain text or (when enforced) JSON like {"path": "a.js"}.
+// A reply may be plain text or JSON like {"path": "a.js"}.
 export function answerText(reply) {
   const t = String(reply).trim()
   if (t.startsWith('{')) {
@@ -172,8 +172,7 @@ class Guided {
   }
 
   async yesNo(question, fallback) {
-    const schema = { type: 'object', properties: { answer: { type: 'string', enum: ['yes', 'no'] } }, required: ['answer'], additionalProperties: false }
-    const res = await this.query(prompt('guided/yes-no', { question }), { room: 20, schema, oneLine: true })
+    const res = await this.query(prompt('guided/yes-no', { question }), { room: 20, oneLine: true })
     const m = /\b(yes|no)\b/i.exec(answerText(res.content))
     return m ? m[1].toLowerCase() === 'yes' : fallback
   }
@@ -229,24 +228,21 @@ class Guided {
     return this.ask1(question, opts)
   }
 
-  async ask1(question, { room = 32, schema, oneLine, onToken, answer, skipKey } = {}, tries = 0) {
+  async ask1(question, { room = 32, oneLine, onToken, answer, skipKey } = {}, tries = 0) {
     const { client, strat } = this.s
     const think = strat.thinking ? 4096 : 0
     const user = `${this.context(est(question) + room + think + tries * 600, skipKey)}\n\n${question}`
     this.instructions ??= userInstructions(this.s.root)
     const system = [prompt('guided/system'), this.instructions && prompt('agent/instructions', { instructions: this.instructions }), this.s.appendSystem].filter(Boolean).join('\n\n')
-    const messages = strat.mergeSystem
-      ? [{ role: 'user', content: `${system}\n\n${user}` }]
-      : [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ]
+    const messages = [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ]
     const out = this.ui.response()
     if (answer) onToken = out.text
     const stream = Boolean(strat.stream && (onToken || strat.thinking))
     const body = { messages, temperature: 0, stream } // no max_tokens: the model decides how long
-    if (schema && strat.enforce) body.response_format = { type: 'json_schema', json_schema: { name: 'answer', strict: true, schema } }
-    else if (oneLine && strat.stop) body.stop = ['\n\n']
+    if (oneLine && strat.stop) body.stop = ['\n\n']
     const res = await client.chat(body, { signal: this.signal, onToken, onReasoning: out.think })
     if (!stream) out.think(res.reasoning)
     if (answer && !stream) out.text(res.content)
@@ -331,9 +327,8 @@ class Guided {
     const names = nextActions(this.st)
     const menu = names.map((n, i) => `${i + 1}. ${n} - ${DESC[n]}`).join('\n')
     let q = prompt('guided/next-action', { menu })
-    const schema = { type: 'object', properties: { choice: { type: 'integer', enum: names.map((_, i) => i + 1) } }, required: ['choice'], additionalProperties: false }
     for (let i = 0; i < 2; i++) {
-      const res = await this.query(q, { room: 16, schema, oneLine: true })
+      const res = await this.query(q, { room: 16, oneLine: true })
       const a = parsePick(res.content, names)
       if (a) return a
       q += '\n\n' + prompt('guided/next-action-retry', { reply: clip(res.content, 40), count: names.length })
@@ -346,11 +341,9 @@ class Guided {
       this.note(null, 'note', prompt('guided/note-no-files'))
       return null
     }
-    const schema =
-      candidates.length <= 300 ? { type: 'object', properties: { path: { type: 'string', enum: candidates } }, required: ['path'], additionalProperties: false } : undefined
     let q = prompt('guided/pick-file', { question })
     for (let i = 0; i < 2; i++) {
-      const res = await this.query(q, { room: 60, schema, oneLine: true })
+      const res = await this.query(q, { room: 60, oneLine: true })
       const said = answerText(res.content)
       const f = matchFile(candidates, said)
       if (f) return f
@@ -387,7 +380,7 @@ class Guided {
     const old = fs.readFileSync(resolveIn(this.s.root, f), 'utf8')
     this.ui.step('edit', f)
     let next = null
-    if (this.s.strat.edits === 'search_replace') next = await this.editBlocks(f, old)
+    next = await this.editBlocks(f, old)
     if (next === null) next = await this.editRewrite(f, old)
     if (next === null) return `edit:${f}`
     const lost = lostNames(old, next, this.task)
@@ -443,11 +436,9 @@ class Guided {
       win = focusWindow(lines, answerText(res.content), room) ?? [0, lines.length]
     }
     const view = clip(numberLines(lines.slice(win[0], win[1]), win[0] + 1), room)
-    const schema = { type: 'object', properties: { start: { type: 'integer' }, end: { type: 'integer' } }, required: ['start', 'end'], additionalProperties: false }
     const part = win[0] > 0 || win[1] < lines.length ? ` (lines ${win[0] + 1}-${win[1]} of ${lines.length})` : ''
     const rres = await this.query(prompt('guided/pick-range', { file: f, part, view: fence(view) }), {
       room: 20,
-      schema,
       oneLine: true,
       skipKey,
     })

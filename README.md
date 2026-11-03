@@ -59,7 +59,7 @@ tried did what I needed:
 - **Tells you when a newer version is out** (a check with npm at most once a day, in the status bar):
   `/update` shows what changed and installs it the way you installed HeartCode. Switch it off in
   `/settings` → General.
-- **Best fit by public rankings**: with "HeartCode picks the model by" set to best fit, each message's
+- **Best fit by public rankings**: with "Pick" set to "the best for each task", each message's
   lead and code reviewer are your models ranked on the skills that task needs (web
   pages, code, images…) by LMArena's public rankings, fetched once a week. Your models shows each
   one's Coding, Web apps and Vision rank.
@@ -105,9 +105,11 @@ heart
 
 ### 3. Open the settings page
 
-Type `/settings`. The settings page opens in your browser. It runs on your machine only
-(127.0.0.1, with a secret key in its link). A running HeartCode picks up what you change right
-away.
+Type `/settings`. The settings page opens in your browser. The link shown has your machine's
+network address (like `http://192.168.1.108:43135/?t=…`), so it opens from another device on the
+same network too: HeartCode on a server over SSH, the page on your laptop. Only that link works:
+it has a secret key, and the page answers only to this machine's own addresses. A running
+HeartCode picks up what you change right away.
 
 <!-- image: the settings page -->
 ![The settings page](https://res.cloudinary.com/m0jnrul4/image/upload/v1793485584/8396c407-f5f8-48af-a242-0b5cbc1c0331.png)
@@ -138,15 +140,15 @@ On **Models → Your list**:
 1. **Sort them by context and abilities.** Click the *Abilities* column, then *Context*: the
    models that can do the most come first, the biggest context window first among those (each
    column clicked breaks the ties of the ones before; click one again to reverse it, a third time to
-   drop it). Click **Save list** to keep it.
+   drop it). Click **Save order** to keep it.
 2. **Rearrange a bit more.** Drag a row to move it. #1 is the one HeartCode uses; the others are
    its fallbacks, tried in order.
 3. **Test them** (optional): **Test all** sends each a short message and shows which really answer.
-   Each test waits up to 10 seconds; the **Timeout** box next to it changes that.
+   Each test waits up to 10 seconds; **Tests wait**, above the list, changes that.
 4. **Filter them** (optional): by name, provider, test result (works, doesn't, not tested, or one
-   error like 402), context, tools, thinking, images or free. **Test all** then tests only the ones
-   shown, and **Use these N** makes them the models HeartCode uses, in the order you see (the others
-   stay under Providers). Filter to the working ones, sort by Works?, Use these: HeartCode uses your
+   error like 402), context, tools, thinking, images or free. **Test N** then tests only the ones
+   shown, and **Use only these N** makes them the models HeartCode uses, in the order you see (the others
+   stay under Providers). Filter to the working ones, sort by Works?, Use only these: HeartCode uses your
    working models, fastest first.
 
 If a model says *not found* in models.dev, **Retry** looks it up again, or **Set up** tells

@@ -58,7 +58,7 @@ reached has an `error` (in text: a line on stderr) and is skipped; the command s
 
 | `-m` | What runs |
 |---|---|
-| `auto`, or no `-m` | the user's list: #1, and the next one in order when it fails. Use this unless you need one particular model. |
+| `auto`, or no `-m` | the user's list: #1, and the next one in order when it fails (with the user's "best fit" setting: their models ranked for each task, below). Use this unless you need one particular model. |
 | `provider/model` (`-m groq/openai/gpt-oss-120b`), or a model of #1's provider alone | that model alone: never another one, also when it fails (a rate limit or an outage is tried again, up to `--max-retries`) |
 | that, plus `--fallback-model provider/model` (repeatable) | that model, then the fallbacks in order when it fails (as `claude -p --fallback-model`) |
 
@@ -79,6 +79,13 @@ Each request is fitted to the model it goes to: one that can't see gets a note i
 image, one that can't call tools gets the tool calls as text.
 
 `--provider <name>` and `-u <url>` (a server for this run) also mean one model, alone.
+
+**Best fit** (the user's setting "Pick: the best for each task", on Your models in `heart settings`): with `auto`,
+each new message first names the skills the task needs (code, web pages, images, long inputs…) in
+one short request, and the user's models are ordered by their places in the public LMArena rankings
+of those skills (fetched once a week); the best leads, the next take over when it fails, and the
+code review goes to the best of the others. Models the rankings don't know come last, in the user's
+order. With "Your order" (the default), the list is the user's order, as is.
 
 A run picks up settings the user changes meanwhile (`heart settings`, another HeartCode, or
 `~/.heart` by hand) without being restarted, from its next request: the model order, prompts,
@@ -126,7 +133,9 @@ heart -p --continue "…"          # or: the last session in this folder
 ## Keep it safe
 
 Headless never asks anyone. What the permission mode would ask about is declined, and the
-model is told why. An MCP tool its server marks read-only is never asked about. The model can't
+model is told why. A question the model would ask the user (what to build, how it should look,
+what testing) it decides itself, and says in its reply what it assumed: put the choices that
+matter in the prompt. An MCP tool its server marks read-only is never asked about. The model can't
 give itself a freer permission mode (its `manage` tool asks the user, so headless refuses it), and
 can't switch the model you chose.
 
@@ -162,7 +171,7 @@ assumptions, and the user can set it up on the settings page. Models that can't 
 work, in a slower guided mode.
 
 The model in use knows the user's other models (what each can do, how often it failed this
-session) and works with them through its `agent` tool: it asks a model that can for what it
+session, and in best fit their ranks for code, web apps and vision) and works with them through its `agent` tool: it asks a model that can for what it
 can't do itself (a model that can't see asks one that can about a screenshot: "which tiles show a
 chair?"), several at once when there are many images or parts, and a helper that fails is handed to
 the next capable model until one does the job. A helper works until its job is done (no step
@@ -191,7 +200,7 @@ answers. A run that fails with a wrong key or an unknown model: ask the user to 
 | Flag | |
 |---|---|
 | `--append-system-prompt "<text>"` | your instructions for this run, at the end of the system prompt. HeartCode's own part then says less (no role of its own, no "stay in the project folder", no way of finishing of its own) and tells the model to follow yours where they differ; its `manage` tool is left out, and nothing from the run's messages is saved to its memory |
-| `--mcp-config <file or JSON>` | more MCP servers (repeatable); `--strict-mcp-config`: only those. The model sees every server's tools by name, one line each, and gets a tool's arguments when it uses it (a call that doesn't fit them comes back with what's wrong, not run). What a server says about using its tools goes in the system prompt |
+| `--mcp-config <file or JSON>` | more MCP servers (repeatable); `--strict-mcp-config`: only those. The model sees every server's tools by name, one line each, and gets a tool's arguments when it uses it (a call that doesn't fit them comes back with what's wrong, not run). What a server says about using its tools comes once, with the first result of one of them |
 | `--skills-dir <folder>` | more skills (repeatable) |
 | `--no-memory` | nothing read or kept: no memory notes, no web pages saved in the project, no wrap-up at the end (see "What a run leaves") |
 
@@ -244,6 +253,10 @@ conversation's). The helper's last reply is that `agent` call's `tool_result`.
 Every `assistant` line's `message.model` is the model that wrote it (`provider/model`): after a
 fallback, the one that took over, not the one the run started with (the `init` line's `model`).
 `modelUsage` in the `result` has each model that answered.
+
+Not in the stream: HeartCode's own prompts (the system prompt, its nudges), the skill-picking
+request of best fit, the review's verdict and the wrap-up. Their tokens are in `usage` and
+`modelUsage`. Retries and switches to another model go to stderr with `--verbose`.
 
 ## Don't
 

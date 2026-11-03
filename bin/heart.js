@@ -64,7 +64,7 @@ if (temp) {
 }
 
 // a folder first: HeartCode opens it (subcommands and options go straight through)
-const SUBCOMMANDS = ['probe', 'models', 'providers', 'config', 'settings']
+const SUBCOMMANDS = ['models', 'providers', 'config', 'settings']
 const first = args[0]
 if (first && !first.startsWith('-') && !SUBCOMMANDS.includes(first)) {
   const where = path.resolve(first.replace(/^~(?=\/|$)/, os.homedir()))

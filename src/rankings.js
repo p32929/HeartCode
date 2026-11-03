@@ -8,6 +8,7 @@ import { readParquet } from './parquet.js'
 
 const FILE = path.join(HOME, 'rankings.json')
 const WEEK = 7 * 24 * 3600_000
+const VERSION = 2 // 2: with each model's score; an older file is fetched again
 const FILES = 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main' // one Parquet file per ranking: text, webdev, vision, agent
 
 // The skills a task can need: [ranking, its category, what it's for] (the pick names them).
@@ -32,12 +33,12 @@ const OVERALL = 'text:overall' // a skill a model isn't ranked on: its overall p
 
 export const loadRankings = () => readJson(FILE, null)
 
-// One ranking (text, webdev…), every category in it: { 'text:coding': [{ name, rank }], … }
+// One ranking (text, webdev…), every category in it: { 'text:coding': [{ name, rank, score, votes }], … } (score: its rating there)
 async function fetchRanking(config, signal) {
   const res = await fetch(`${FILES}/${config}/latest-00000-of-00001.parquet`, { signal: AbortSignal.any([AbortSignal.timeout(120_000), ...(signal ? [signal] : [])]) })
   if (!res.ok) throw new Error(`rankings ${config}: HTTP ${res.status}`)
   const out = {}
-  for (const r of readParquet(Buffer.from(await res.arrayBuffer()), ['model_name', 'rank', 'category'])) (out[`${config}:${r.category}`] ??= []).push({ name: r.model_name, rank: r.rank })
+  for (const r of readParquet(Buffer.from(await res.arrayBuffer()), ['model_name', 'rank', 'category', 'rating', 'vote_count'])) (out[`${config}:${r.category}`] ??= []).push({ name: r.model_name, rank: r.rank, score: Math.round(r.rating), votes: r.vote_count })
   return out
 }
 
@@ -46,12 +47,12 @@ async function fetchRanking(config, signal) {
 let refreshing = null
 export async function rankings({ signal, onWait, now = false } = {}) {
   const have = loadRankings()
-  if (have && Date.now() - have.fetched < WEEK && !now) return have
+  if (have && have.v === VERSION && Date.now() - have.fetched < WEEK && !now) return have
   refreshing ??= (async () => {
     const wanted = new Set([...Object.values(SKILLS).map(([c, k]) => `${c}:${k}`), OVERALL])
     const all = Object.assign({}, ...(await Promise.all([...new Set([...wanted].map((p) => p.split(':')[0]))].map((c) => fetchRanking(c, have ? undefined : signal)))))
     const lists = Object.fromEntries(Object.entries(all).filter(([k]) => wanted.has(k)))
-    const out = { fetched: Date.now(), source: 'LMArena (huggingface.co/datasets/lmarena-ai/leaderboard-dataset)', lists }
+    const out = { v: VERSION, fetched: Date.now(), source: 'LMArena (huggingface.co/datasets/lmarena-ai/leaderboard-dataset)', lists }
     writeJson(FILE, out)
     log('fit', `rankings fetched: ${Object.entries(lists).map(([k, v]) => `${k} ${v.length}`).join(', ')}`)
     return out
@@ -72,8 +73,14 @@ export async function rankings({ signal, onWait, now = false } = {}) {
 
 // A name as words: "models/gemini-3.6-flash" and "Gemini 3.6 Flash (High)" are both "gemini 3 6 flash"
 const DROP = new Set(['latest', 'preview', 'free', 'it', 'instruct', 'exp', 'chat'])
-export const words = (name) =>
-  String(name)
+const WORDS = new Map() // name → its words: thousands of models are matched against hundreds of entries, each parsed once
+export const words = (name) => {
+  const k = String(name)
+  if (!WORDS.has(k)) WORDS.set(k, toWords(k))
+  return WORDS.get(k)
+}
+const toWords = (name) =>
+  name
     .toLowerCase()
     .replace(/\([^)]*\)/g, ' ')
     .replace(/^.*\//, '')
@@ -105,11 +112,11 @@ export function score(model, skills, data) {
   return each.every((x) => x == null) ? null : each.reduce((n, x) => n + (x ?? 1), 0) / each.length
 }
 
-// A model's place in one list ('text:coding'…), for showing: { rank, of, as } (as: its name there); null when not in it
+// A model's place in one list ('text:coding'…), for showing: { rank, of, as, score, votes } (as: its name there); null when not in it
 export function rankIn(model, key, data) {
   const list = data?.lists[key]
   const at = list?.filter((e) => place(model, [e]) != null)
   if (!at?.length) return null
   const best = at.reduce((a, b) => (b.rank < a.rank ? b : a))
-  return { rank: best.rank, of: list.length, as: best.name }
+  return { rank: best.rank, of: list.length, as: best.name, score: best.score, votes: best.votes }
 }

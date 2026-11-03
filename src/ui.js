@@ -1828,6 +1828,7 @@ export class UI {
           const picked = Array.isArray(pick?.chosen) ? pick.chosen.map((x) => x.label).join(', ') : pick?.chosen?.label
           if (pick?.quiet) this.render()
           else if (pick) this.write(echo + (picked ?? c.dim('cancelled')) + '\n')
+          else if (l !== null && history && this.isCommand(l.trim()) && !/^\s*\/skill:/.test(l)) this.notice(/^\S+/.exec(l.trim())[0], 3000, '›') // a command isn't part of the conversation: its name for a moment (not its arguments: maybe a key)
           else if (l !== null) this.write(echo + c.bright(l.replace(/\n/g, '\n' + ' '.repeat(width(echo.replace(/\x1b\[[0-9;]*m/g, ''))))) + '\n')
           else this.render()
         }
@@ -1929,6 +1930,23 @@ export class UI {
         this.render()
       })
     }
+  }
+  // A /command's output is taken back out of the conversation once it's done (nothing of a command
+  // stays): one line shown as a notice for a moment, more in a box (Esc closes). Not when the command
+  // put another conversation on the screen (/resume, /clear_chat…): that's what it's for.
+  mark() {
+    return { log: this.log, at: this.log.length - 1, base: this.log.at(-1), tail: this.tail, sgr: this.sgr }
+  }
+  unmark(m, title) {
+    if (this.log !== m.log || this.log.length <= m.at || !this.log[m.at].startsWith(m.base)) return this.render()
+    const text = [this.log[m.at].slice(m.base.length), ...this.log.slice(m.at + 1)].join('\n').replace(/^(\s*\n)+|\s+$/g, '')
+    this.log.length = m.at + 1
+    this.log[m.at] = m.base
+    Object.assign(this, { tail: m.tail, sgr: m.sgr })
+    const lines = text ? text.split('\n') : []
+    if (lines.length === 1 || (lines.length && this.dialog)) this.notice(lines[0], 4000, '›')
+    else if (lines.length) this.showText(title, text)
+    else this.render()
   }
   // A blank line before a new block, unless there already is one.
   gap() {

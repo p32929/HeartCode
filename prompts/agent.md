@@ -103,11 +103,6 @@ Reply now, without using tools: what did you do, and what is the result? If some
 <!-- HeartCode's own answer when the model gives none at all. {{model}}: its name; {{changed}}: files changed in this message (may be empty). -->
 {{model}} stopped without a final answer.{{#if changed}} Files changed in this message: {{changed}} (/rewind can undo them).{{/if}} Say "continue" to make it carry on.
 
-## system-acknowledged
-
-<!-- For models without a system role: the system prompt goes in as the first user message, and this is the model's reply to it. -->
-Understood.
-
 ## instructions
 
 <!-- Added to the system prompt when the user has instructions: HEARTCODE.md or AGENTS.md in the

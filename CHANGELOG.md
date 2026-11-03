@@ -2,6 +2,30 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.41 (2026-11-03)
+
+- **Model scores on Your models**: Coding, Web apps and Vision show each model's LMArena score with
+  its place (`1478 #60`; hover for the votes); green is the top tenth. The page opens fast again
+  with thousands of models (each name matched once, not once per ranking entry).
+- **Your models in three rows**: the title with Order providers and Update model info (models.dev
+  and the scores in one click); the settings on one line with short names (Pick, If one fails, Give
+  up after, New message to, Tests wait); search, filters, the count, Clear, Test all and Save order
+  on one line. The sort shows in the column heads.
+- **Best fit said plainly**: with Pick on "the best for each task", the page and the sidebar say
+  each message goes to the models that score best for it (not "HeartCode uses #1"), and Order
+  providers is off, with why on hover.
+- **The list holds still while models are tested** (or Update model info runs): filters, sorting,
+  the settings, dragging and each row's changes wait; Stop and Request still work.
+- **Settings from another device**: the link shows your machine's network address
+  (`http://192.168.1.108:43135/?t=…`) and the page answers there; only with its key, and only to
+  this machine's addresses.
+- **Slash commands leave nothing behind**: a command shows a toast for a few seconds; what it shows
+  opens in a dialog, and nothing stays in the conversation.
+- **/import asks before a duplicate**: one you already have (same name, same text, or the same MCP
+  server under another name) is marked, and added only if you say so, under a new name.
+- **Removed**: /test_model and `heart probe` (models.dev says what a model can do), and the
+  settings only those tests could switch on.
+
 ## 0.1.40 (2026-11-03)
 
 - **A smaller, general system prompt** (about 6,700 tokens to start a task, from 13,000+): its rules

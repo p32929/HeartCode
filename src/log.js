@@ -25,7 +25,7 @@ export const LOG_DIR = process.env.HEART_LOG === 'off' ? null : path.resolve(pro
 // listed goes in debug.
 export const LOG_KINDS = {
   tools: { label: 'Tools & commands', about: 'what HeartCode did on your machine: each tool call and its result, commands and background commands, MCP calls, files written', topics: ['tool', 'command', 'mcp', 'background', 'lsp', 'format', 'write', 'web', 'research', 'worktree'] },
-  models: { label: 'Model choices', about: 'why a model answered or didn\'t: fallbacks, retries, best-fit picks, strengths learned, probes and quirks found', topics: ['rotate', 'retry', 'fit', 'strengths', 'probe', 'quirk'] },
+  models: { label: 'Model choices', about: 'why a model answered or didn\'t: fallbacks, retries, best-fit picks and quirks found', topics: ['rotate', 'retry', 'fit', 'quirk'] },
   agent: { label: "Agent's decisions", about: 'why it did what it did: each task and its answer, plan-first, reviews, page checks, helpers and parts, compacting, lessons, the wrap-up', topics: ['task', 'look', 'review', 'compact', 'wrapup', 'learn', 'agent', 'director', 'guided', 'rewind', 'btw', 'parts'] },
   errors: { label: 'Errors', about: 'what went wrong: errors, crashes and warnings, with where they came from', topics: ['error', 'crash', 'warn', 'exit'] },
   conversation: { label: 'Conversation', about: 'a plain transcript: what you typed, its answers, its questions and your answers', topics: ['input', 'ask', 'answer'] },
