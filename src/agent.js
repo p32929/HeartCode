@@ -235,7 +235,7 @@ export class Session {
   // ACP) as that call's.
   async subagent(args, signal, id) {
     const task = String(args.prompt ?? args.task ?? '').trim()
-    if (!task) return 'error: give the helper its job in "prompt"'
+    if (!task) return this.orchestrating ? 'error: "prompt" is missing: put the whole task for the model in "prompt", and which model does it in "model"' : 'error: give the helper its job in "prompt"'
     let images
     try {
       images = await loadImages(args.images, this, signal)
@@ -248,15 +248,18 @@ export class Session {
     const all = [...(this.orchestrating ? [] : [self]), ...(this.team?.() ?? [])] // an orchestrator hands work out, never to itself
     const want = String(args.model ?? '').trim()
     // only one model available (a pinned model, or you have just one): helpers use it, whatever was asked
-    const first = !want || all.length === 1 ? all[0] : (all.find((t) => name(t) === want) ?? all.find((t) => t.model === want || want.endsWith(` ${t.model}`)))
+    const first = !want || all.length === 1 ? all[0] : (all.find((t) => name(t) === want || `${t.provider}/${t.model}` === want) ?? all.find((t) => t.model === want || want.endsWith(` ${t.model}`) || t.model.endsWith(`/${want}`)))
     if (!first) return `error: no model "${want}". Yours: ${all.map(name).join(', ')}`
+    const until = this.resting?.[name(first)] ?? 0
+    if (this.orchestrating && until > Date.now()) return `error: ${name(first)} is out of quota for ${Math.ceil((until - Date.now()) / 60_000)} more minutes (its provider said so); hand it to another model` // not asked again: it would only refuse
     // the one asked for first (if it can do the job), then the others that can: those that call
     // tools first, then the ones that failed least this session, in your list's order
     const able = (t) => !images.length || t.images
     const fails = (t) => this.failures?.[name(t)] ?? 0
     const rests = (t) => (this.resting?.[name(t)] ?? 0) > Date.now() // out of quota: tried last
-    const order = [first, ...all.filter((t) => t !== first).sort((a, b) => b.tools - a.tools || fails(a) - fails(b))].filter(able).sort((a, b) => rests(a) - rests(b))
-    if (!order.length) return 'error: none of your models can see images'
+    // an orchestrator's choice only: when it fails, the orchestrator chooses again (a model of the size it wants)
+    const order = (this.orchestrating ? [first] : [first, ...all.filter((t) => t !== first).sort((a, b) => b.tools - a.tools || fails(a) - fails(b))]).filter(able).sort((a, b) => rests(a) - rests(b))
+    if (!order.length) return this.orchestrating ? `error: ${name(first)} can't see images; hand it to one that can` : 'error: none of your models can see images'
     const failed = []
     for (const [i, t] of order.entries()) {
       let answer = ''
@@ -273,6 +276,7 @@ export class Session {
       }
       if (order[i + 1]) this.ui.warn(`${t.model} couldn't do it (${failed.at(-1).slice(t.model.length + 2)}); handing it to ${order[i + 1].model}`)
     }
+    if (this.orchestrating) return `error: ${name(first)} couldn't do it (${failed.join('; ').slice(first.model.length + 2)}). Hand it to another model.`
     return `error: none of your models that can do it managed: ${failed.join('; ')}`
   }
 
@@ -548,6 +552,13 @@ const envLine = () => {
 const rootList = (root) => {
   const v = folderView(root)
   return v.error ? `(can't read it: ${v.error})` : v.entries.length ? v.entries.join(' · ') + (v.more ? ` · … ${v.more} more` : '') : '(empty)'
+}
+
+// An orchestrator's system prompt and tools as a session gives them, handing work to team (the
+// settings page's Test orchestrators)
+export function orchestratorSetup(root, team) {
+  const s = { root, orchestrating: true, subagent: true, fitMode: () => true, team: () => team, strat: {}, client: {} }
+  return { system: SYSTEM(s), tools: [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name)).map((f) => ({ type: 'function', function: f })) }
 }
 
 const SYSTEM = (s) => {
@@ -1015,7 +1026,8 @@ async function runNative(s, task, images, signal) {
     const together = new Map()
     for (const call of res.toolCalls) {
       const args = argsOf(call)
-      if (call.function.name !== 'agent' || !args || !allowed(s, 'agent') || res.toolCalls.filter((x) => x.function.name === 'agent').length < 2) continue
+      // an orchestrator's: one after another (several at once went over each other's work)
+      if (call.function.name !== 'agent' || !args || !allowed(s, 'agent') || s.orchestrating || res.toolCalls.filter((x) => x.function.name === 'agent').length < 2) continue
       ui.step('agent', clip([args.model && `${args.model}:`, args.description].filter(Boolean).join(' '), 80))
       together.set(call.id, runTool('agent', args, s, signal, call.id))
     }

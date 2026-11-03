@@ -2,6 +2,24 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.46 (2026-11-04)
+
+- **The orchestrator chooses the model, sized to the job**: it always names the model (no silent
+  default to your #1), the smallest that will do the job well (a folder listing to a small model, a
+  real program to a strong one). When that model fails or is out of quota, it hears why and picks
+  another, instead of HeartCode going down your list to a big one. A model out of quota is refused
+  without a request, and `provider/model` or a short name (`gemini-3.5-flash` for
+  `models/gemini-3.5-flash`) works in a handoff.
+- **One handoff at a time**: an orchestrator's handoffs run one after another, so the same job sent
+  twice finds the work done instead of overwriting it. A handoff with no prompt says exactly what's
+  missing.
+- **Test orchestrators** (Your models): each orchestrator gets the same 5 short scenes (a hello, a
+  small job, a big job, another model after a failure, reporting finished work), checked on what it
+  does. A dialog shows it live: each scene's ✓ or ✗, what the model did, what it's waiting on. Then
+  they're put in order, the most passed first; Results shows the last run again. The table tags
+  them orchestrator #1, #2…, and their own order now decides which answers first.
+- **Test all** names the models being tested now, not only their providers.
+
 ## 0.1.45 (2026-11-03)
 
 - **Rate limits hand the work on**: a helper whose model answers 429 goes to your next model at

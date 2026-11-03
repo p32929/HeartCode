@@ -23,6 +23,7 @@ import { capabilities } from './capabilities.js'
 import { connect, sendTelegram, tokenHint, tgReady, EVENTS } from './telegram.js'
 import { searchSettings, testSearxng, ENGINE_NAMES } from './web.js'
 import { loadRankings, rankings, rankIn } from './rankings.js'
+import { testOrchestrator } from './orchtest.js'
 // a model's places in the rankings shown on Your models: { coding, web, vision } as { rank, of, as }
 const RANKED_ON = { coding: 'text:coding', web: 'webdev:webdev', vision: 'vision:overall' }
 const ranksOf = (model, data) => (data ? Object.fromEntries(Object.entries(RANKED_ON).map(([k, list]) => [k, rankIn(model, list, data)])) : null)
@@ -282,7 +283,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   const RATE_TRIES = 4
   let run = null
   const runState = () => ({
-    total: run.total, done: run.done, good: run.good, each: run.each, busy: [...run.busy.keys()], stopping: run.stopping, some: run.some, started: run.started,
+    total: run.total, done: run.done, good: run.good, each: run.each, busy: [...run.busy.keys()], now: [...run.now], stopping: run.stopping, some: run.some, started: run.started,
     paused: Object.fromEntries([...run.providers].filter(([, p]) => p.until > Date.now()).map(([name, p]) => [name, Math.ceil((p.until - Date.now()) / 1000)])),
   })
   // your models now ("provider/model"), to skip the ones taken off while a run goes
@@ -295,7 +296,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   const wait = (ms) => new Promise((r) => setTimeout(r, ms))
   async function startRun(list, some) {
     const each = Math.max(1, Math.ceil(list.length / 100))
-    run = { total: list.length, done: 0, good: 0, each, busy: new Map(), pending: new Set(list.map((t) => `${t.provider}/${t.model}`)), stopping: false, some, started: Date.now(), providers: new Map(), cancel: new AbortController() }
+    run = { total: list.length, done: 0, good: 0, each, busy: new Map(), now: new Set(), pending: new Set(list.map((t) => `${t.provider}/${t.model}`)), stopping: false, some, started: Date.now(), providers: new Map(), cancel: new AbortController() }
     emit('testrun', runState())
     for (const t of list) {
       if (!run.providers.has(t.provider)) run.providers.set(t.provider, { queue: [], cap: each, until: 0, pausedAt: 0, backoff: 15_000, refused: new Map() })
@@ -321,7 +322,10 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
         }
         run.busy.set(provider, (run.busy.get(provider) ?? 0) + 1)
         const sent = Date.now()
+        run.now.add(`${t.provider} ${t.model}`) // the models being tested this moment, for the page
+        emit('testrun', runState())
         const r = await tryOne(t, run.cancel.signal)
+        run.now.delete(`${t.provider} ${t.model}`)
         if (r.stopped) break // Stop: not a result (its last one stays)
         run.busy.get(provider) > 1 ? run.busy.set(provider, run.busy.get(provider) - 1) : run.busy.delete(provider)
         if (r.status === 429) {
@@ -564,6 +568,30 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       cfg.orchestrators = clean.length ? clean : undefined
       save('setting:orchestrators')
       return state()
+    },
+    // Test orchestrators: each marked one gets the same few scenes (src/orchtest.js), all at once;
+    // the list is then put in order, the most passed first (the quicker on a tie)
+    'POST /api/orchestrators/test': async () => {
+      const lead = (cfg.orchestrators ?? []).filter((t) => cfg.providers[t.provider])
+      if (!lead.length) throw new Error('mark models as orchestrators first')
+      const isLead = (t) => lead.some((o) => o.provider === t.provider && o.model === t.model)
+      const team = state().order.filter((t) => !isLead(t)).map((t) => ({ provider: t.provider, model: t.model, tools: t.tested ? t.tested.mode === 'tools' : t.known?.tools !== false, images: Boolean(t.tested ? t.tested.vision : t.known?.images), thinking: Boolean(t.tested ? t.tested.thinking : t.known?.thinking) }))
+      if (!team.length) throw new Error('no models left to hand work to: an orchestrator needs some of your models that aren\'t orchestrators')
+      // the page sees it as it goes: each orchestrator's scene now and what it did in the ones done
+      const live = lead.map((t) => ({ provider: t.provider, model: t.model, steps: [], now: null }))
+      const show = (over) => emit('orchtest', { list: live, team: team.length, over })
+      show()
+      const results = await Promise.all(lead.map(async (t, k) => ({ provider: t.provider, model: t.model, ...(await testOrchestrator(clientFor(t), root, team, null, (st) => {
+        if (st.asking) live[k].now = { i: st.i, of: st.of, scene: st.scene }
+        else (live[k].now = null), live[k].steps.push(st)
+        show()
+      })) })))
+      show(true)
+      results.sort((a, b) => b.passed - a.passed || a.ms - b.ms)
+      cfg.orchestrators = results.map(({ provider, model }) => ({ provider, model }))
+      save('setting:orchestrators')
+      log('fit', results.map((r) => `${r.provider} ${r.model}: ${r.passed}/${r.of} in ${r.ms}ms${r.fails.length ? ` (${r.fails.map((f) => `${f.scene}: ${f.why}`).join('; ')})` : ''}`).join('\n'))
+      return { ...state(), results }
     },
     // models.dev again (one model, or all of yours): its list fetched anew, and each model's profile
     // takes what it says now (one it didn't know before becomes "from models.dev"; your own settings

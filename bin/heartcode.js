@@ -839,7 +839,7 @@ class App {
   // that are in this session's set and call tools; none picked: your first that calls tools.
   orchestrators() {
     const mine = this.sessionModels().filter((t) => this.abilities(t).tools)
-    const picked = mine.filter((t) => (this.cfg.orchestrators ?? []).some((o) => o.provider === t.provider && o.model === t.model))
+    const picked = (this.cfg.orchestrators ?? []).map((o) => mine.find((t) => o.provider === t.provider && o.model === t.model)).filter(Boolean) // in their own order (Test orchestrators sets it)
     return picked.length ? picked : mine.slice(0, 1)
   }
 

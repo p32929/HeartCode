@@ -82,10 +82,12 @@ image, one that can't call tools gets the tool calls as text.
 
 **Orchestrator** (the user's setting "Pick: an orchestrator hands it out", on Your models in
 `heart settings`; `--model-choice fit` for one run): with `auto`, each message starts on one of the
-models the user chose as orchestrators (none chosen: their first that calls tools). It answers
+models the user chose as orchestrators, in their order (none chosen: their first that calls tools). It answers
 at once, streaming, when it can (a greeting, a question), and otherwise hands the work to the
-user's other models through its `agent` tool. It picks which one, knowing what each can do and
-its places in the public LMArena rankings. It has no other tool: the models it picks do the work. If no
+user's other models through its `agent` tool, one handoff at a time. It picks which one (the smallest
+that will do the job well), knowing what each can do and its places in the public LMArena rankings;
+a model that fails or is out of quota is reported back, and it picks another. It has no other tool:
+the models it picks do the work. If no
 orchestrator answers, the list goes on to the next model. With "in your order" (the default), the list
 is the user's order, as is.
 

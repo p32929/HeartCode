@@ -63,7 +63,9 @@ tried did what I needed:
   each message starts on a model you choose for that (a quick, cheap one is enough). It answers
   at once when it can ("hi" needs no other model), and otherwise hands the work to whichever of
   your models it thinks suits it. It knows what each one can do and where it stands in LMArena's
-  public rankings. Your models shows each model's Coding, Web apps and Vision scores.
+  public rankings, and gives small jobs to small models. Your models shows each model's Coding, Web
+  apps and Vision scores. **Test orchestrators** tries each of yours on a few short scenes, shows
+  live what each one does, and puts the best first.
 - **Works with discipline by default**: its rules (from Karpathy's guidelines, Grill Me,
   Superpowers, Ponytail and Caveman) have it ask before building, find a bug's root cause first,
   write the least code that works, change only what the task needs, prove it before saying done,

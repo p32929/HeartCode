@@ -680,7 +680,7 @@ export function extraTools(s) {
     const team = s.team?.() ?? []
     const model = { type: 'string', description: prompt(s.orchestrating ? 'agent/tool-hand-model' : 'agent/tool-agent-model') }
     const images = { type: 'array', items: str, description: prompt('agent/tool-agent-images') }
-    out.push({ name: 'agent', description: prompt(s.orchestrating ? 'agent/tool-hand' : 'agent/tool-agent'), parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }) }, ['description', 'prompt']) })
+    out.push({ name: 'agent', description: prompt(s.orchestrating ? 'agent/tool-hand' : 'agent/tool-agent'), parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }) }, ['description', 'prompt', ...(s.orchestrating ? ['model'] : [])]) }) // an orchestrator always chooses
   }
   return [...out, ...(s.director && !s.appendSystem ? s.director.toolDefs(s) : [])] // manage (director.js); not when a program gives the instructions (--append-system-prompt)
 }
