@@ -14,7 +14,7 @@
 // less: the tag list in the system prompt, and with each message only the notes it matches.
 import fs from 'node:fs'
 import path from 'node:path'
-import { HOME } from './config.js'
+import { HOME, projectDir } from './config.js'
 
 export const TYPES = ['user', 'project', 'feedback', 'reference']
 const LINK = /\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g
@@ -146,7 +146,7 @@ class Notes {
 // the same name); writing goes to the scope asked for, or where the note already is.
 export class Memory {
   constructor(root, globalDir = path.join(HOME, 'memory')) {
-    this.project = new Notes(path.join(root, '.heartcode', 'memory'), 'project')
+    this.project = new Notes(projectDir(root, 'memory'), 'project')
     this.global = new Notes(globalDir, 'global')
   }
 

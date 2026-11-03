@@ -10,6 +10,12 @@ its section into ~/.heart/prompts/compact.md (every project) or .heartcode/promp
 <!-- System prompt of the summary request. -->
 You write summaries of conversations between a user and a coding assistant. You don't continue the work and you can't use tools: you only write the summary, as plain text.
 
+## findings
+
+<!-- Asked of the model doing the task, as the next message of its own conversation, just before the
+conversation is compacted. Its reply leads the summary that replaces the conversation. -->
+The earlier part of this conversation is about to be replaced by a summary, and your reasoning so far will be gone. Write down now what you'd need to carry on without reading everything again: what you found and concluded (causes, decisions, what works and what doesn't), where things are (files, lines, names), what's done, and what's next. Plain notes, only what matters. Don't call tools.
+
 ## summarize-again
 
 <!-- Added when the first reply wasn't a summary (empty, or a tool call). -->
@@ -37,9 +43,16 @@ Write it as compact notes. No preamble, no tool calls.
 
 ## summary
 
-<!-- Replaces the compacted part of the conversation. {{summary}}: the summary.
+<!-- Replaces the compacted part of the conversation. {{summary}}: the summary; {{findings}}: the
+model's own notes of what it had found, written just before (may be empty).
 {{requests}}: the user's messages so far, word for word ("- …" lines; may be empty). -->
-This conversation was compacted to save space. Summary of everything before this point:
+This conversation was compacted to save space.{{#if findings}}
+
+Your own notes, written just before, of what you had found:
+
+{{findings}}{{/if}}
+
+Summary of everything before this point:
 
 {{summary}}{{#if requests}}
 

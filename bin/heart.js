@@ -52,10 +52,11 @@ if (temp) {
     fs.rmSync(dir, { recursive: true, force: true }) // left by a crashed run: from your settings again
     fs.mkdirSync(runs, { recursive: true })
     // your providers and keys; what HeartCode learned about each model and prices (or it tests them again)
-    for (const f of ['config.json', 'models', 'prices.json']) if (fs.existsSync(path.join(realHome, f))) fs.cpSync(path.join(realHome, f), path.join(dir, f), { recursive: true })
+    for (const f of ['config.json', 'models', 'prices.json', 'memory']) if (fs.existsSync(path.join(realHome, f))) fs.cpSync(path.join(realHome, f), path.join(dir, f), { recursive: true })
   }
   fs.writeFileSync(path.join(runs, String(process.pid)), '')
   process.env.HEART_HOME = dir
+  process.env.HEART_TEMP = '1' // the project's .heartcode folders too: copies in here (config.js projectDir)
   process.on('exit', () => {
     fs.rmSync(path.join(runs, String(process.pid)), { force: true })
     if (!others().length) fs.rmSync(dir, { recursive: true, force: true })
@@ -77,7 +78,7 @@ if (first && !first.startsWith('-') && !SUBCOMMANDS.includes(first)) {
 
 // where the logs go, and this run's name for its folders (src/log.js: each kind of log is switched on
 // by itself in config.json's "logs", also while HeartCode runs)
-const logs = temp ? path.join(os.tmpdir(), 'heart-temp-logs') : path.join(realHome, 'logs')
+const logs = temp ? path.join(process.env.HEART_HOME, 'logs') : path.join(realHome, 'logs') // --temp: deleted with its folder
 process.env.HEART_LOGS ??= logs
 let runStamp = stamp
 for (let n = 2; ['runs', 'requests'].some((d) => fs.existsSync(path.join(logs, d, runStamp))); n++) runStamp = `${stamp}-${n}` // two runs in the same second

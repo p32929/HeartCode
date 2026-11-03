@@ -17,8 +17,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { keywords } from './memory.js'
+import { projectDir } from './config.js'
 
-export const researchDir = (root) => path.join(root, '.heartcode', 'research')
+export const researchDir = (root) => projectDir(root, 'research')
 const slugOf = (s, n) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, n).replace(/-+$/, '')
 const hash = (s) => createHash('sha256').update(String(s)).digest('hex').slice(0, 8)
 const today = () => new Date().toISOString().slice(0, 10)

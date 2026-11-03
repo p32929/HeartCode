@@ -2,6 +2,36 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.42 (2026-11-03)
+
+- **Your "no, do this instead" reaches the model as you**: what you type when you decline a command,
+  an edit or a call goes to the model as your own message, not inside the tool's result (where small
+  models read it as the tool failing and tried again).
+- **The conversation's size counted honestly**: tokens estimated the way tokenizers split text, so
+  code, CSS, JSON and SVG count for what they are (a flat estimate was up to 2× low on them: a request
+  thought to fit was refused, and compacting never started); a ratio learned on prose never makes it
+  smaller than characters ÷ 4, and what's new since the server's last count is never discounted.
+- **The provider's prompt cache kept**: a file read again no longer rewrites its older copy in the
+  middle of the conversation at once (every such change makes the provider process everything after
+  it again: minutes on a local model, full price on a paid one); older copies go together with the
+  old results, or when it's nearly full.
+- **Checks what uses a change**: before saying done, the model reads its whole change and updates
+  what uses it (the callers of a function, what reads a renamed value). In our test a 14B model
+  updated both callers 2 of 2 times, against 0 of 2 before. The new `changes` tool shows the model
+  its own diff for the message (or the conversation), with or without git.
+- **Tool messages that can't be misread**: search tells a path that doesn't exist, a pattern no file
+  fits and an invalid regular expression apart from "no matches" (with how many files it searched),
+  and takes a pattern as its path (`src/*.css`); shortened output says it's shortened to fit, not an
+  error.
+- **Findings saved before compacting**: the model working on the task writes down what it has found
+  just before the conversation is summarized, and the summary starts with it, so it doesn't read the
+  same files again after every compaction.
+- **`--temp` keeps nothing**: besides `~/.heart`, the project's `.heartcode/` (research pages, notes)
+  is untouched (read from a copy), logs go with the throwaway folder, and skills or MCP servers saved
+  in a `--temp` run don't reach the project.
+- **The update check at every start**, not once a day: a new version shows on the next launch.
+- **Thanks** in the README to Reika, OpenCode, Cline, OpenClaw and Pi.
+
 ## 0.1.41 (2026-11-03)
 
 - **Model scores on Your models**: Coding, Web apps and Vision show each model's LMArena score with

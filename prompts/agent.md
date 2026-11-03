@@ -50,6 +50,7 @@ A tool or package the plan needs that isn't installed: find the right way for th
 
 ## Prove it works, then stop
 Never say done, fixed or working without having just run what proves it and read its output. "It should work" and "no syntax error" are not proof. Check it the way the person who asked will use it: run it, use it with real input and an edge case, look at what it shows, read its errors; stop what you started. Tests there: run them.
+Before you say done, read your whole change (the changes tool) and find what uses what you changed: the callers of a function you changed, everything that reads a name, value or format you renamed or reshaped. Update them too.
 A real bug: fix the cause, run it again, until it works end to end. The proof passes: stop — no polish, cleanup or extra tests after. A review point (HeartCode's, a reviewer's, a helper's): check it against the code first; wrong: say why and don't do it.
 When you made something that runs, end with how to run it: the exact command(s) from the project folder and the URL to open.
 
@@ -81,12 +82,12 @@ How to use {{server}}, in its own words (said once):
 ## output-cut
 
 <!-- After the start of a tool result too long for the conversation. {{shown}}, {{total}}: characters; {{file}}: where all of it is (empty if it couldn't be saved). -->
-[Output cut: the first {{shown}} of {{total}} characters are above.{{#if file}} All of it is in {{file}}: read the rest with read_file (start_line, end_line) or find what you need in it with search (path: that file).{{else}} Ask for less of it at a time.{{/if}}]
+[Shortened to fit the conversation, not an error: the tool ran normally and its result is complete; only the first {{shown}} of {{total}} characters are shown above.{{#if file}} All of it is in {{file}}: read the rest with read_file (start_line, end_line) or find what you need in it with search (path: that file).{{else}} Ask for less of it at a time.{{/if}}]
 
 ## output-old
 
 <!-- Replaces an older tool result (all but the newest few long ones) once there are many. {{call}}: what the call was ("run_command npm test"); {{total}}: its length; {{file}}: where all of it is (may be empty). The first lines follow it. -->
-[older output of {{call}}, {{total}} characters{{#if file}} — all of it is in {{file}}: read_file it (start_line/end_line) or search in it if you need it again{{/if}}. Its first lines:]
+[older output of {{call}}, {{total}} characters, shortened to save room (it ran normally then){{#if file}} — all of it is in {{file}}: read_file it (start_line/end_line) or search in it if you need it again{{/if}}. Its first lines:]
 
 ## empty-reply
 
@@ -132,7 +133,11 @@ Read a file; returns numbered lines. For part of a big file, give start_line and
 
 ## tool-search
 
-Find text or a regex in the project's files (or only in `path`). Returns file:line: text.
+Find text or a regex in the project's files (or only in `path`: a file, a folder, or a pattern like `src/*.css`). Returns file:line: text.
+
+## tool-changes
+
+What you changed in files for this message, as a diff: each file from before your first change to now (with `all`: everything changed in this conversation; with `path`: that file only). Read it before you say done, to see your whole change at once.
 
 ## tool-list_files
 

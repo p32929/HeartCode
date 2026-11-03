@@ -218,12 +218,25 @@ function readImage(s, p) {
 export function searchFiles(root, query, sub = '', limit = 50) {
   const ci = query === query.toLowerCase()
   let re
+  let literal = false // not a valid regular expression: searched as the text it is
   try {
     re = new RegExp(query, ci ? 'i' : '')
   } catch {
     re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), ci ? 'i' : '')
+    literal = true
+  }
+  // a pattern given as the path ("src/*.css", "**/*.ts"): the folder before it, and its files that fit
+  let only = null
+  const pattern = sub
+  if (/[*?]/.test(sub)) {
+    const parts = String(sub).split(/[\\/]/)
+    const at = parts.findIndex((p) => /[*?]/.test(p))
+    const glob = parts.slice(at).filter((p) => p !== '**').join('/') || '*'
+    only = new RegExp(`(^|/)${glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]')}$`)
+    sub = parts.slice(0, at).join('/')
   }
   const abs = sub ? resolveIn(root, sub, true) : ''
+  if (abs && !fs.existsSync(abs)) return `error: ${sub} doesn't exist, so nothing was searched (this is not "no matches"). Give a file or folder that exists, or leave path out to search the whole project.`
   const away = abs && abs !== root && !abs.startsWith(root + path.sep) && !isSavedOutput(abs) // a folder the user named outside the project
   let single = false // one file named: searched whatever lists leave out (a saved page, a .gitignored file)
   try {
@@ -232,8 +245,11 @@ export function searchFiles(root, query, sub = '', limit = 50) {
   const saved = isSavedOutput(abs) || single
   const prefix = sub && !saved && !away ? path.relative(root, abs) : ''
   const hits = []
+  let searched = 0
   for (const f of saved ? [abs] : away ? listFiles(abs).map((f) => path.join(abs, f)) : listFiles(root)) {
     if (prefix && f !== prefix && !f.startsWith(prefix + '/')) continue
+    if (only && !only.test(f)) continue
+    searched++
     let buf
     try {
       buf = fs.readFileSync(path.resolve(root, f))
@@ -248,7 +264,8 @@ export function searchFiles(root, query, sub = '', limit = 50) {
       if (hits.length >= limit) return hits.join('\n') + `\n… (stopped at ${limit} matches)`
     }
   }
-  return hits.join('\n') || `no matches for ${query}`
+  if (hits.length) return hits.join('\n')
+  return searched ? `no matches for ${query} in ${searched} file${searched === 1 ? '' : 's'} searched${literal ? ' (as plain text: it isn\'t a valid regular expression)' : ''}` : `nothing was searched: no files${only ? ` fit ${pattern}` : ''} in ${sub || 'the project'} (this is not "no matches")`
 }
 
 // Runs a shell command in its own process group. The command is over when its shell exits, even
@@ -295,11 +312,12 @@ export function runCommand(root, cmd, { signal, timeout = 120_000, stdin, env, s
       child.stdout.destroy()
       child.stderr.destroy()
       const plain = (t) => t.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
-      resolve({ code, output: plain(out) + note, ...(split && { stderr: plain(err) }) })
+      resolve({ code, output: (dropped ? '(the start of a very long output was left out: only its last 100,000 characters are here; the command itself was not affected)\n…' : '') + plain(out) + note, ...(split && { stderr: plain(err) }) })
     }
+    let dropped = false // a very long output's start, left out (said, so it isn't read as the command failing)
     const add = (d) => {
       out += d
-      if (out.length > 200_000) out = out.slice(-100_000)
+      if (out.length > 200_000) (out = out.slice(-100_000)), (dropped = true)
     }
     const addErr = (d) => {
       err += d
@@ -332,6 +350,38 @@ export function suggestCommands(root) {
   return out.slice(0, 9)
 }
 
+// What the model changed in files: this message's (or with all, the conversation's), each file from
+// before its first change to now (the turns keep that first version for /rewind; /diff shows the same).
+function changesTool(s, args) {
+  const turns = args.all ? (s.chat?.turns ?? []) : (s.chat?.turns ?? []).slice(-1)
+  const first = new Map()
+  for (const t of turns) for (const [rel, before] of Object.entries(t.files ?? {})) if (!first.has(rel)) first.set(rel, before)
+  const want = String(args.path ?? '').trim().replace(/^\.\//, '')
+  const out = []
+  for (const rel of [...first.keys()].filter((f) => !want || f === want || f.endsWith('/' + want)).sort()) {
+    const abs = path.join(s.root, rel)
+    const now = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null
+    const was = first.get(rel)
+    if (was === now) continue
+    out.push(was === null ? `${rel} (new)\n${renderDiff(diffLines('', now), rel, false, 3, 400)}` : now === null ? `${rel} (deleted)` : renderDiff(diffLines(was, now), rel, false, 3, 400))
+  }
+  const where = args.all ? 'in this conversation' : 'for this message'
+  return out.join('\n\n') || (want ? `No changes to ${want} ${where}.` : `No file changes ${where}${first.size ? ' (the files you changed are back as they were)' : ''}.`)
+}
+
+// A "no" from the user, with what they typed instead. Their words go to the model as their own message,
+// after the tool results (s.userSaid, which the agent sends): inside a result a model reads them as the
+// tool talking, and tries again. Where there's no queue (guided mode) or no user (headless: the "no" is
+// HeartCode's), they stay in the result.
+export function declined(s, ok, what) {
+  const said = typeof ok === 'string' ? ok.trim() : ''
+  if (said && s.userSaid && !s.ui.noUser) {
+    s.userSaid.push(said)
+    return `${what} What they want instead is in their message that follows.`
+  }
+  return `${what}${said ? ` ${s.ui.noUser ? said : `User feedback: ${said}`}` : ''}`
+}
+
 const PLACEHOLDER = /(\.\.\.|…)\s*(rest|existing|remaining|unchanged|other)|rest of (the )?(code|file)|existing code (here|unchanged)/i
 
 // Shows the diff, asks the user, writes (next = null: deletes the file). Shared by both agent modes.
@@ -343,7 +393,7 @@ export async function proposeWrite(s, rel, old, next) {
   if (next !== null && PLACEHOLDER.test(next) && !PLACEHOLDER.test(old)) s.ui.warn('the new content seems to contain a placeholder like "rest of code unchanged"')
   const ok = await s.ui.confirm(next === null ? `Delete ${rel}?` : old ? `Apply this change to ${rel}?` : `Create ${rel}?`)
   log('write', rel, ok === true ? 'approved' : `rejected ${typeof ok === 'string' ? ok : ''}`)
-  if (ok !== true) return { status: 'rejected', feedback: typeof ok === 'string' ? ok : '' }
+  if (ok !== true) return { status: 'rejected', said: declined(s, ok, '') }
   const abs = resolveIn(s.root, rel)
   s.track?.(rel, fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null) // for /rewind
   if (next === null) fs.rmSync(abs, { force: true })
@@ -426,7 +476,7 @@ export async function runConfirmed(s, cmd, signal, background = false, wait) {
     return prompt('agent/command-too-wide', { root: s.root })
   }
   const ok = s.ui.permission === 'plan' ? true : await s.ui.confirm(`Run ${c.bold(cmd)}?`, 'command') // plan mode: only read-only ones get here
-  if (ok !== true) return `The user declined to run this command.${typeof ok === 'string' ? ' User feedback: ' + ok : ''}`
+  if (ok !== true) return declined(s, ok, 'The user declined to run this command.')
   const secs = Number(wait) > 0 ? Number(wait) : background ? 3 : 30
   const before = snapshot(s)
   s.ui.spinner(`running ${cmd}`)
@@ -531,7 +581,7 @@ function changesSince(s, before) {
 export function writeResult(rel, r) {
   if (r.status === 'applied') return `${r.deleted ? 'Deleted' : 'Changed'} ${rel} (${r.summary}).${r.note ? `\n${r.note}` : ''}`
   if (r.status === 'unchanged') return `No change: the new content of ${rel} is identical to the old content.`
-  return `The user rejected the change to ${rel}.${r.feedback ? ' User feedback: ' + r.feedback : ''}`
+  return r.feedback ? r.feedback : `The user rejected the change to ${rel}.${r.said ?? ''}`
 }
 
 // --- native tool calling ---
@@ -543,6 +593,7 @@ const obj = (properties, required = []) => ({ type: 'object', properties, requir
 export const TOOL_DEFS = [
   { name: 'read_file', description: prompt('agent/tool-read_file'), parameters: obj({ path: str, start_line: int, end_line: int }, ['path']) },
   { name: 'search', description: prompt('agent/tool-search'), parameters: obj({ query: str, path: str }, ['query']) },
+  { name: 'changes', description: prompt('agent/tool-changes'), parameters: obj({ path: str, all: { type: 'boolean' } }) },
   { name: 'list_files', description: prompt('agent/tool-list_files'), parameters: obj({ path: str, filter: str }) },
   { name: 'find_command', description: prompt('agent/tool-find_command'), parameters: obj({ names: { type: 'array', items: str } }, ['names']) },
   { name: 'lsp', description: prompt('agent/tool-lsp'), parameters: obj({ server: str, language: str, action: { type: 'string', enum: ['definition', 'references', 'hover', 'errors'] }, file: str, line: int, column: int, name: str }, ['server', 'language', 'action', 'file']) },
@@ -737,7 +788,7 @@ async function webTool(s, name, args, signal) {
   const what = name === 'web_search' ? String(args.query ?? '') : String(args.url ?? '')
   if (!what.trim()) return `error: ${name} needs ${name === 'web_search' ? '"query"' : '"url"'}`
   const ok = await s.ui.confirm(name === 'web_search' ? `Search the web for ${c.bold(what)}?` : `Fetch ${c.bold(what)}?`, 'read')
-  if (ok !== true) return `The user declined this.${typeof ok === 'string' ? ' User feedback: ' + ok : ''}`
+  if (ok !== true) return declined(s, ok, 'The user declined this.')
   // what this message's research is for: the page's look_for, else the last search, else the task
   const purpose = String(args.look_for ?? '').trim() || s.lastQuery || String(s.task ?? '').split('\n')[0].slice(0, 160)
   if (name === 'web_search') {
@@ -949,7 +1000,7 @@ async function callMcp(s, server, tool, a, signal) {
   // declines what it would ask, so a browser's snapshot must not be); any other like a command
   if (!def?.annotations?.readOnlyHint) {
     const ok = await s.ui.confirm(`Use ${server.name} → ${tool}?`, 'command')
-    if (ok !== true) return `The user declined this call.${typeof ok === 'string' ? ' User feedback: ' + ok : ''}`
+    if (ok !== true) return declined(s, ok, 'The user declined this call.')
   }
   const done = await s.mcpGate?.() // a helper may be using the MCP servers (a browser): its turn first
   s.ui.spinner(`${server.name} · ${tool}`)
@@ -1296,6 +1347,8 @@ async function tool(name, args, s, signal, id) {
       }
       case 'search':
         return searchFiles(root, String(args.query ?? ''), args.path)
+      case 'changes':
+        return changesTool(s, args)
       case 'find_command': {
         const names = (Array.isArray(args.names) ? args.names : String(args.names ?? args.name ?? '').split(/[\s,]+/)).map(String).filter(Boolean)
         if (!names.length) return 'error: find_command needs "names": the commands to look for, like ["rg", "pnpm"]'

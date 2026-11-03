@@ -2,7 +2,7 @@
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { Client } from '../src/client.js'
-import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, AUTO_MODEL, isAuto, parseModel, takeIn, whatOf, VERSION } from '../src/config.js'
+import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, TEMP, AUTO_MODEL, isAuto, parseModel, takeIn, whatOf, VERSION } from '../src/config.js'
 import { loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
 import { learnFromUsage, LIMIT_MS } from '../src/context.js'
 import { Session, transcript, contextReport } from '../src/agent.js'
@@ -59,9 +59,10 @@ ${c.bold('options')}
       --ask              ask before every edit and command, this run
       --hide-thinking    collapse the model's thinking to one line
   -C, --cwd <dir>        project folder (default: current folder)
-      --temp             a throwaway settings folder (your providers, model tests and prices
-                         copied in), shared by the --temp runs going on at once and deleted
-                         after the last; ~/.heart isn't touched
+      --temp             keep nothing: a throwaway settings folder (your providers, model info,
+                         prices and notes copied in), shared by the --temp runs going on at once
+                         and deleted after the last, with its logs; ~/.heart and the project's
+                         .heartcode/ aren't touched (their notes and research are read from a copy)
       --context <n>      context window size in tokens
       --save             keep the given -u/-m/--api-key/... in ${CONFIG_FILE}
   -w, --worktree         work in a new git worktree and branch (--worktree=name to name it,
@@ -238,6 +239,7 @@ class App {
   }
 
   saveProjectModels() {
+    if (TEMP) return // --temp keeps nothing: the choice lasts for this run only
     const file = path.join(this.root, '.heartcode', 'models.json')
     if (this.cfg.session?.length) writeJson(file, { session: this.cfg.session.map((t) => ({ provider: t.provider, model: t.model })) })
     else fs.rmSync(file, { force: true }) // auto: forget the folder's choice
@@ -1443,7 +1445,7 @@ async function slash(app, line, working = false) {
       return ui.showText('Commands and keys', app.help())
     case 'update': {
       ui.spinner('asking npm for the newest HeartCode')
-      const u = await checkUpdate({ force: true })
+      const u = await checkUpdate()
       ui.stopSpin()
       if (!u) return ui.warn("couldn't reach npm to check for a newer HeartCode")
       app.update = u
@@ -1827,7 +1829,7 @@ async function repl(app, f = {}) {
   // models this folder picked earlier (/select_model): said, with the way back to your whole list
   if (app.folderModels && cfg.session?.length) ui.print(`${c.muted('this folder uses')} ${c.cyan(cfg.session.map((t) => t.model).join(', '))} ${c.faint(`(picked earlier) · ${c.cyan('/select_model auto')} for your whole list again`)}`)
   app.tabs?.onChange?.() // the conversation it opened with
-  // a newer HeartCode: asked in the background (once a day at most), said once and kept in the status bar
+  // a newer HeartCode: asked of npm in the background at every start, said once and kept in the status bar
   if (cfg.updateCheck !== false)
     checkUpdate()
       .then((u) => {

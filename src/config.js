@@ -5,6 +5,19 @@ import { fileURLToPath } from 'node:url'
 
 export const HOME = process.env.HEART_HOME || path.join(os.homedir(), '.heart')
 export const CONFIG_FILE = path.join(HOME, 'config.json')
+// --temp (bin/heart.js): HOME is a throwaway folder, deleted after the run, and nothing is kept
+// anywhere else either: the project's own HeartCode folders are copies in it (projectDir)
+export const TEMP = process.env.HEART_TEMP === '1'
+
+// The project's .heartcode/<what> (research, memory). In a --temp run, a copy in the throwaway
+// folder instead: what the project has is read, what the run adds goes with the folder.
+export function projectDir(root, what) {
+  const real = path.join(root, '.heartcode', what)
+  if (!TEMP) return real
+  const dir = path.join(HOME, 'projects', path.resolve(root).replace(/[^\w.-]+/g, '_'), what)
+  if (!fs.existsSync(dir)) fs.existsSync(real) ? fs.cpSync(real, dir, { recursive: true }) : fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
 
 const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director', 'theme', 'format', 'lsp', 'voice', 'queue', 'rotation', 'statusBar', 'log', 'logRequests', 'logDetail', 'logDays', 'telegram', 'search', 'testTimeout', 'updateCheck', 'modelChoice', 'logs', 'replyStart', 'mouse']
 const LOCAL_NAMES = { 11434: 'ollama', 1234: 'lmstudio', 8080: 'llamacpp' }

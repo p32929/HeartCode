@@ -146,10 +146,10 @@ can't switch the model you chose.
 | Everything (edits and commands) | `--permission-mode all` (the default unless the user set another) |
 | Changes kept apart from the user's files | `--worktree=<name>` (in a git repo): it works in `.heartcode/worktrees/<name>` on the branch `heartcode/<name>`; kept if anything changed (merge it from there), removed if nothing did |
 | A cap on how long it works | `--max-turns 30` (model steps), `--max-retries 3` (a failing provider) |
-| Nothing written to the user's `~/.heart` (sessions, logs, settings) | `--temp` (a throwaway copy, shared by the `--temp` runs going on at once) |
+| Nothing kept: no session, logs, settings or notes in `~/.heart`, nothing in the project's `.heartcode/` | `--temp` (a throwaway copy, shared by the `--temp` runs going on at once, deleted after the last; the project's notes and research are read, and what the run adds goes with the copy) |
 
 Tool names: HeartCode's own (`read_file`, `edit_file`, `write_file`, `run_command`, `search`,
-`list_files`, `web_fetch`, `web_search`…) or Claude Code's (`Read`, `Edit`, `Write`, `Bash`,
+`list_files`, `changes`, `web_fetch`, `web_search`…) or Claude Code's (`Read`, `Edit`, `Write`, `Bash`,
 `Grep`, `Glob`, `WebFetch`, `WebSearch`). `--disallowedTools Bash` takes one away. MCP servers'
 tools are named as in Claude Code: `mcp__<server>__<tool>`; `mcp__<server>` means all of one
 server's tools, `mcp` all of them. (The model itself reaches them through one `mcp` tool that lists

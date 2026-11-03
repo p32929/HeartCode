@@ -3,7 +3,17 @@ import { createHash } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { log, logRequest, requestLog } from './log.js'
 
-export const est = (text) => Math.ceil(String(text ?? '').length / 3.5)
+// Tokens in a text, estimated the way tokenizers split it: a word or a number is about one, a long
+// word more, every symbol one. Prose comes out near characters ÷ 4; code, CSS, JSON and SVG paths,
+// dense with symbols and digits, far higher (a flat characters ÷ 3.5 was 2× low on them: a request
+// estimated to fit was refused, and compacting never started).
+const PIECE = /[A-Za-z]+|\d{1,3}|[^\sA-Za-z\d]/g
+export const est = (text) => {
+  const t = String(text ?? '')
+  let n = 0
+  for (const [w] of t.matchAll(PIECE)) n += w.length > 7 && /[A-Za-z]/.test(w[0]) ? Math.ceil(w.length / 6) : 1
+  return Math.max(n, Math.ceil(t.length / 4))
+}
 // An error that may go away by itself: a rate limit, a server error or overload, a timeout, no
 // connection (no status). Anything else (a wrong model name, key or request) won't.
 // A 403 that is a web page, not the API's own (JSON) answer, comes from a gateway or proxy in
@@ -13,15 +23,33 @@ export const outage = (e) => !e.status || [408, 409, 429].includes(e.status) || 
 // won't help, but the next one in the list may work.
 export const unusable = (e) => [401, 403, 404].includes(e.status) && !outage(e)
 // A request's messages, estimated: an image's data isn't text (about 800 tokens, not its base64)
-export function estMessages(messages) {
+// Each message's count is kept while its content is the same (a long conversation is counted
+// several times a step). chars: its length, for the floor below.
+const counted = new WeakMap()
+function estMessage(m) {
+  const had = counted.get(m)
+  if (had && had.content === m.content && had.calls === m.tool_calls) return had
   let images = 0
-  const text = JSON.stringify(messages ?? [], (k, v) => (k === 'url' && typeof v === 'string' && v.startsWith('data:') ? (images++, '') : v))
-  return est(text) + images * 800
+  const text = JSON.stringify(m, (k, v) => (k === 'url' && typeof v === 'string' && v.startsWith('data:') ? (images++, '') : v))
+  const got = { content: m.content, calls: m.tool_calls, tokens: est(text) + images * 800, chars: text.length }
+  if (m && typeof m === 'object') counted.set(m, got)
+  return got
+}
+export function estMessages(messages, chars = false) {
+  let n = 0
+  for (const m of messages ?? []) n += estMessage(m)[chars ? 'chars' : 'tokens']
+  return n
 }
 // A request's size in a model's tokens, estimated: its messages and tools, by that model's ratio of
 // counted to estimated tokens (context.js). The same measure decides when to compact (agent.js) and
 // whether a request fits the model the list moves on to.
-export const tokensOf = (messages, tools, ratio = 1) => Math.round((estMessages(messages) + (tools?.length ? est(JSON.stringify(tools)) : 0)) * ratio)
+// The learned ratio never takes it below characters ÷ 4: a ratio learned on prose would otherwise
+// make code look smaller than it is.
+export const tokensOf = (messages, tools, ratio = 1) => {
+  const e = estMessages(messages) + (tools?.length ? est(JSON.stringify(tools)) : 0)
+  const floor = (estMessages(messages, true) + (tools?.length ? JSON.stringify(tools).length : 0)) / 4
+  return Math.round(Math.max(e * ratio, Math.min(e, floor)))
+}
 // The share of a model's window a conversation may take: the rest is room for the reply. Past it,
 // the conversation is compacted first.
 export const COMPACT_SHARE = 0.85

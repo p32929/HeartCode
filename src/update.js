@@ -1,4 +1,4 @@
-// A newer HeartCode: asked of npm at most once a day (in the background, never waited on), shown in
+// A newer HeartCode: asked of npm at every start (in the background, never waited on), shown in
 // the status bar, installed with /update the way HeartCode was installed. A git checkout (npm link)
 // isn't npm-installed over: it's told to git pull.
 import fs from 'node:fs'
@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url'
 import { HOME, VERSION, readJson, writeJson } from './config.js'
 
 const FILE = path.join(HOME, 'update-check.json')
-const DAY = 24 * 60 * 60 * 1000
 const PKG = fileURLToPath(new URL('..', import.meta.url))
 
 // "0.1.38" > "0.1.37": numbers compared part by part (a pre-release tag isn't offered)
@@ -17,18 +16,16 @@ export const newer = (a, b) => {
   return false
 }
 
-// { current, latest, newer }, or null when npm can't be reached. force: ask now, not from the day's answer.
-export async function checkUpdate({ force = false } = {}) {
-  const was = readJson(FILE, {})
-  let latest = was.latest
-  if (force || !latest || Date.now() - (was.checked ?? 0) > DAY) {
-    try {
-      const r = await fetch('https://registry.npmjs.org/heartcode/latest', { signal: AbortSignal.timeout(8000) })
-      latest = (await r.json()).version
-      writeJson(FILE, { checked: Date.now(), latest })
-    } catch {
-      if (!latest) return null
-    }
+// { current, latest, newer }: npm asked now (its answer kept for the settings page); npm out of
+// reach, its last answer; null when there's none.
+export async function checkUpdate() {
+  let latest = readJson(FILE, {}).latest
+  try {
+    const r = await fetch('https://registry.npmjs.org/heartcode/latest', { signal: AbortSignal.timeout(8000) })
+    latest = (await r.json()).version
+    writeJson(FILE, { checked: Date.now(), latest })
+  } catch {
+    if (!latest) return null
   }
   return { current: VERSION, latest, newer: Boolean(latest) && newer(latest, VERSION) }
 }

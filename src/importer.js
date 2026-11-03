@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { HOME, readJson, writeJson } from './config.js'
+import { HOME, TEMP, readJson, writeJson } from './config.js'
 import { frontMatter } from './skills.js'
 import { Memory } from './memory.js'
 
@@ -38,7 +38,8 @@ function filesIn(dir, exts) {
 }
 
 const safe = (n) => String(n).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
-const skillsDir = (root, scope) => (scope === 'global' ? path.join(HOME, 'skills') : path.join(root, '.heartcode', 'skills'))
+// --temp: the throwaway folder, never the project (nothing is kept from a --temp run)
+const skillsDir = (root, scope) => (scope === 'global' || TEMP ? path.join(HOME, 'skills') : path.join(root, '.heartcode', 'skills'))
 const taken = (root, scope, name) => exists(path.join(skillsDir(root, scope), `${name}.md`)) || exists(path.join(skillsDir(root, scope), name))
 // name, else name-2, name-3…: the first not taken
 const freeName = (isTaken, name) => {
@@ -101,7 +102,7 @@ function importSkillFolder(root, scope, name, dir) {
   return name
 }
 
-const mcpFile = (root, scope) => (scope === 'global' ? path.join(HOME, 'mcp.json') : path.join(root, '.heartcode', 'mcp.json'))
+const mcpFile = (root, scope) => (scope === 'global' || TEMP ? path.join(HOME, 'mcp.json') : path.join(root, '.heartcode', 'mcp.json'))
 const serverKey = (cfg) => (cfg.command ? [cfg.command, ...(cfg.args ?? [])].join(' ') : (cfg.url ?? cfg.httpUrl ?? ''))
 // Why an MCP server would be a duplicate there, or ''
 function mcpDup(root, scope, name, cfg) {

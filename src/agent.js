@@ -114,6 +114,7 @@ export class Session {
     const cut = () => (conversation.length > room ? `[… the earliest part is cut]\n${conversation.slice(-room)}` : conversation)
     const before = native ? size(body) : est(conversation)
     ui.spinner(why ? `${why}: compacting the conversation` : 'compacting the conversation')
+    const findings = native ? await this.findings(signal) : ''
     // A model shown its own work tends to carry on with it (calling tools, or writing tool calls
     // as text) instead of summarizing: so it's told what it is, and a reply that isn't a summary
     // is asked for again once; then the compaction fails (the conversation is trimmed instead).
@@ -131,7 +132,7 @@ export class Session {
     ;(chat.snapshots ??= [])[epoch] = { messages: chat.messages, history: [...chat.history] }
     chat.sentNotes = [] // the summary replaces the messages the notes came with
     chat.epoch = epoch + 1
-    const recap = prompt('compact/summary', { summary, requests: requestsOf(chat) })
+    const recap = prompt('compact/summary', { summary, findings, requests: requestsOf(chat) })
     if (native) {
       chat.messages = midTask
         ? [...head, { role: 'user', content: `${recap}\n\n${prompt('compact/continue', { task })}` }]
@@ -145,6 +146,31 @@ export class Session {
     ui.stopSpin()
     ui.print(`${c.faint('✻')} ${c.muted(`Compacted the conversation: ~${kTokens(before)} → ~${kTokens(after)} tokens`)}`)
     return summary
+  }
+
+  // Before the conversation is summarized, the model working on it writes down what it has found:
+  // its conclusions live in its reasoning, which the summary (written from the transcript) never
+  // sees, and without them it reads the same files again after every compaction. Asked as the next
+  // message of its own conversation with the same tools, so the provider's cache of it still holds;
+  // tool calls in the reply aren't run. '' when there's nothing to ask or it fails (the summary alone).
+  async findings(signal) {
+    const { chat, client, strat } = this
+    if (!chat.messages?.length || !this.lastTools) return ''
+    // already past the model's window (one step can add a lot): the request would only be refused
+    if (strat.context > 0 && tokensOf(chat.messages, this.lastTools.map((t) => t.function), strat.ratio ?? 1) > strat.context * 0.95) {
+      log('compact', 'no findings note: the conversation is already past the window')
+      return ''
+    }
+    try {
+      const r = await client.chat({ messages: [...chat.messages, { role: 'user', content: prompt('compact/findings') }], tools: this.lastTools }, { signal })
+      const note = String(r.content ?? '').trim()
+      log('compact', note ? `findings note: ${note.length} characters` : 'no findings note (the reply had no text)', note)
+      return note
+    } catch (e) {
+      if (e.name === 'AbortError') throw e
+      log('compact', `no findings note: ${e.message}`)
+      return ''
+    }
   }
 
   // images: data: URLs from the caller (headless input), besides @shot.png in the task.
@@ -743,14 +769,15 @@ async function runNative(s, task, images, signal) {
   // window as set up, measured or learned; also when that changes mid-task, or the model list moves
   // on to a model with a smaller one), so there's room left for the reply. Its size: what the server
   // counted for this conversation's last request (s.counted) plus the estimate of what came since
-  // (the tool results), or the estimate of all of it when that's more (no count yet: a resumed
-  // session, just compacted). After a failed try: again once it has grown by another 5%.
+  // (the tool results, never counted smaller than estimated: they're often code), or the estimate of
+  // all of it when that's more (no count yet: a resumed session, just compacted). After a failed try:
+  // again once it has grown by another 5%.
   const used = () => {
     const ratio = strat.ratio ?? 1
     const all = tokensOf(s.messages, [...TOOL_DEFS, ...extraTools(s)], ratio)
     const k = s.counted
     if (!k?.tokens || k.upTo > s.messages.length) return all
-    return Math.max(all, k.tokens + tokensOf(s.messages.slice(k.upTo), null, ratio))
+    return Math.max(all, k.tokens + tokensOf(s.messages.slice(k.upTo), null, Math.max(1, ratio)))
   }
   const nearlyFull = () => s.autoCompact && strat.context > 0 && used() >= strat.context * COMPACT_SHARE && used() >= (s.compactFailedAt ?? 0)
   const fullness = () => `context ${Math.round((used() / strat.context) * 100)}% full (~${kTokens(used())} of ${kTokens(strat.context)})`
@@ -779,6 +806,7 @@ async function runNative(s, task, images, signal) {
   }
   // Already that long from earlier messages: switch to a roomier model, or else compact first, so the
   // new message stays word for word.
+  if (nearlyFull() && dropStale(s)) log('compact', 'older copies of files read again shortened first')
   if (nearlyFull() && !roomier()) {
     await s.compact({ signal, why: fullness() }).then(afterCompact, (e) => (e.name === 'AbortError' ? Promise.reject(e) : ui.warn(`could not compact: ${e.message}`)))
   }
@@ -816,6 +844,7 @@ async function runNative(s, task, images, signal) {
   if (!s.isSub) s.choicesFresh = false // a question about how to do it, this message: replaces the earlier answers (s.chat.choices)
   s.runFails = new Map() // a command that failed (by its tool) → its error; when the same tool runs clean after an edit, that's a verified fix to learn from (any language, not just web)
   s.edits = 0 // successful file edits so far this message (to tell a real fix from a lucky rerun)
+  s.userSaid = [] // what the user typed with a "no" to a tool call: sent as their message after the results (declined in tools.js)
   s.acted = false // used a tool this message (so a reply that only promises more is a premature stop)
   let nudged = 0 // reminders sent this message about open todo items, a premature stop, or a Stop hook
   let sinceNudge = true // a tool call made since the last reminder: one that changed nothing isn't sent again (no count: it goes on while the model gets on)
@@ -841,11 +870,13 @@ async function runNative(s, task, images, signal) {
   for (let step = 0; ; step++) {
     if (step && !s.isSub) s.onTurn?.() // saved after every step: a quit, crash or kill mid-task loses nothing done so far
     const tools = toolList()
+    s.lastTools = tools // what the requests carry: the findings note before compacting sends the same (compact)
     if (s.maxTurns && step >= s.maxTurns) {
       ui.warn(`stopped after ${s.maxTurns} steps (--max-turns); say "continue" to go on`)
       throw Object.assign(new Error(`stopped after ${s.maxTurns} steps (--max-turns)`), { maxTurns: true })
     }
     // after a failed compaction, the next try waits until the conversation has grown by 5% of the window
+    if (nearlyFull() && dropStale(s)) log('compact', 'older copies of files read again shortened first')
     if (nearlyFull() && step !== s.compactedAt && !roomier()) {
       s.compactedAt = step
       await s.compact({ signal, midTask: true, task, why: fullness() }).then(
@@ -1048,7 +1079,7 @@ async function runNative(s, task, images, signal) {
       lastCall = sig
       if (inRow >= 3) out += `\n\n${prompt('agent/repeating', { n: inRow })}`
       if (inRow >= 5) stuck = `made the same ${name} call five times in a row`
-      if (name === 'read_file' || name === 'search' || name === 'list_files' || name === 'web_fetch' || name === 'web_search') ui.result(`${out.split('\n').length} lines`)
+      if (name === 'read_file' || name === 'search' || name === 'list_files' || name === 'web_fetch' || name === 'web_search' || name === 'changes') ui.result(`${out.split('\n').length} lines`)
       else if (name === 'agent' && !failed(out)) ui.result(`${s.ui.permission === 'plan' ? 'planned' : 'done'}: ${clip(out.split('\n').find((l) => l.trim()) ?? '', 100)}`)
       else if (failed(out)) ui.result(clip(out, 120))
       client.refresh?.() // a setting changed while the tool ran (the window): its result is cut by the new one
@@ -1063,6 +1094,7 @@ async function runNative(s, task, images, signal) {
       s.messages.push(msg)
       s.onEvent?.({ type: 'tool', id: call.id, name, output: out })
     }
+    if (s.userSaid.length) s.messages.push({ role: 'user', content: s.userSaid.splice(0).join('\n\n') }) // their own words, as they typed them
     trimOldResults(s)
     const ended = newlyEnded(s.root) // background commands that exited meanwhile: the model hears it now
     if (ended.length) {
@@ -1095,7 +1127,7 @@ const CHECKS = new Set(['run_command', 'mcp', 'agent', 'lsp'])
 // Files only read by people (a change there needs no run to check it).
 const DOC_FILE = /\.(md|mdx|txt|rst|adoc)$/i
 // Tools that only look (nothing changes): several in one reply run at the same time.
-const LOOKUPS = new Set(['web_search', 'web_fetch', 'read_file', 'search', 'list_files', 'find_command', 'lsp'])
+const LOOKUPS = new Set(['web_search', 'web_fetch', 'read_file', 'search', 'list_files', 'find_command', 'lsp', 'changes'])
 export function newGuard() {
   const seen = new Map() // what a call is → { out, at }
   let epoch = 0 // goes up with each change (an edit, a command that can change things)
@@ -1111,7 +1143,7 @@ export function newGuard() {
   const keyOf = (name, a) => {
     if (name === 'web_search') return `search: ${words(a.query)}${a.fresh ? ' (fresh)' : ''}`
     if (name === 'web_fetch') return `page: ${String(a.url ?? '').toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/+$/, '')} @${a.start ?? 0} ${words(a.look_for)}`
-    if (['run_command', 'read_file', 'search', 'list_files', 'find_command', 'lsp'].includes(name)) return `${name} ${JSON.stringify(a)} @${epoch}`
+    if (['run_command', 'read_file', 'search', 'list_files', 'find_command', 'lsp', 'changes'].includes(name)) return `${name} ${JSON.stringify(a)} @${epoch}`
     return null
   }
   g.before = (name, a) => {
@@ -1441,8 +1473,9 @@ function callOf(messages, id) {
 // provider's prompt cache (the conversation's unchanged start) is broken rarely, not every step.
 // An older conversation's results (no file yet) are saved now, before they're cut.
 export function trimOldResults(s, keep = 4, most = 8) {
-  const long = s.messages.filter((m) => m.role === 'tool' && typeof m.content === 'string' && m.content.length > SAVE_AT && !shortened.has(m) && !/^\[older output/.test(m.content))
+  const long = s.messages.filter((m) => m.role === 'tool' && typeof m.content === 'string' && m.content.length > SAVE_AT && !shortened.has(m) && !/^\[older output/.test(m.content) && !s.staleCopies?.has(m))
   if (long.length <= most) return
+  dropStale(s) // the conversation changes here anyway: the older copies of files read again go too
   for (const m of long.slice(0, -keep)) {
     const call = callOf(s.messages, m.tool_call_id)
     const read = /^read_file /.test(call) ? call.slice('read_file '.length) : '' // a project file: read it again
@@ -1454,15 +1487,22 @@ export function trimOldResults(s, keep = 4, most = 8) {
   log('tool', `older tool output cut: ${long.length - keep} results`)
 }
 
-// A file read again: the older copy in the conversation becomes a one-line note.
+// A file read again: the older copy in the conversation becomes a one-line note, later. Changing a
+// message in the middle makes the provider process everything after it again (its prompt cache
+// keeps only the unchanged start: minutes on a local model, full price on a paid one), so the older
+// copies wait and go together with the old results (trimOldResults), or when it's nearly full.
 function replaceCopy(s, file, msg) {
   const key = path.normalize(String(file))
   const older = (s.copies ??= new Map()).get(key)
-  if (older && !shortened.has(older)) {
-    older.content = prompt('agent/older-copy', { file })
-    shortened.add(older)
-  }
+  if (older && !shortened.has(older)) (s.staleCopies ??= new Map()).set(older, file)
   s.copies.set(key, msg)
+}
+// the older copies waiting, replaced now: true when there were any
+function dropStale(s) {
+  if (!s.staleCopies?.size) return false
+  for (const [m, file] of s.staleCopies) if (!shortened.has(m)) (m.content = prompt('agent/older-copy', { file })), shortened.add(m)
+  s.staleCopies.clear()
+  return true
 }
 
 // Files the user's message names go in as if the model had already read them: one round trip less

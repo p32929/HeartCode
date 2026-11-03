@@ -2,11 +2,12 @@
 // asked in plain words, with one tool, manage. The settings page (General → Features) turns it off.
 import fs from 'node:fs'
 import path from 'node:path'
-import { HOME, readJson, writeJson } from './config.js'
+import { HOME, TEMP, readJson, writeJson } from './config.js'
 import { log } from './log.js'
 import { DEFAULT_SERVERS } from './mcp.js'
 import { prompt } from './prompts.js'
 import { frontMatter, loadSkills, skillDirs } from './skills.js'
+import { declined } from './tools.js'
 import { c, diffLines, renderDiff } from './ui.js'
 
 const KINDS = ['skill', 'mcp', 'setting']
@@ -41,7 +42,7 @@ export class Director {
   async manage(args, s) {
     const { app } = this
     const kind = args.kind
-    const scope = args.scope === 'global' ? 'global' : 'project'
+    const scope = args.scope === 'global' || TEMP ? 'global' : 'project' // --temp: saved in the throwaway folder, never in the project
     const name = safeName(args.name)
     if (args.action === 'help') return prompt('agent/director-help', Object.fromEntries(['args', '1', '2'].map((k) => [k, `{{${k}}}`]))) // the formats show these holes as they are
     if (!KINDS.includes(kind)) return `error: kind must be one of ${KINDS.join(', ')}`
@@ -57,12 +58,13 @@ export class Director {
     const existing = loadSkills(app.root).get(name)
     const dir = dirs[scope === 'global' ? 0 : 1]
     // saving changes the existing file, unless a scope is given that it isn't in (then a new one there)
-    const file = existing && (!args.scope || existing.file.startsWith(dir + path.sep)) ? existing.file : path.join(dir, `${name}.md`)
+    const file = existing && (!args.scope || existing.file.startsWith(dir + path.sep)) && !(TEMP && !existing.file.startsWith(HOME + path.sep)) ? existing.file : path.join(dir, `${name}.md`)
     if (args.action === 'show') return existing ? `${existing.file}\n\n${fs.readFileSync(existing.file, 'utf8')}` : `error: no ${kind} "${name}"`
     if (args.action === 'delete') {
       if (!existing) return `error: no ${kind} "${name}"`
+      if (TEMP && !existing.file.startsWith(HOME + path.sep)) return TEMP_REFUSED
       const ok = await s.ui.confirm(`Delete the ${kind} ${name} (${existing.file})?`, 'edit')
-      if (ok !== true) return declined(ok)
+      if (ok !== true) return declined(s, ok, 'The user declined.')
       // a skill in its own folder (<name>/SKILL.md): that folder; never a skills folder itself
       const folder = path.dirname(existing.file)
       const isFolder = path.basename(existing.file) === 'SKILL.md' && !skillDirs(app.root).some((d) => path.resolve(d) === path.resolve(folder))
@@ -77,7 +79,7 @@ export class Director {
     const old = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : ''
     s.ui.print(renderDiff(diffLines(old, content + '\n'), tilde(file)))
     const ok = await s.ui.confirm(`${old ? 'Update' : 'Save'} the ${kind} ${name}?`, 'edit')
-    if (ok !== true) return declined(ok)
+    if (ok !== true) return declined(s, ok, 'The user declined.')
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(file, content + '\n')
     app.reload(kind)
@@ -109,8 +111,9 @@ export class Director {
     data.mcpServers ??= {}
     if (action === 'delete') {
       if (!where && !DEFAULT_SERVERS[name]) return `error: no MCP server "${name}"`
+      if (TEMP && where?.scope === 'project') return TEMP_REFUSED
       const ok = await s.ui.confirm(`${DEFAULT_SERVERS[name] ? 'Turn off' : 'Delete'} the MCP server ${name}?`, 'edit')
-      if (ok !== true) return declined(ok)
+      if (ok !== true) return declined(s, ok, 'The user declined.')
       if (DEFAULT_SERVERS[name]) data.mcpServers[name] = { disabled: true } // built in: turned off, not gone
       else delete data.mcpServers[name]
       writeJson(file, data)
@@ -133,7 +136,7 @@ export class Director {
     const clean = Object.fromEntries(['command', 'args', 'env', 'url', 'headers', 'description', 'disabled'].filter((k) => cfg[k] !== undefined).map((k) => [k, cfg[k]]))
     s.ui.print(`${c.bold(name)} ${c.faint(`→ ${tilde(file)}`)}\n  ${c.muted(JSON.stringify(clean))}`)
     const ok = await s.ui.confirm(clean.url && !clean.command ? `Save the MCP server ${name}? HeartCode will connect to ${clean.url}` : `Save the MCP server ${name}? HeartCode will run: ${clean.command ?? ''} ${(clean.args ?? []).join(' ')}`, 'command')
-    if (ok !== true) return declined(ok)
+    if (ok !== true) return declined(s, ok, 'The user declined.')
     data.mcpServers[name] = { ...data.mcpServers[name], ...clean }
     writeJson(file, data)
     this.app.reload('mcp')
@@ -141,6 +144,6 @@ export class Director {
   }
 }
 
-const declined = (ok) => `The user declined.${typeof ok === 'string' ? ` User feedback: ${ok}` : ''}`
+const TEMP_REFUSED = "error: this is a --temp run, which keeps nothing, so it can't change the project's own files. Tell the user what to change instead."
 const tilde = (f) => (process.env.HOME && f.startsWith(process.env.HOME) ? '~' + f.slice(process.env.HOME.length) : f)
 const mcpFiles = (root) => [{ scope: 'global', file: path.join(HOME, 'mcp.json') }, { scope: 'project', file: path.join(root, '.heartcode', 'mcp.json') }]

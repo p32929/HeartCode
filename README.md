@@ -56,7 +56,7 @@ tried did what I needed:
   default): requests, tools & commands, model choices, the agent's decisions, errors, the
   conversation, debug. Read them on the settings page, searched and live.
 - **Takes skills, MCP servers and hooks** in Claude Code's formats; `/import` brings yours over.
-- **Tells you when a newer version is out** (a check with npm at most once a day, in the status bar):
+- **Tells you when a newer version is out** (a check with npm each time it starts, in the status bar):
   `/update` shows what changed and installs it the way you installed HeartCode. Switch it off in
   `/settings` → General.
 - **Best fit by public rankings**: with "Pick" set to "the best for each task", each message's
@@ -188,6 +188,16 @@ alone (`/help`, `/cost`, `/diff`, `/select_model`, `/settings`, `/tab`, `/exit`�
 ones that change it (`/compact`, `/rewind`, `/resume`…) wait until it's done. Pickers, questions and what
 commands show (`/help`, `/context`, `/diff`…) open in a dialog over the conversation; `Esc`
 closes it.
+
+## Thanks
+
+A lot of what HeartCode handles, I learned from other coding agents and the problems they ran into
+first. Thank you to [Reika](https://github.com/alexwkleung/reika) (its measured findings on small
+models: sending a "no, do this instead" as your own message, counting code's tokens honestly,
+keeping the provider's prompt cache, checking what uses a changed function, saving what the model
+found before compacting), [OpenCode](https://github.com/anomalyco/opencode),
+[Cline](https://github.com/cline/cline), [OpenClaw](https://github.com/openclaw/openclaw) and
+[Pi](https://github.com/earendil-works/pi), for the many use cases like these they showed me.
 
 ## License
 

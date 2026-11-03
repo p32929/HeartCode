@@ -14,7 +14,7 @@ import { HeadlessUI } from './headless.js'
 import { PERMISSIONS } from './ui.js'
 import { loadChat } from './sessions.js'
 
-const KIND = { read_file: 'read', list_files: 'search', search: 'search', edit_file: 'edit', write_file: 'edit', run_command: 'execute', web_fetch: 'fetch', web_search: 'fetch', todo: 'think', agent: 'think' }
+const KIND = { read_file: 'read', changes: 'read', list_files: 'search', search: 'search', edit_file: 'edit', write_file: 'edit', run_command: 'execute', web_fetch: 'fetch', web_search: 'fetch', todo: 'think', agent: 'think' }
 const plain = (s) => String(s ?? '').replace(/\x1b\[[0-9;]*m/g, '')
 
 // The screen for one session: everything goes to the editor as session/update.
