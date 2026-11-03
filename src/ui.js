@@ -353,6 +353,23 @@ export function wrapAnsi(line, cols) {
   return rows
 }
 
+// wrapAnsi at spaces: a word moves to the next row whole (one longer than a row is still cut)
+export function wrapWords(line, cols) {
+  const width = (x) => x.replace(/\x1b\[[0-9;]*m/g, '').length
+  const rows = []
+  let row = ''
+  for (const word of line.split(/(?<= )/)) {
+    if (width(row.trim()) && width(row + word.trimEnd()) > cols) {
+      const style = (row.match(/\x1b\[[0-9;]*m/g) ?? []).reduce((st, e) => (e === '\x1b[0m' ? '' : st + e), '') // colors still on: carried to the next row
+      rows.push(row.trimEnd() + (style ? '\x1b[0m' : ''))
+      row = style
+    }
+    row += word
+  }
+  rows.push(row)
+  return rows.flatMap((r) => wrapAnsi(r, cols))
+}
+
 // Streams text as an indented, word-wrapped block: "<marker>first line\n  next line".
 // Leading/trailing blank lines are dropped; runs of blank lines collapse to one.
 export class Block {
@@ -696,7 +713,7 @@ export class UI {
         if (by) top = Math.max(0, Math.min(top + by, total - page))
       },
       draw: (w, h) => {
-        const rows = all.flatMap((l) => wrapAnsi(l, w))
+        const rows = all.flatMap((l) => wrapWords(l, w))
         total = rows.length
         page = h - 2
         top = Math.max(0, Math.min(top, total - page))
@@ -889,12 +906,15 @@ export class UI {
 
   // Full-screen mode: the alternate screen, the conversation on top, the input pinned to the
   // bottom row, the spinner and the suggestion menu just above the input. PgUp/PgDn scroll.
-  fullscreen() {
+  // mouse: HeartCode takes the mouse (the wheel scrolls the conversation, dragging copies); off,
+  // the terminal keeps it, so text is selected and copied the terminal's own way (over SSH too).
+  fullscreen({ mouse = false } = {}) {
     if (this.full || !(this.input.isTTY && this.out.isTTY)) return
     this.full = true
+    this.mouseOn = mouse ? MOUSE_ON : ''
     // alternate screen · kitty keyboard protocol (Shift/Cmd+Enter are told apart) · bracketed paste
-    // · mouse reports (SGR): the wheel scrolls the conversation, not the terminal
-    this.out.write('\x1b[?1049h\x1b[H\x1b[2J\x1b[>1u\x1b[?2004h' + MOUSE_ON)
+    // · mouse reports (SGR), when HeartCode takes the mouse
+    this.out.write('\x1b[?1049h\x1b[H\x1b[2J\x1b[>1u\x1b[?2004h' + this.mouseOn)
     this.out.on('resize', () => this.render())
     this.#rl()
     process.on('exit', () => this.leaveFullscreen())
@@ -912,7 +932,7 @@ export class UI {
       this.input.setRawMode?.(true)
       this.rl?.resume()
       if (wasFull) {
-        this.out.write('\x1b[?1049h\x1b[>1u\x1b[?2004h' + MOUSE_ON)
+        this.out.write('\x1b[?1049h\x1b[>1u\x1b[?2004h' + this.mouseOn)
         this.render()
       }
     }

@@ -59,14 +59,14 @@ tried did what I needed:
 - **Tells you when a newer version is out** (a check with npm at most once a day, in the status bar):
   `/update` shows what changed and installs it the way you installed HeartCode. Switch it off in
   `/settings` → General.
-- **Knows what each of your models is good at**: the first time it meets a model it looks up its
-  strengths and weaknesses (a web search, summed up in two lines), keeps that in
-  `~/.heart/model-strengths.json` for every project, and gives each part of a job to the model best at it.
-- **Works with discipline by default**: its built-in `discipline` skill (from Karpathy's guidelines,
-  Grill Me, Superpowers, Ponytail and Caveman) has it ask before building, write the least code
-  that works, change only what the task needs, prove it before saying done, then stop, and answer
-  short. A skill with `use: always` is in every message; make your own copy in `/settings` → Skills
-  to change it or turn it off.
+- **Best fit by public rankings**: with "HeartCode picks the model by" set to best fit, each message's
+  lead and code reviewer are your models ranked on the skills that task needs (web
+  pages, code, images…) by LMArena's public rankings, fetched once a week. Your models shows each
+  one's Coding, Web apps and Vision rank.
+- **Works with discipline by default**: its rules (from Karpathy's guidelines, Grill Me,
+  Superpowers, Ponytail and Caveman) have it ask before building, find a bug's root cause first,
+  write the least code that works, change only what the task needs, prove it before saying done,
+  then stop, and answer short. A skill with `use: always` adds rules of your own to every message.
 - **Tabs** (`Alt+T`), each with its own conversation, and git worktrees for work kept apart.
 - **Servers and watchers in the background**: the model starts one and goes on working, reads its
   output when it needs to, and stops it. `Alt+B` (or `/background`) shows their logs live above the input,

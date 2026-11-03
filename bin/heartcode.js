@@ -152,7 +152,7 @@ const SLASH = helpText(SECTIONS)
 
 // The keyboard shortcuts, as [keys, what] rows, read from the effective keybindings (keybindings.json
 // can change any of them) plus the fixed ones (Space, Enter, Esc, Shift+Tab, Ctrl+C).
-function keysHelp(keys = {}) {
+function keysHelp(keys = {}, mouse = false) {
   const NAMES = { pageup: 'PgUp', pagedown: 'PgDn', up: '↑', down: '↓', left: '←', right: '→', ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift' }
   const pretty = (k) => k.split('+').map((p) => NAMES[p] ?? (p.length === 1 ? p.toUpperCase() : p[0].toUpperCase() + p.slice(1))).join('+')
   const forAct = (a) => Object.entries(keys).filter(([, v]) => v === a).map(([k]) => pretty(k)).join(' / ')
@@ -177,9 +177,10 @@ function keysHelp(keys = {}) {
     [[forAct('scroll_top'), forAct('scroll_bottom')].filter(Boolean).join(' / '), 'to the top / bottom of the conversation (scrolled up, it stays put while the answer comes in)'],
     [[forAct('scroll_line_up'), forAct('scroll_line_down')].filter(Boolean).join(' / '), 'scroll a few lines'],
     ['Ctrl+C', 'stop · twice quits HeartCode'],
-    ['Drag', 'select and copy: the conversation, a dialog, the folder, the input, the status bar'],
-    ['Double-click', 'copy the word under it (an address, a path, a model)'],
-    [process.platform === 'darwin' ? 'Option+drag' : 'Shift+drag', "the terminal's own selection, past HeartCode's"],
+    [mouse ? 'Drag' : '', 'select and copy: the conversation, a dialog, the folder, the input, the status bar'],
+    [mouse ? 'Double-click' : '', 'copy the word under it (an address, a path, a model)'],
+    [mouse ? (process.platform === 'darwin' ? 'Option+drag' : 'Shift+drag') : '', "the terminal's own selection, past HeartCode's"],
+    [mouse ? '' : 'Mouse', 'the terminal\'s own: select and copy as usual (HeartCode takes the mouse, for the wheel and drag to copy, with "mouse": true in config.json)'],
   ].filter(([k]) => k)
   return rows
 }
@@ -608,7 +609,7 @@ class App {
     const mine = this.commands().slice(COMMANDS.length)
     const sections = [...SECTIONS]
     if (mine.length) sections.push(['your skills (type /skill:name)', mine])
-    sections.push(['keyboard', keysHelp(this.ui.keys)])
+    sections.push(['keyboard', keysHelp(this.ui.keys, this.cfg?.mouse === true)])
     return helpText(sections)
   }
 
@@ -1747,7 +1748,7 @@ async function runTask(app, task, ctl) {
 
 async function repl(app, f = {}) {
   const { ui, cfg } = app
-  ui.fullscreen()
+  ui.fullscreen({ mouse: cfg.mouse === true }) // off: the terminal selects and copies text itself
   ui.onDoubleEscape = () => '/rewind'
   let ctl = null
   ui.onEscape = () => ctl?.abort()

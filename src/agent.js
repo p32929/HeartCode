@@ -1,17 +1,14 @@
-import vm from 'node:vm'
-import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import { log } from './log.js'
 import { prompt, userInstructions } from './prompts.js'
 import { newChat } from './sessions.js'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { est, estMessages, Client, writtenBy, tokensOf, COMPACT_SHARE } from './client.js'
 import { runGuided } from './guided.js'
 import { markUsed, removeResearch, findResearch } from './research.js'
-import { learnStrengths, loadStrengths, strengthKey } from './strengths.js'
-import { pickModels, byPick, modelFacts } from './fit.js'
+import { loadRankings, rankIn } from './rankings.js'
+import { pickModels, byPick } from './fit.js'
 import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, noteNamedPaths } from './tools.js'
 import { serversNote } from './lsp.js'
 import { newlyEnded, jobLine } from './background.js'
@@ -257,7 +254,7 @@ export class Session {
     if (this.engineFor) {
       ;({ client, profile, strat } = await this.engineFor(t))
       const was = client.retryIf
-      client.retryIf = (e, attempt) => attempt < 3 && (!was || was(e, attempt))
+      client.retryIf = (e, attempt) => attempt < 3 && !e.notStarted && (!was || was(e, attempt)) // not answering in time: the next model, not another wait
     }
     const label = clip(`${client.model}: ${String(description ?? '').trim() || task.split('\n')[0]}`, 60)
     const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
@@ -313,7 +310,7 @@ export class Session {
         this.ui.spinner(`${seer.model} is looking at image ${i + 1}`)
         try {
           const { client } = await this.engineFor(seer)
-          client.retryIf = (e, attempt) => attempt < 3
+          client.retryIf = (e, attempt) => attempt < 3 && !e.notStarted
           said = (await client.chat({ messages: [{ role: 'user', content: [{ type: 'text', text: prompt('guided/describe-image', { task }) }, { type: 'image_url', image_url: { url } }] }] }, { signal })).content.trim()
         } catch (e) {
           if (e.name === 'AbortError' || signal?.aborted) throw e
@@ -531,7 +528,6 @@ const SYSTEM = (s) => {
     ...[...(s.skills?.values() ?? [])].filter((k) => k.use === 'always').map((k) => k.body), // skills that say how to work (use: always)
     s.memory && prompt('agent/memory', { tags: s.memory.tagSummary() || '(none yet)' }),
     s.strat.vision && prompt('agent/you-see'), // models that can see often say they can't
-    s.mcpInstructions && prompt('agent/mcp-instructions', { instructions: s.mcpInstructions }), // what the MCP servers say about their tools
     s.director && !s.appendSystem && s.director.app.cfg.director !== false && prompt('agent/director'),
     !s.isSub && teamPrompt(s),
     s.isSub && prompt('agent/subagent'),
@@ -542,17 +538,21 @@ const SYSTEM = (s) => {
     .join('\n\n')
 }
 
-// Your other models and what each can do, for the agent tool's model (only when there are any).
+// Your other models and what each can do, for the agent tool's model (only when there are any): a
+// short line each — in best fit, with its places in the public rankings (rankings.js).
+const RANKED_AS = { code: 'text:coding', web: 'webdev:webdev', vision: 'vision:overall' }
 const teamPrompt = (s) => {
   const team = s.team?.() ?? []
   if (!team.length) return ''
-  const fails = (t) => s.failures?.[`${t.provider} ${t.model}`] && `failed ${s.failures[`${t.provider} ${t.model}`]}× this session`
-  const known = loadStrengths()
-  const at = (model) => (/^unknown/i.test(known[strengthKey(model)]?.good ?? '') ? null : known[strengthKey(model)]) // nothing published: kept, so not looked up again, but not shown
-  const strong = (model) => (at(model) ? `; good at: ${at(model).good}${at(model).weak ? `; weak at: ${at(model).weak}` : ''}` : '')
-  const can = (t) => [modelFacts(t), fails(t)].filter(Boolean).join('; ') // what it can do, is good and weak at, how it did in your tests
-  const you = [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking'].filter(Boolean).join(', ') + strong(s.client.model)
-  return prompt('agent/team', { models: team.map((t) => `- ${t.provider} ${t.model}: ${can(t)}`).join('\n'), you })
+  const data = s.fitMode?.() ? loadRankings() : null
+  const ranks = (t) => (data ? Object.entries(RANKED_AS).map(([k, list]) => ((r) => r && `${k} #${r.rank}`)(rankIn(t.model, list, data))).filter(Boolean).join(' ') : '')
+  const line = (t) => {
+    const failed = s.failures?.[`${t.provider} ${t.model}`]
+    const facts = [t.tools === false && 'no tool calls', t.images && 'images', t.thinking && 'thinking', ranks(t) && `ranked ${ranks(t)}`, failed && `failed ${failed}× this session`].filter(Boolean)
+    return `- ${t.provider} ${t.model}${facts.length ? `: ${facts.join(', ')}` : ''}`
+  }
+  const you = [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking', ranks(s.client) && `ranked ${ranks(s.client)}`].filter(Boolean).join(', ')
+  return prompt('agent/team', { models: team.map(line).join('\n'), you, ranked: Boolean(data) })
 }
 
 const sizeOf = (m) =>
@@ -728,9 +728,6 @@ async function runNative(s, task, images, signal) {
   // The system prompt is rebuilt for every message: files come and go, and a resumed chat's is
   // from back then (it once told the model the project was empty after it had made files).
   // Unchanged, it stays the same text, so a provider's prompt cache still holds.
-  // what your models are good at, learned once per model, before the system prompt that lists them
-  const team = !s.isSub && !s.appendSystem ? (s.team?.() ?? []) : []
-  if (team.length) await learnStrengths(s, [{ model: client.model }, ...team], signal)
   const sys = SYSTEM(s)
   if (!s.messages) {
     s.messages = strat.mergeSystem ? [{ role: 'user', content: sys }, { role: 'assistant', content: prompt('agent/system-acknowledged') }] : [{ role: 'system', content: sys }]
@@ -793,22 +790,14 @@ async function runNative(s, task, images, signal) {
   // pages already read for this project that match: titles only (the model opens one when needed)
   const pages = s.isSub || !s.memory ? [] : findResearch(s.root, task, 6).filter((r) => r.kind !== 'search' && !sent.has(`research:${r.name}:${r.fetched}`))
   s.chat.sentNotes = [...sent, ...notes.map(key), ...pages.map((r) => `research:${r.name}:${r.fetched}`)]
-  const guideSent = () => (s.chat.sentNotes ?? []).includes('guide:ui')
-  // the UI guide: once per conversation, with a message about a UI (else with the first UI file written)
-  const uiGuide = !sent.has('guide:ui') && UI_TASK.test(task)
-  if (uiGuide) s.chat.sentNotes = [...(s.chat.sentNotes ?? []), 'guide:ui']
   const known = [
-    uiGuide && prompt('agent/ui-guide'),
     notes.length && prompt('agent/memory-relevant', { notes: notes.map((n) => `[[${n.name}]] — ${n.description}`).join('\n') }),
     pages.length && prompt('agent/research-known', { pages: pages.map((r) => `- ${r.title} — ${r.url} (read ${r.fetched}) → ${r.file}`).join('\n') }),
   ].filter(Boolean)
   const text = known.length ? `${task}\n\n${known.join('\n\n')}` : task
   if (!s.isSub) Object.assign(s, { research: [], ran: [], lastQuery: '', dirsBefore: foldersOf(s.root), noResearch: !s.memory }) // this message's pages and commands (helpers add theirs), and the folders there were, for the wrap-up
   const planning = ui.permission === 'plan'
-  // the research-first reminder: small models follow the user's message far more than the system
-  // prompt (not a helper's job, nor a program's own task with its own instructions)
-  const noted = !s.isSub && !s.appendSystem ? `${text}\n\n${prompt('agent/research-first', { today: new Date().toISOString().slice(0, 10) })}` : text
-  const said = planning && !s.isSub ? `${noted}\n\n${prompt('agent/plan-mode')}` : noted
+  const said = planning && !s.isSub ? `${text}\n\n${prompt('agent/plan-mode')}` : text
   const content = images.length ? [{ type: 'text', text: said }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))] : said
   s.messages.push({ role: 'user', content })
   attachNamed(s, task) // files the message names: as if already read (saves a round trip each)
@@ -821,13 +810,10 @@ async function runNative(s, task, images, signal) {
   // A todo list left done from an earlier message is cleared; an unfinished one stays.
   if (!s.isSub && s.chat.todos?.every((t) => t.status === 'completed')) s.chat.todos = []
   s.todoTouched = false
-  s.task = task // the user's message, for the page review (lookAtUi)
+  s.task = task // the user's message, for the review
   for (const turn of s.chat.turns ?? []) noteNamedPaths(turn.task) // folders outside the project any message here names (a resumed chat's too): readable, and cd there is no wrong turn
   noteNamedPaths(task)
   if (!s.isSub) s.choicesFresh = false // a question about how to do it, this message: replaces the earlier answers (s.chat.choices)
-  s.uiTouched = new Set() // pages (and styles) written in this message: looked at before it ends
-  s.uiLooks = 0
-  s.uiErrorsPrev = [] // hard errors from the last look: when one is gone next look, it was fixed — learn from it
   s.runFails = new Map() // a command that failed (by its tool) → its error; when the same tool runs clean after an edit, that's a verified fix to learn from (any language, not just web)
   s.edits = 0 // successful file edits so far this message (to tell a real fix from a lucky rerun)
   s.acted = false // used a tool this message (so a reply that only promises more is a premature stop)
@@ -967,12 +953,6 @@ async function runNative(s, task, images, signal) {
     }
     empty = 0
     if (!res.toolCalls.length) {
-      // a page it built or restyled: HeartCode opens it and shows it the result, to check and fix
-      const look = !s.isSub && (await lookAtUi(s, signal))
-      if (look) {
-        s.messages.push({ role: 'user', content: look })
-        continue
-      }
       const more = sinceNudge && !s.isSub && ((await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal)))
       if (!more) {
         s.wrapUpLater?.(task, res.content) // after the answer, beside what comes next
@@ -1072,11 +1052,6 @@ async function runNative(s, task, images, signal) {
       else if (name === 'agent' && !failed(out)) ui.result(`${s.ui.permission === 'plan' ? 'planned' : 'done'}: ${clip(out.split('\n').find((l) => l.trim()) ?? '', 100)}`)
       else if (failed(out)) ui.result(clip(out, 120))
       client.refresh?.() // a setting changed while the tool ran (the window): its result is cut by the new one
-      // the first UI file written in a conversation that hasn't had the UI guide: it comes with the result
-      if (EDITS.has(name) && args && UI_FILE.test(String(args.path ?? '')) && !failed(out) && !guideSent()) {
-        s.chat.sentNotes = [...(s.chat.sentNotes ?? []), 'guide:ui']
-        out += `\n\n${prompt('agent/ui-guide')}`
-      }
       // every sizable result is saved as it comes (a web page already is, in research): later it can
       // become a pointer to its file in the conversation without anything being lost
       if (out.length > SAVE_AT && name !== 'read_file' && !s.chat.outputs?.[call.id]) {
@@ -1119,9 +1094,6 @@ const EDITS = new Set(['edit_file', 'write_file', 'append_file', 'apply_patch'])
 const CHECKS = new Set(['run_command', 'mcp', 'agent', 'lsp'])
 // Files only read by people (a change there needs no run to check it).
 const DOC_FILE = /\.(md|mdx|txt|rst|adoc)$/i
-// A message about something people look at (gets the UI guide), and a file that is one.
-const UI_TASK = /\b(ui|ux|web ?page|page|website|web ?site|landing|dashboard|screen|component|front-?end|layout|redesign|design|css|html|styles?|styling|theme|tailwind|navbar|modal|button)s?\b/i
-const UI_FILE = /\.(html?|css|scss|sass|less|jsx|tsx|vue|svelte|astro)$/i
 // Tools that only look (nothing changes): several in one reply run at the same time.
 const LOOKUPS = new Set(['web_search', 'web_fetch', 'read_file', 'search', 'list_files', 'find_command', 'lsp'])
 export function newGuard() {
@@ -1168,81 +1140,6 @@ export function newGuard() {
   return g
 }
 
-// The pages this message wrote or restyled (an .html written, or one using a .css written),
-// opened in the built-in browser (chrome-devtools): a screenshot at desktop width (the whole page)
-// and at phone width, given to the model to check against its brief and fix. Again whenever pages
-// changed since the last look; nothing when there's no browser. A model that can't see gets them
-// described by one of yours that can.
-// Problems found in a built page without a browser: JavaScript that doesn't parse, and the Tailwind
-// CDN used with @apply/@layer (it throws "Cannot apply unknown utility class" at runtime and the
-// styling breaks). These are caught even when the browser can't be opened.
-export function staticChecks(root, rel) {
-  const out = []
-  let html
-  try {
-    html = fs.readFileSync(path.join(root, rel), 'utf8')
-  } catch {
-    return out
-  }
-  for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
-    const attrs = m[1]
-    const type = /\btype\s*=\s*["']?([^"'\s>]+)/i.exec(attrs)?.[1].toLowerCase() ?? ''
-    if (/\bsrc\s*=/.test(attrs) || !m[2].trim() || (type && !/^(module|text\/javascript|application\/javascript)$/.test(type))) continue // external, or not JavaScript (an import map, JSON, a template)
-    // compiled without running, with the line it's on in the page (so the model goes straight to it)
-    const offset = html.slice(0, m.index + m[0].indexOf('>') + 1).split('\n').length - 1
-    let line = 0
-    let why = ''
-    if (type === 'module') {
-      const r = spawnSync(process.execPath, ['--input-type=module', '--check'], { input: m[2], encoding: 'utf8' })
-      if (r.status) (line = Number(/\[stdin\]:(\d+)/.exec(r.stderr)?.[1] ?? 0)), (why = /SyntaxError: .*/.exec(r.stderr)?.[0] ?? r.stderr.trim().split('\n').at(-1))
-    } else {
-      try {
-        new vm.Script(m[2], { filename: rel, lineOffset: offset })
-      } catch (e) {
-        line = Number(new RegExp(`${rel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:(\\d+)`).exec(e.stack)?.[1] ?? 0) - offset
-        why = `${e.name}: ${e.message}`
-      }
-    }
-    if (!why) continue
-    const at = line > 0 ? offset + line : 0
-    out.push(`${rel}${at ? ` line ${at}` : ''}: the <script> doesn't parse — ${why}${at ? ` (the line: ${html.split('\n')[at - 1]?.trim().slice(0, 160)})` : ''}. The page's JavaScript won't run at all: fix that line (or what's just before it: an unclosed brace or bracket).`)
-  }
-  const tailwindCdn = /cdn\.tailwindcss\.com|@tailwindcss\/browser|type\s*=\s*["']text\/tailwindcss/.test(html)
-  if (tailwindCdn) {
-    const css = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n')
-    const defined = new Set([...css.matchAll(/(?:^|\})\s*\.([a-zA-Z][\w-]*)\s*\{/g)].map((m) => m[1])) // classes defined with a rule
-    const applied = new Set([...css.matchAll(/@apply\b([^;}{]*)/g)].flatMap((m) => m[1].split(/\s+/).map((t) => t.replace(/[^\w-].*$/, '')).filter(Boolean)))
-    const bad = [...applied].filter((c) => defined.has(c))
-    if (bad.length) out.push(`${rel}: the Tailwind browser build (CDN) throws "Cannot apply unknown utility class" here — you @apply a class you defined yourself (${bad.join(', ')}), which only a real build step allows. Put those utility classes directly in the HTML (class="…"), not behind @apply; or drop the @apply and write the rules in plain CSS.`)
-  }
-  return out
-}
-
-// The tech a mistake is about, for tagging a lesson so it's recalled on later tasks of the same
-// kind. Reads both the error and the command/file it came from; works for any language, not just web.
-function techOf(context) {
-  const t = String(context).toLowerCase()
-  const tags = []
-  const add = (re, tag) => re.test(t) && tags.push(tag)
-  add(/tailwind/, 'tailwind')
-  add(/\btsc?\b|\.tsx?\b|typescript|ts-node/, 'typescript')
-  add(/\bnode\b|\.c?js\b|\.mjs\b|javascript|npm|pnpm|yarn|\bbun\b|vite|webpack|eslint|referenceerror|is not defined/, 'javascript')
-  add(/\breact\b|usestate|useeffect|\bjsx\b|next\.?js/, 'react')
-  add(/\bpython3?\b|\bpip3?\b|\bpytest\b|\buv\b|\.py\b|traceback|modulenotfound|indentationerror/, 'python')
-  add(/\bgo\b|\.go\b|golang|go\.mod/, 'go')
-  add(/\bcargo\b|\brustc\b|\.rs\b|rust/, 'rust')
-  add(/\bjava\b|\bmvn\b|gradle|\.java\b/, 'java')
-  add(/\bruby\b|\bgem\b|bundle|\.rb\b|rails/, 'ruby')
-  add(/\bphp\b|composer|\.php\b|laravel/, 'php')
-  add(/\bmake\b|cmake|\bgcc\b|clang|\.c\b|\.cpp\b/, 'c')
-  add(/\bdocker\b|dockerfile|kubectl|\bk8s\b/, 'docker')
-  add(/\bcurl\b|\bwget\b|http|endpoint|\bapi\b|\bfetch\b/, 'api')
-  add(/\.html\b|<script|<style|\bdom\b/, 'html')
-  add(/\.css\b|@apply|@layer|utility class|stylesheet/, 'css')
-  add(/\bsql\b|postgres|sqlite|mysql|database/, 'sql')
-  return tags.length ? [...new Set(tags)].slice(0, 4) : ['general']
-}
-
 // A command's tool: its first word (npm, python3, go, cargo, make, curl…), paths and flags dropped,
 // so the same kind of command failing then passing is recognised across runs.
 const runTool_ = (cmd) => (String(cmd).trim().match(/^[\w./-]+/)?.[0] ?? '').split('/').pop()
@@ -1273,12 +1170,12 @@ async function noteRun(s, name, args, out, signal) {
   }
 }
 
-// Turn each fixed mistake into one reusable rule and save it (global memory, tagged by tech). The
+// Turn each fixed mistake into one reusable rule and save it (global memory, tagged by the tool it came from). The
 // model writes the rule from the error; a near-duplicate lesson is skipped. Recall is automatic
 // (memory.relevant attaches matching notes to a later message).
 async function learnFromFixes(s, fixed, signal) {
   for (const { error, context } of fixed.slice(0, 5)) {
-    const tags = techOf(context ?? error)
+    const tags = [runTool_(context ?? error) || 'general'] // the tool it came from (npm, python3, cargo…)
     const near = s.memory.search(`tag:lesson ${tags.join(' ')}`).find((n) => n.body.toLowerCase().includes(error.replace(/^[^:]*:\s*/, '').toLowerCase().slice(0, 30)))
     if (near) continue // already learned
     let rule = ''
@@ -1303,147 +1200,6 @@ async function learnFromFixes(s, fixed, signal) {
     s.ui.step('learned', `${rule.slice(0, 90)}${scope === 'project' ? ' (this project)' : ''}`)
     log('learn', `saved lesson [[${name}]] (${scope}, #${tags.join(' #')}): ${rule}`)
   }
-}
-
-// Injected into the page (evaluate_script): fills inputs, clicks buttons, toggles checkboxes, and
-// returns the errors any of them threw. Navigation is blocked so one click can't end the test.
-const SMOKE_TEST = `async () => {
-  const errs = []
-  const push = (m) => { const s = String(m && m.message ? m.message : m).slice(0, 180); if (s && !errs.includes(s)) errs.push(s) }
-  addEventListener('error', (e) => push(e.message || (e.error && e.error.message) || e), true)
-  addEventListener('unhandledrejection', (e) => push('unhandled: ' + ((e.reason && e.reason.message) || e.reason)), true)
-  const ce = console.error; console.error = (...a) => { push(a.map(String).join(' ')); ce.apply(console, a) }
-  document.addEventListener('submit', (e) => e.preventDefault(), true)
-  document.addEventListener('click', (e) => { const a = e.target.closest && e.target.closest('a'); const h = a && a.getAttribute('href'); if (h && h[0] !== '#') e.preventDefault() }, true)
-  for (const inp of document.querySelectorAll('input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]):not([type=file]), textarea')) {
-    try { inp.focus(); inp.value = 'Test 123'; inp.dispatchEvent(new Event('input', { bubbles: true })); inp.dispatchEvent(new Event('change', { bubbles: true })); for (const t of ['keydown','keypress','keyup']) inp.dispatchEvent(new KeyboardEvent(t, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true })) } catch (e) { push('typing: ' + e.message) }
-  }
-  const btns = [...document.querySelectorAll('button, [role=button], input[type=button], input[type=submit], a[href^="#"], a:not([href]), [onclick]')]
-  let controls = btns.length
-  for (const el of btns) { try { el.click() } catch (e) { push('click "' + ((el.textContent || el.getAttribute('aria-label') || el.value || '').trim().slice(0, 30)) + '": ' + e.message) } ; await new Promise((r) => setTimeout(r, 10)) }
-  for (const cb of document.querySelectorAll('input[type=checkbox], input[type=radio]')) { controls++; try { cb.click() } catch (e) { push('toggle: ' + e.message) } }
-  await new Promise((r) => setTimeout(r, 200))
-  return JSON.stringify({ errors: errs, controls })
-}`
-
-async function lookAtUi(s, signal) {
-  if (!s.uiTouched?.size || s.ui.permission === 'plan') return null // again whenever pages changed since the last look
-  const touched = [...s.uiTouched]
-  s.uiTouched.clear()
-  const styles = touched.filter((f) => /\.css$/i.test(f)).map((f) => path.basename(f))
-  const pages = touched.filter((f) => /\.html?$/i.test(f))
-  if (styles.length) {
-    for (const f of listFiles(s.root).filter((f) => /\.html?$/i.test(f))) {
-      try {
-        if (styles.some((c) => fs.readFileSync(path.join(s.root, f), 'utf8').includes(c))) pages.push(f)
-      } catch {}
-    }
-  }
-  const shown = [...new Set(pages)].filter((f) => fs.existsSync(path.join(s.root, f)))
-  if (!shown.length) return null
-  s.uiLooks++
-  const browser = s.mcp?.get?.('chrome-devtools')
-  const errors = shown.flatMap((rel) => staticChecks(s.root, rel)) // works with no browser
-  const shots = []
-  let opened = 0 // pages actually opened in the browser (0: couldn't verify it runs)
-  const text = (r) => (r.content ?? []).map((p) => p.text ?? '').join('\n')
-  const done = browser ? await s.mcpGate?.() : null
-  try {
-    if (!browser) throw new Error('no browser')
-    for (const rel of shown) {
-      s.ui.spinner(`opening ${rel} in the browser`)
-      const openedText = text(await browser.call('new_page', { url: pathToFileURL(path.join(s.root, rel)).href }, signal))
-      opened++
-      const id = Number(/(\d+):[^\n]*\[selected\]/.exec(openedText)?.[1]) || undefined // newer versions number the pages
-      const page = id ? { pageId: id } : {}
-      await new Promise((r) => setTimeout(r, 600)) // the scripts run before we read the console
-      const con = await browser.call('list_console_messages', page, signal).catch(() => null)
-      for (const line of (con ? text(con) : '').split('\n')) {
-        if (!/\[error\]/i.test(line) || /favicon\.ico/i.test(line)) continue // a missing favicon isn't a real problem
-        errors.push(`${rel}: ${line.replace(/^\s*msgid=\d+\s*\[error\]\s*/i, '').replace(/\s*\(\d+ args?\)\s*$/, '').trim()}`)
-      }
-      // Drive it like a user: fill the inputs, click every button, toggle every checkbox. An error a
-      // control throws means it doesn't work (a dead button, a popup that fails) — caught here, not on a plain load.
-      s.ui.spinner(`testing ${rel} (clicking through it)`)
-      const ran = await browser.call('evaluate_script', { ...page, function: SMOKE_TEST }, signal).catch((e) => (log('look', `smoke test failed on ${rel}: ${e.message}`), null))
-      const blob = ran && /\{"errors":\s*\[[\s\S]*?\],\s*"controls":\s*\d+\}/.exec(text(ran).replace(/\\n/g, ' ').replace(/\\"/g, '"').replace(/\\\\/g, '\\'))
-      if (blob) {
-        try {
-          const r = JSON.parse(blob[0])
-          for (const err of r.errors) errors.push(`${rel}: a control is broken — ${err}`)
-          log('look', `${rel}: exercised ${r.controls} control(s), ${r.errors.length} broke`)
-        } catch (e) {
-          log('look', `smoke parse: ${e.message}`)
-        }
-      }
-      for (const [width, height, fullPage] of [[1280, 900, true], [390, 844, false]]) {
-        await browser.call('resize_page', { ...page, width, height }, signal)
-        const r = await browser.call('take_screenshot', { ...page, ...(fullPage && { fullPage }) }, signal)
-        const img = r.content?.find((p) => p.type === 'image' && p.data)
-        if (img) shots.push({ label: `${rel} at ${width} px wide${fullPage ? ' (the whole page)' : ''}`, url: `data:${img.mimeType ?? 'image/png'};base64,${img.data}` })
-      }
-      if (id) await browser.call('close_page', page, signal).catch(() => {})
-    }
-  } catch (e) {
-    if (signal?.aborted) throw e
-    log('look', `couldn't open ${shown.join(', ')} in the browser: ${e.message}`)
-  } finally {
-    done?.()
-    s.ui.stopSpin()
-  }
-  if (opened) s.lastCheckAt = s.seq ?? 0 // it ran in a browser: what changed was checked
-  if (errors.length) log('look', `problems found: ${errors.join(' | ')}`)
-  // Learn: a hard error that was there last look and is gone now was fixed — save the lesson so it
-  // isn't made again (recalled on later tasks about the same tech). Only in the main agent.
-  if (!s.isSub && s.memory) {
-    const key = (e) => e.replace(/^[^:]*:\s*/, '').toLowerCase().replace(/["'`]/g, '').replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().slice(0, 120)
-    const nowKeys = new Set(errors.map(key))
-    const fixed = (s.uiErrorsPrev ?? []).filter((p) => !nowKeys.has(p.key))
-    if (fixed.length) await learnFromFixes(s, fixed, signal).catch((e) => log('learn', `failed: ${e.message}`))
-    s.uiErrorsPrev = errors.map((e) => ({ key: key(e), error: e }))
-  }
-  // Couldn't open it in a browser (none configured, or it failed): don't pass silently — the model
-  // must verify it itself. Static checks still apply.
-  const unverified = opened === 0 ? `${shown.join(', ')} could not be opened in a browser here, so HeartCode could not confirm it works. Before you finish, verify it yourself: open it and check it actually works — no errors in the console, every button and interaction does what it should.` : ''
-  // JavaScript errors mean the page is broken however good it looks: fed back on their own (text,
-  // no model that sees needed), and the visual review added when there is one.
-  const brokenList = errors.length ? errors.map((e, i) => `${i + 1}. ${e}`).join('\n') : ''
-  let found = ''
-  if (shots.length) {
-    log('look', shots.map((x) => x.label))
-    // reviewed in a request of its own (the screenshots and the user's request, nothing else): a
-    // model checking its own work in its own conversation tends to call it fine
-    const self = { provider: s.client.provider, model: s.client.model, images: s.strat.vision }
-    const seers = [...(self.images ? [self] : []), ...(s.team?.() ?? []).filter((t) => t.images && !(t.provider === self.provider && t.model === self.model))]
-    const reviewers = s.fitMode?.() && s.chat.fit?.look?.length ? byPick(seers, s.chat.fit.look) : seers // best fit: the best at judging a page first
-    const ask = prompt('agent/ui-review', { task: s.task ?? '', emphasis: (s.chat?.choices ?? []).join('; '), shots: shots.map((x, i) => `${i + 1}. ${x.label}`).join('\n') })
-    for (const t of reviewers) {
-      s.ui.spinner(`${t.model} is reviewing ${shown.join(', ')}`)
-      try {
-        const { client } = t === self ? { client: s.client } : await s.engineFor(t)
-        const was = client.purpose
-        client.purpose = 'ui-review'
-        try {
-          found = (await client.chat({ messages: [{ role: 'user', content: [{ type: 'text', text: ask }, ...shots.map((x) => ({ type: 'image_url', image_url: { url: x.url } }))] }] }, { signal })).content.trim()
-        } finally {
-          client.purpose = was
-        }
-        if (found) break
-      } catch (e) {
-        if (signal?.aborted) throw e
-        log('look', `${t.model} couldn't review: ${e.message}`)
-      }
-    }
-    s.ui.stopSpin()
-  }
-  const visual = found && !(/^\W*none\W*$/i.test(found) || !/\d+[.)]\s/.test(found)) ? found : ''
-  if (!brokenList && !visual && !unverified) {
-    if (shots.length) s.ui.step('look', `${shown.join(', ')}: works, nothing to fix`)
-    return null
-  }
-  s.ui.step('look', `${shown.join(', ')}: ${[errors.length && `${errors.length} problem${errors.length > 1 ? 's' : ''}`, visual && 'review notes', unverified && 'verify it yourself'].filter(Boolean).join(', ')}`)
-  const problems = [brokenList, visual, unverified].filter(Boolean).join('\n')
-  return prompt('agent/look-at-ui', { files: shown.join(', '), problems })
 }
 
 // The model says it's done: is it? Not while its todo list (from this message) has open items, or
@@ -1573,7 +1329,7 @@ export async function review(s, task, answer, signal) {
     s.ui.spinner(`${t.model} is reviewing the work`)
     try {
       const { client } = t.self ? { client: s.client } : await s.engineFor(t)
-      if (!t.self) client.retryIf = (e, attempt) => attempt < 2
+      if (!t.self) client.retryIf = (e, attempt) => attempt < 2 && !e.notStarted
       const was = client.purpose
       client.purpose = 'review'
       let said

@@ -52,7 +52,7 @@ export async function whatsNew(current, latest) {
     const text = await r.text()
     const start = text.indexOf(`## ${latest}`)
     const end = text.indexOf(`## ${current}`)
-    return start >= 0 ? text.slice(start, end > start ? end : undefined).trim() : ''
+    return start >= 0 ? text.slice(start, end > start ? end : undefined).trim().replace(/\n {2,}(?=\S)/g, ' ') : '' // a list item's wrapped lines joined: the box wraps it to its width
   } catch {
     return ''
   }

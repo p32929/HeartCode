@@ -134,7 +134,8 @@ export function fitFor(messages, can, model) {
       const { tool_calls, ...rest } = x
       return { ...rest, content: [x.content, ...tool_calls.map((c) => `(called ${c.function.name} ${c.function.arguments || '{}'})`)].filter(Boolean).join('\n') }
     }
-    if (x.tool_calls) x.tool_calls = x.tool_calls.map((c) => ({ ...c, id: callId(c.id), function: { ...c.function, arguments: asJson(c.function.arguments) } }))
+    const own = !writtenBy.has(m) || writtenBy.get(m) === model // extra_content (Gemini's thought_signature) only back to its writer: others refuse it (Mistral: 422 extra_forbidden)
+    if (x.tool_calls) x.tool_calls = x.tool_calls.map(({ extra_content, ...c }) => ({ ...c, ...(own && extra_content && { extra_content }), id: callId(c.id), function: { ...c.function, arguments: asJson(c.function.arguments) } }))
     if (x.role === 'tool') x.tool_call_id = callId(x.tool_call_id)
     return x
   })

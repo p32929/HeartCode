@@ -350,7 +350,6 @@ export async function proposeWrite(s, rel, old, next) {
   else {
     fs.mkdirSync(path.dirname(abs), { recursive: true })
     fs.writeFileSync(abs, next)
-    if (/\.(html?|css)$/i.test(rel)) (s.uiTouched ??= new Set()).add(rel) // looked at in a browser when the model says it's done (agent.js)
   }
   const add = ops.filter(([t]) => t === '+').length
   const del = ops.filter(([t]) => t === '-').length
@@ -582,27 +581,23 @@ export function readOnlyCommand(cmd) {
 // they're needed: "describe" shows them, and a call whose arguments don't fit its schema gets the
 // schema back with what's wrong (nothing is sent to the server). Sets s.mcpDirect
 // (mcp__server__tool → { server, tool, def }: only to understand a call by that name — an older
-// conversation's, or a model used to Claude Code's names), s.mcpCatalog and s.mcpInstructions (what
-// the servers say about using them).
+// conversation's, or a model used to Claude Code's names) and s.mcpCatalog (with what each server
+// says about using it: given with its first result, howTo).
 export async function loadMcpTools(s, signal) {
-  if (!s.mcp?.names.length) return Object.assign(s, { mcpDirect: new Map(), mcpInstructions: '' })
+  if (!s.mcp?.names.length) return Object.assign(s, { mcpDirect: new Map() })
   const catalog = await s.mcp.catalog(signal)
   const direct = new Map()
-  const notes = []
-  for (const [server, { tools, instructions }] of catalog) {
+  for (const [server, { tools }] of catalog) {
     for (const t of tools) {
       let n = mcpName(server, t.name)
       if (direct.has(n)) n = `${n.slice(0, 57)}_${createHash('sha256').update(`${server}/${t.name}`).digest('hex').slice(0, 6)}` // cut to the same 64 characters as another
       direct.set(n, { server, tool: t.name, def: t })
     }
-    if (instructions) notes.push(`### ${server}\n${instructions}`)
   }
-  return Object.assign(s, { mcpDirect: direct, mcpInstructions: notes.join('\n\n'), mcpCatalog: catalog })
+  return Object.assign(s, { mcpDirect: direct, mcpCatalog: catalog })
 }
 // Tool names may only have letters, digits, _ and - (64 at most).
 export const mcpName = (server, tool) => `mcp__${server}__${tool}`.replace(/[^\w-]/g, '_').slice(0, 64)
-// A tool's description cut to its first sentence (what it does), for the list.
-const firstLine = (d) => String(d ?? '').trim().split(/\n|(?<=\.)\s/)[0].slice(0, 140)
 
 // The MCP servers (one tool for all of their tools), the memory and the skill loader; each only when
 // there's something to offer.
@@ -614,7 +609,7 @@ export function extraTools(s) {
       const cfg = s.mcp.get(n)?.cfg ?? {}
       const tools = s.mcpCatalog?.get(n)?.tools
       const head = `${n}${cfg.description ? ` — ${cfg.description}` : ''}`
-      return tools ? `${head}\n${tools.map((t) => `  - ${t.name}: ${firstLine(t.description)}`).join('\n')}` : `${head} (its tools aren't known yet: tool "list" shows them)`
+      return tools ? `${head}: ${tools.map((t) => t.name).join(', ')}` : `${head} (its tools aren't known yet: tool "list" shows them)`
     }
     out.push({ name: 'mcp', description: prompt('agent/tool-mcp', { servers: servers.map(list).join('\n') }), parameters: obj({ server: str, tool: str, arguments: { type: 'object' } }, ['server', 'tool']) })
   }
@@ -819,7 +814,19 @@ function memoryTool(s, args) {
 // Lenient about slips in names: "chrome-devtools:", "evaluate_script'", no server when there's one.
 const bare = (v) => String(v ?? '').trim().replace(/^["'`]+|["'`:;,.]+$/g, '')
 
+// A server's own words on using it (its MCP "instructions"): with its first result in this
+// conversation, not in every request's system prompt.
+function howTo(s, server, out) {
+  const said = s.mcpCatalog?.get(server)?.instructions
+  if (!said || typeof out !== 'string' || (s.mcpTold ??= new Set()).has(server)) return out
+  s.mcpTold.add(server)
+  return `${out}\n\n${prompt('agent/mcp-instructions', { server, instructions: said })}`
+}
+
 async function mcpTool(s, args, signal) {
+  return howTo(s, bare(args?.server) || (s.mcp?.names.length === 1 ? s.mcp.names[0] : ''), await mcpCall(s, args, signal))
+}
+async function mcpCall(s, args, signal) {
   const names = s.mcp?.names ?? []
   // everything written into "server": 'chrome-devtools" tool="navigate_page" arguments={...}'
   const crammed = /^\s*"?([\w.-]+)"?\s+tool\s*[=:]\s*"?([\w.-]+)"?(?:\s+arguments\s*[=:]\s*(\{[\s\S]*\}))?/.exec(String(args.server ?? ''))
@@ -1338,7 +1345,7 @@ async function tool(name, args, s, signal, id) {
       }
       default: {
         const m = mcpTarget(s, name)
-        if (m) return await callMcp(s, m.server, m.tool, args, signal)
+        if (m) return howTo(s, m.server.name, await callMcp(s, m.server, m.tool, args, signal))
         return (await s.director?.tool(name, args, s, signal)) ?? `error: there is no tool named ${name}`
       }
     }

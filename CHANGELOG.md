@@ -2,6 +2,26 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.40 (2026-11-03)
+
+- **A smaller, general system prompt** (about 6,700 tokens to start a task, from 13,000+): its rules
+  in working order (ask what they want → research and plan → find your way → write code → install
+  tools → prove it works, then stop → keep going → how to answer), the discipline skill merged into
+  them (no separate copy), nothing about one kind of project: a check is "the way the person will use
+  it", for a page, a script or a server alike. Gone: the web UI guide, the reminder on every
+  message, the automatic page review with screenshots, and asking models what they're good at
+  (best fit's rankings do that). Your other models in a short list; an MCP server's own
+  instructions sent once, the first time its tool is used.
+- **Your terminal's mouse**: HeartCode no longer takes the mouse, so text is selected and copied the
+  terminal's own way, over SSH too (to the computer you connect from). `"mouse": true` in config.json
+  brings back the wheel scrolling the conversation and drag to copy.
+- **A model that doesn't start answering** within the time allowed: a helper, the image describer or
+  the reviewer goes to your next model at once, not after three more waits.
+- **Gemini, then another model**: Gemini's tool-call signature goes back to Gemini only; Mistral and
+  others refused the request with it (422).
+- **/update's changelog** wrapped at words, not mid-word, and a list item's lines joined.
+- Lessons learned from a fixed mistake are tagged by the tool that failed (npm, python3, cargo…).
+
 ## 0.1.39 (2026-11-03)
 
 - **Best fit picks by public rankings**, not by a model's opinion of models: for each new message,

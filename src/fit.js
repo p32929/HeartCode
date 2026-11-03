@@ -1,34 +1,15 @@
 // "Best fit" (modelChoice: 'fit'): for each new message, your models ranked by how good each is at
 // what this message needs — by public rankings (rankings.js), not by a model's opinion of models.
 // One short request names the skills the task needs (web pages, code, images…); the rest is
-// arithmetic: who leads the work (and who next when one fails), who reviews the code (not the
-// lead), who judges the pages (one that sees, not the lead). A model the rankings don't know comes
-// after those they do, in your order. A message that only says to go on keeps the last pick.
+// arithmetic: who leads the work (and who next when one fails) and who reviews it (not the lead).
+// A model the rankings don't know comes after those they do, in your order. A message that only says to go on keeps the last pick.
 // "Your order" (the default): none of this — your list as you set it.
 import { prompt } from './prompts.js'
-import { loadStrengths, strengthKey } from './strengths.js'
-import { readJson, HOME } from './config.js'
 import { log } from './log.js'
 import { rankings, score, SKILLS } from './rankings.js'
-import path from 'node:path'
 
 const name = (t) => `${t.provider} ${t.model}`
 const GO_ON = /^\s*(continue|go on|carry on|keep going|resume|proceed|ok(ay)?|yes|do it|go ahead)\W*$/i
-
-// One model's line for a pick (also the team list): what it can do, what it's good and weak at, how
-// it did when you tested it ("Test all").
-export function modelFacts(t) {
-  const known = loadStrengths()[strengthKey(t.model)]
-  const test = readJson(path.join(HOME, 'model-tests.json'), {})[`${t.provider}/${t.model}`]
-  return [
-    [t.tools ? 'tool calls' : 'no tool calls', t.images && 'images', t.thinking && 'thinking', t.context && `${Math.round(t.context / 1000)}k context`].filter(Boolean).join(', '),
-    known && !/^unknown/i.test(known.good) && `good at: ${known.good}`,
-    known?.weak && !/^unknown/i.test(known.weak) && `weak at: ${known.weak}`,
-    test && (test.ok ? `answered your test in ${(test.ms / 1000).toFixed(1)}s` : 'failed your last test'),
-  ]
-    .filter(Boolean)
-    .join('; ')
-}
 
 // The skills this task needs, from SKILLS: { work: [...] } — asked of the model in use (naming
 // what a task needs is easy; judging models is what the rankings are for). ['coding'] when it can't say.
@@ -50,7 +31,7 @@ async function skillsFor(s, task, signal) {
   }
 }
 
-// { work, review, look, why } (names, best first), kept in chat.fit; null when there's nothing to choose.
+// { work, review, why } (names, best first), kept in chat.fit; null when there's nothing to choose.
 export async function pickModels(s, task, signal, { images = 0, size = 0 } = {}) {
   const all = s.allModels?.() ?? []
   const can = all.filter((t) => t.tools && (!images || t.images) && (!size || !t.context || t.context > size * 1.2))
@@ -73,10 +54,9 @@ export async function pickModels(s, task, signal, { images = 0, size = 0 } = {})
   const fit = {
     work: order.map((x) => name(x.t)),
     review: ranked(can, ['coding', 'hard']).filter((x) => x.sc != null).map((x) => name(x.t)).filter((n) => n !== lead).slice(0, 2),
-    look: ranked(all.filter((t) => t.images), ['vision']).filter((x) => x.sc != null).map((x) => name(x.t)).filter((n) => n !== lead).slice(0, 2),
     why: skills.join(', '),
   }
-  log('fit', { skills, scores: order.slice(0, 8).map((x) => `${x.t.model} ${x.sc == null ? 'not ranked' : x.sc.toFixed(2)}`), review: fit.review, look: fit.look })
+  log('fit', { skills, scores: order.slice(0, 8).map((x) => `${x.t.model} ${x.sc == null ? 'not ranked' : x.sc.toFixed(2)}`), review: fit.review })
   s.chat.fit = fit
   return fit
 }
