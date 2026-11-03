@@ -225,6 +225,7 @@ class App {
     this.director = new Director(this) // the manage tool: skills, MCP servers and settings by asking
     this.later = [] // setting changes that wait until the current message is done
     this.failures = {} // "provider model" → failed requests this session (engine: onFail)
+    this.resting = {} // "provider model" → until when it's out of quota (the server said so: engine: onFail)
     this.loadProjectModels() // the model(s) you last chose for this folder (.heartcode/models.json)
   }
 
@@ -342,6 +343,7 @@ class App {
       if (e.name === 'AbortError') return
       const k = `${t.provider} ${t.model}`
       this.failures[k] = (this.failures[k] ?? 0) + 1
+      if (Number(e.retryAfter) > 60) this.resting[k] = Date.now() + Number(e.retryAfter) * 1000
     }
     // the model list (settings page): another model answered
     client.onSwitch = (t) => {
@@ -792,6 +794,7 @@ class App {
       }
     }
     this.s.failures = this.failures
+    this.s.resting = this.resting
     if (this.allowTools?.length) this.s.allowTools = toolNames(this.allowTools) // headless --allowedTools
     if (this.denyTools?.length) this.s.denyTools = toolNames(this.denyTools)
     if (this.cfg.maxTurns) this.s.maxTurns = this.cfg.maxTurns

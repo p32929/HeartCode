@@ -2,6 +2,14 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.45 (2026-11-03)
+
+- **Rate limits hand the work on**: a helper whose model answers 429 goes to your next model at
+  once, instead of waiting a minute and asking the same one again (and again). When the provider
+  says its quota is out for longer than a minute (Gemini: "retry in 13 hours"), HeartCode doesn't
+  wait at all, remembers it until then, tries that model last, and tells the orchestrator it's out
+  of quota so it picks another.
+
 ## 0.1.44 (2026-11-03)
 
 - **Orchestrators first**: with Pick on "an orchestrator hands it out", the model shown (status bar,

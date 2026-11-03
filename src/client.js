@@ -520,7 +520,9 @@ export class Client {
           continue
         }
         // a server error or no connection, again and again: waited out like a rate limit (the wait
-        // grows to a minute), until it comes back or Esc — never given up on
+        // grows to a minute), until it comes back or Esc — never given up on; unless the server
+        // says it's out for longer than that (a day's quota used up): no use waiting a minute
+        if (Number(e.retryAfter) > 60) throw e
         const wait = Math.min(Number(e.retryAfter) * 1000 || this.retryBase * 2 ** (tries - 1), 60_000)
         log('retry', `attempt ${attempt + 1} failed, waiting ${wait}ms: ${e.message}`)
         this.onRetry(e, wait, attempt + 1)

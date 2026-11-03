@@ -254,7 +254,8 @@ export class Session {
     // tools first, then the ones that failed least this session, in your list's order
     const able = (t) => !images.length || t.images
     const fails = (t) => this.failures?.[name(t)] ?? 0
-    const order = [first, ...all.filter((t) => t !== first).sort((a, b) => b.tools - a.tools || fails(a) - fails(b))].filter(able)
+    const rests = (t) => (this.resting?.[name(t)] ?? 0) > Date.now() // out of quota: tried last
+    const order = [first, ...all.filter((t) => t !== first).sort((a, b) => b.tools - a.tools || fails(a) - fails(b))].filter(able).sort((a, b) => rests(a) - rests(b))
     if (!order.length) return 'error: none of your models can see images'
     const failed = []
     for (const [i, t] of order.entries()) {
@@ -283,7 +284,7 @@ export class Session {
     if (this.engineFor) {
       ;({ client, profile, strat } = await this.engineFor(t))
       const was = client.retryIf
-      client.retryIf = (e, attempt) => attempt < 3 && !e.notStarted && (!was || was(e, attempt)) // not answering in time: the next model, not another wait
+      client.retryIf = (e, attempt) => attempt < 3 && !e.notStarted && e.status !== 429 && (!was || was(e, attempt)) // not answering in time or rate-limited: the next model, not another wait
     }
     const label = clip(`${client.model}: ${String(description ?? '').trim() || task.split('\n')[0]}`, 60)
     const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
@@ -580,7 +581,8 @@ const teamOf = (s, team = s.team?.() ?? []) => {
   const ranks = (t) => (data ? Object.entries(RANKED_AS).map(([k, list]) => ((r) => r && `${k} #${r.rank}`)(rankIn(t.model, list, data))).filter(Boolean).join(' ') : '')
   const line = (t) => {
     const failed = s.failures?.[`${t.provider} ${t.model}`]
-    const facts = [t.tools === false && 'no tool calls', t.images && 'images', t.thinking && 'thinking', ranks(t) && `ranked ${ranks(t)}`, failed && `failed ${failed}× this session`].filter(Boolean)
+    const rest = Math.ceil(((s.resting?.[`${t.provider} ${t.model}`] ?? 0) - Date.now()) / 60_000)
+    const facts = [t.tools === false && 'no tool calls', t.images && 'images', t.thinking && 'thinking', ranks(t) && `ranked ${ranks(t)}`, failed && `failed ${failed}× this session`, rest > 0 && `out of quota for ${rest < 120 ? `${rest} min` : `${Math.round(rest / 60)} h`}`].filter(Boolean)
     return `- ${t.provider} ${t.model}${facts.length ? `: ${facts.join(', ')}` : ''}`
   }
   const you = [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking', ranks(s.client) && `ranked ${ranks(s.client)}`].filter(Boolean).join(', ')
