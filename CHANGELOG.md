@@ -2,6 +2,18 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.47 (2026-11-04)
+
+- **Add to orchestrators / Remove from orchestrators** in place of Mark as orchestrators: add the
+  selected models after the ones you have (none twice), or take them out; the rest keep their order.
+- **Test orchestrators, plainer**: one button beside Test all opens a dialog with a table, one row
+  per orchestrator and a column per scene (Hello, Small job, Big job, After a failure, Reports
+  back): ✓, ✗, the seconds it's been waiting, or ⏱ for no answer in time. What went wrong is one
+  line per orchestrator. Start / Test again is in the dialog, and closing it doesn't stop the test.
+- **Each scene waits as long as Tests wait**, like the other model tests, not two minutes.
+- **Your models, less cluttered**: a one-line intro, no list of orchestrator names above the table
+  (the table's orchestrator #1, #2… tags show them).
+
 ## 0.1.46 (2026-11-04)
 
 - **The orchestrator chooses the model, sized to the job**: it always names the model (no silent

@@ -581,7 +581,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       const live = lead.map((t) => ({ provider: t.provider, model: t.model, steps: [], now: null }))
       const show = (over) => emit('orchtest', { list: live, team: team.length, over })
       show()
-      const results = await Promise.all(lead.map(async (t, k) => ({ provider: t.provider, model: t.model, ...(await testOrchestrator(clientFor(t), root, team, null, (st) => {
+      const results = await Promise.all(lead.map(async (t, k) => ({ provider: t.provider, model: t.model, ...(await testOrchestrator(clientFor(t), root, team, testWait(), null, (st) => {
         if (st.asking) live[k].now = { i: st.i, of: st.of, scene: st.scene }
         else (live[k].now = null), live[k].steps.push(st)
         show()

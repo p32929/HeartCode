@@ -49,9 +49,10 @@ const said = (t, n) => (t = String(t ?? '').replace(/\s+/g, ' ').trim()).length 
 const didOf = (r) =>
   r.calls.length ? r.calls.map((c) => (c.bad ? 'a handoff that isn\'t JSON' : `handed to ${c.model || '(no model)'}: "${said(c.description || c.prompt, 70)}"`)).join('; ') : r.content.trim() ? `answered: "${said(r.content, 90)}"` : 'said nothing'
 
-// One orchestrator (client: its own, no retries) handing work to team: { passed, of, ms, fails: [{ scene, why }],
+// One orchestrator (client: its own, no retries) handing work to team, each scene's answer awaited
+// for ms (the settings page's Tests wait): { passed, of, ms, fails: [{ scene, why }],
 // steps: [{ scene, ok, why, did, ms }] }. onStep({ i, of, scene, asking }) as a scene starts, onStep({ i, of, ...step }) as it ends.
-export async function testOrchestrator(client, root, team, signal, onStep = () => {}) {
+export async function testOrchestrator(client, root, team, ms, signal, onStep = () => {}) {
   const { system, tools } = orchestratorSetup(root, team)
   const names = team.map((t) => `${t.provider} ${t.model}`)
   const real = (m) => team.some((t) => [`${t.provider} ${t.model}`, `${t.provider}/${t.model}`, t.model].includes(m) || String(m).endsWith(` ${t.model}`) || t.model.endsWith(`/${m}`)) // as the agent tool takes it
@@ -64,7 +65,7 @@ export async function testOrchestrator(client, root, team, signal, onStep = () =
     let why, did
     const s0 = Date.now()
     onStep({ i, of: SCENES.length, scene: scene.name, asking: true })
-    const wait = AbortSignal.timeout(120_000) // one that hasn't answered in two minutes fails the scene
+    const wait = AbortSignal.timeout(ms) // one that hasn't answered by then fails the scene
     try {
       const res = await client.chat({ messages: [{ role: 'system', content: system }, ...scene.messages(first)], tools }, { signal: signal ? AbortSignal.any([signal, wait]) : wait })
       const calls = (res.toolCalls ?? []).filter((c) => c.function.name === 'agent').map((c) => {
@@ -80,11 +81,11 @@ export async function testOrchestrator(client, root, team, signal, onStep = () =
       did = didOf(r)
     } catch (e) {
       if (signal?.aborted) break
-      why = wait.aborted ? 'no answer in 2 minutes' : `the request failed: ${said(e.message, 160)}`
+      why = wait.aborted ? `no answer within ${ms / 1000} seconds` : `the request failed: ${said(e.message, 160)}`
       did = 'no answer'
     }
     if (why) fails.push({ scene: scene.name, why })
-    const step = { scene: scene.name, ok: !why, why, did, ms: Date.now() - s0 }
+    const step = { scene: scene.name, ok: !why, why, did, ms: Date.now() - s0, ...(wait.aborted && { slow: true }) }
     steps.push(step)
     onStep({ i, of: SCENES.length, ...step })
   }
