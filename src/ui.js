@@ -103,23 +103,24 @@ export function setTheme(name = 'dark') {
 }
 setTheme()
 
-// keybindings.json: { "ctrl+o": "cycle_permissions", "ctrl+g": "/toggle_thinking", "shift+tab": "none" }.
+// keybindings.json: { "alt+o": "cycle_permissions", "alt+g": "/toggle_thinking", "shift+tab": "none" }.
 // Actions: stop, send_first, send_all, queue_mode, cycle_permissions, newline, clear_input, scroll_up, scroll_down (a page),
 // scroll_line_up, scroll_line_down (3 lines), scroll_top, scroll_bottom, voice, new_tab,
 // close_tab, next_tab, prev_tab, tab_1…tab_9, none (turns a
 // built-in key off); anything else is sent as typed (a /command or a message). Ctrl+C stays Ctrl+C.
 const CONTROL_KEYS = { '\x1c': 'ctrl+\\', '\x1d': 'ctrl+]', '\x1e': 'ctrl+^', '\x1f': 'ctrl+_' } // no name from readline
 export const keyId = (key, s = '') => CONTROL_KEYS[key.sequence ?? s] ?? [key.ctrl && 'ctrl', key.meta && 'alt', key.shift && 'shift', key.name ?? s].filter(Boolean).join('+').toLowerCase()
-// The built-in keys use Alt/Option, not Ctrl, so they don't clash with the shell and readline (Ctrl+N/P
-// history, Ctrl+T transpose, Ctrl+Q flow-control, Ctrl+\ quit). On macOS Terminal.app, Alt keys need
-// "Use Option as Meta key" on (Settings → Profiles → Keyboard); Ctrl+PgUp/PgDn cycle tabs without it.
+// The built-in keys use Alt/Option, never Ctrl (the user's rule; Ctrl keys also clash with the shell and
+// readline: Ctrl+N/P history, Ctrl+T transpose, Ctrl+Q flow-control, Ctrl+\ quit). Only Ctrl+C (stop)
+// and Ctrl+D (quit) stay, the terminal's own. On macOS Terminal.app, Alt keys need "Use Option as Meta
+// key" on (Settings → Profiles → Keyboard).
 // While it works, Enter queues a message; Alt+S stops the answer and sends the first queued one,
 // Alt+A all of them (as one message); Alt+M switches what goes when an answer is done (all or the
 // next one). /voice records (Space in an empty box, or a key in keybindings.json); Alt+T, Alt+W,
-// Alt+N/P (or Ctrl+PgDn/PgUp), Alt+1…9: tabs; Shift+↑↓ and Alt+↑↓ scroll the conversation (as
-// PgUp/PgDn and the mouse wheel do), Alt+Shift+↑↓ (or Ctrl+Home/End) to its top and bottom.
+// Alt+N/P, Alt+1…9: tabs; Shift+↑↓ and Alt+↑↓ scroll the conversation (as PgUp/PgDn and the mouse
+// wheel do), Alt+Shift+↑↓ to its top and bottom; Alt+O: all of the model's thinking, or its last lines.
 // keybindings.json can move any of them.
-export const DEFAULT_KEYS = { 'ctrl+o': '/toggle_thinking', 'alt+b': 'background_log', 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+shift+up': 'scroll_top', 'alt+shift+down': 'scroll_bottom', 'ctrl+home': 'scroll_top', 'ctrl+end': 'scroll_bottom', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', 'ctrl+pagedown': 'next_tab', 'ctrl+pageup': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
+export const DEFAULT_KEYS = { 'alt+o': '/toggle_thinking', 'alt+b': 'background_log', 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+shift+up': 'scroll_top', 'alt+shift+down': 'scroll_bottom', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
 export function loadKeys(file = path.join(HOME, 'keybindings.json')) {
   let raw = {}
   try {
@@ -673,7 +674,7 @@ export class UI {
     this.onInterrupt = null
     this.timer = null
     this.label = ''
-    this.showThinking = false // all of it as it comes (Ctrl+O); off: its last two lines, live, above the spinner
+    this.showThinking = false // all of it as it comes (Alt+O); off: its last two lines, live, above the spinner
     this.thinkTail = '' // the thinking coming in now, for those two lines
     this.tail = ''
     // suggest(line, cursor) → [{ value, desc, start, end, space, insertOnly }] for the menu under the prompt
@@ -790,7 +791,7 @@ export class UI {
     const choices = pick ? m.items.filter((x) => !x.header) : []
     const cards = pick && !pick.multi && pick.items.length <= 6 && !m.items.some((x) => x.header)
     const body = pick?.body ? String(pick.body).split('\n') : []
-    const hint = pick ? (pick.fixed ? '↑↓ move · Enter choose · Esc close' : pick.multi ? '↑↓ move · Space tick · Ctrl+A all · Ctrl+N none · Enter take · Esc cancel · type to filter' : `↑↓ move · Enter choose · Esc cancel${cards ? '' : ' · type to filter'}`) : 'Enter send · Esc cancel'
+    const hint = (pick ? (pick.fixed ? '↑↓ move · Enter choose · Esc close' : pick.multi ? '↑↓ move · Space tick · Alt+A all · Alt+N none · Enter take · Esc cancel · type to filter' : `↑↓ move · Enter choose · Esc cancel${cards ? '' : ' · type to filter'}`) : 'Enter send · Esc cancel') + this.autoHint()
     let at = 0
     const long = (w) => width(title) > w // too long for the border: all of it inside too
     return {
@@ -847,15 +848,15 @@ export class UI {
     const write = (x) => this.write(x)
     let think = null
     let text = null
-    let thought = '' // all of it so far: shown whole when Ctrl+O switches to all of it midway
+    let thought = '' // all of it so far: shown whole when Alt+O switches to all of it midway
     const summary = () => {
       this.thinkTail = ''
       if (thought.trim() && !think) {
-        // what it thought stays in the conversation: its last two lines (all of it: Ctrl+O)
+        // what it thought stays in the conversation: its last two lines (all of it: Alt+O)
         const last = thought.split('\n').map((l) => l.trim()).filter(Boolean).slice(-2)
-        this.print(c.faint(c.italic(`✻ ${who ? `${who} ` : ''}thought for ${secs()} · Ctrl+O shows all of it`)))
+        this.print(c.faint(c.italic(`✻ ${who ? `${who} ` : ''}thought for ${secs()} · Alt+O shows all of it`)))
         this.print(c.think(c.italic(last.map((l) => `  ${l}`).join('\n'))))
-        this.lastThought = { who, text: thought } // Ctrl+O shows it, now that it's over (showLastThought)
+        this.lastThought = { who, text: thought } // Alt+O shows it, now that it's over (showLastThought)
       }
     }
     return {
@@ -897,7 +898,7 @@ export class UI {
     }
   }
 
-  // The thinking that was shown as two lines, all of it (Ctrl+O after it's over): true when there was some
+  // The thinking that was shown as two lines, all of it (Alt+O after it's over): true when there was some
   showLastThought() {
     const t = this.lastThought
     if (!t?.text.trim()) return false
@@ -1185,7 +1186,7 @@ export class UI {
     if (this.timer && !this.asking) {
       // the spinner on its own line; the timer (and Esc) on the next, so neither line is crammed
       const request = this.requestSince?.()
-      const timer = this.busySince ? `responding ${duration(this.worked())}${request ? ` · waiting for model ${duration(Date.now() - request)}` : ''} · Esc to stop${this.thinkTail ? ' · Ctrl+O shows all thinking' : ''}` : ''
+      const timer = this.busySince ? `responding ${duration(this.worked())}${request ? ` · waiting for model ${duration(Date.now() - request)}` : ''} · Esc to stop${this.thinkTail ? ' · Alt+O shows all thinking' : ''}` : ''
       if (this.thinkTail) {
         // the thinking's last two lines (long ones wrapped), dim, changing as it comes
         const w = Math.max(20, cols - 6)
@@ -1303,6 +1304,7 @@ export class UI {
     this.ttyWrite = write
     rl._ttyWrite = (s, key = {}) => {
       if (!this.full) return write(s, key)
+      if (this.menu.pick?.auto) this.#armAuto() // a key: you're there; the wait starts again (debounced)
       if (this.sel || this.ssel) (this.sel = this.ssel = null), this.render() // a key ends a selection
       const bound = !(key.ctrl && key.name === 'c') && this.keys[keyId(key, s)] // ~/.heart/keybindings.json
       // a dialog: its keys, all of them; Esc (or its own key) closes it; Ctrl+C still stops and quits
@@ -1313,8 +1315,8 @@ export class UI {
       if (this.recording) return this.recording.key(key, bound) // voice: Space, Enter, Esc; the rest waits
       // a fixed dialog (pick(…, { fixed })): only its keys, nothing typed and no shortcuts
       if (this.menu.pick?.fixed && !['up', 'down', 'return', 'escape'].includes(key.name) && !(key.ctrl && key.name === 'c')) return
-      // In a multi-select: Ctrl+A ticks all, Ctrl+N unticks all (before tab shortcuts claim Ctrl+N)
-      if (this.menu.pick?.multi && key.ctrl && (key.name === 'a' || key.name === 'n')) {
+      // In a multi-select: Alt+A ticks all, Alt+N unticks all (before Alt+A sends and Alt+N switches tabs)
+      if (this.menu.pick?.multi && key.meta && (key.name === 'a' || key.name === 'n')) {
         for (const x of this.menu.pick.items) if (!x.only) x.checked = key.name === 'a'
         return this.refreshMenu()
       }
@@ -1379,7 +1381,7 @@ export class UI {
         if (key.name === 'up' || key.name === 'down') return this.#move(key.name === 'up' ? -1 : 1)
         if (key.name === 'tab') return
         if (m.pick.multi && key.name === 'space' && it && !it.item.only) {
-          it.item.checked = !it.item.checked // Space ticks; Enter takes the ticked ones; Ctrl+A/N all/none (handled earlier, before tab shortcuts)
+          it.item.checked = !it.item.checked // Space ticks; Enter takes the ticked ones; Alt+A/N all/none (handled earlier, before tab shortcuts)
           return this.refreshMenu()
         }
         if (key.name === 'escape' || (key.name === 'return' && it)) {
@@ -1740,8 +1742,8 @@ export class UI {
     })
     const more = m.items.length - first - shown.length
     if (more > 0) lines.push(c.faint(`  … ${more} more`))
-    const how = m.pick?.multi ? '↑↓ move · Space tick · Ctrl+A all · Ctrl+N none · Enter take · Esc cancel · type to filter' : '↑↓ move · Enter choose · Esc cancel · type to filter'
-    if (m.pick) lines.unshift(c.faint(m.items.length ? how : `nothing matches "${this.rl.line}" · Esc cancel`))
+    const how = m.pick?.multi ? '↑↓ move · Space tick · Alt+A all · Alt+N none · Enter take · Esc cancel · type to filter' : '↑↓ move · Enter choose · Esc cancel · type to filter'
+    if (m.pick) lines.unshift(c.faint(m.items.length ? how + this.autoHint() : `nothing matches "${this.rl.line}" · Esc cancel`))
     return lines
   }
 
@@ -1889,7 +1891,7 @@ export class UI {
           this.inputMark = this.log.length - 1 // where this message starts, for /rewind
           const picked = Array.isArray(pick?.chosen) ? pick.chosen.map((x) => x.label).join(', ') : pick?.chosen?.label
           if (pick?.quiet) this.render()
-          else if (pick) this.write(echo + (picked ?? c.dim(pick.closedAs ?? 'cancelled')) + '\n')
+          else if (pick) this.write(echo + (picked ?? c.dim(pick.closedAs ?? 'cancelled')) + (pick.auto?.fired ? c.dim(` · no answer in ${pick.auto.secs}s: the recommended one`) : '') + '\n')
           else if (l !== null && history && this.isCommand(l.trim()) && !/^\s*\/skill:/.test(l)) this.notice(/^\S+/.exec(l.trim())[0], 3000, '›') // a command isn't part of the conversation: its name for a moment (not its arguments: maybe a key)
           else if (l !== null) this.write(echo + c.bright(l.replace(/\n/g, '\n' + ' '.repeat(width(echo.replace(/\x1b\[[0-9;]*m/g, ''))))) + '\n')
           else this.render()
@@ -1912,7 +1914,8 @@ export class UI {
   // multi: tick several with Space; returns the ticked items (an array), or null.
   // quiet: the question and answer aren't left in the conversation (a question before it starts).
   // fixed: a dialog: no typing to filter, no other keys meanwhile.
-  async pick(title, items, { filter = '', multi = false, quiet = false, fixed = false, body = '' } = {}) {
+  // auto: { item, secs }: nobody answers for secs seconds (each key starts the wait again) → item is chosen.
+  async pick(title, items, { filter = '', multi = false, quiet = false, fixed = false, body = '', auto = null } = {}) {
     if (!this.full) {
       items.forEach((it, i) => this.print(`  ${i + 1}. ${it.group ? `${it.group} · ` : ''}${it.label}${it.desc ? '  ' + c.dim(it.desc) : ''}`))
       const a = await this.ask(`${title} ${c.dim(multi ? '(numbers, like 1,3)' : '(number)')}: `)
@@ -1922,13 +1925,42 @@ export class UI {
     }
     await this.#free()
     if (multi) for (const it of items) if (!it.only) it.checked ??= false
-    this.menu.pick = { items, chosen: null, multi, quiet, fixed, body }
+    this.menu.pick = { items, chosen: null, multi, quiet, fixed, body, auto: auto && { ...auto } }
+    this.autoPicked = false // chosen for the user (nobody answered in time), for the caller to say so
+    if (auto) {
+      this.#armAuto()
+      this.autoTick = setInterval(() => this.menu.pick?.auto && this.render(), 1000) // the countdown in the hint
+    }
     try {
       await this.ask(`${c.bold(title)} ${c.dim('›')} `, { suggest: true, initial: filter })
       return this.menu.pick.chosen
     } finally {
+      clearTimeout(this.menu.pick?.auto?.timer)
+      clearInterval(this.autoTick)
       this.menu.pick = null
     }
+  }
+
+  // The wait of a pick with auto, from now: a key starts it again (debounced); at its end the item is chosen.
+  #armAuto() {
+    const a = this.menu.pick.auto
+    clearTimeout(a.timer)
+    a.until = Date.now() + a.secs * 1000
+    a.timer = setTimeout(() => {
+      const pick = this.menu.pick
+      if (pick?.auto !== a) return
+      a.fired = this.autoPicked = true
+      pick.chosen = pick.multi ? [a.item] : a.item
+      this.rl.line = ''
+      this.rl.cursor = 0
+      this.ttyWrite('\r', { name: 'return' })
+    }, a.secs * 1000)
+    this.render()
+  }
+
+  autoHint() {
+    const a = this.menu.pick?.auto
+    return a ? ` · recommended in ${Math.max(0, Math.ceil((a.until - Date.now()) / 1000))}s` : ''
   }
 
   setPermission(mode) {

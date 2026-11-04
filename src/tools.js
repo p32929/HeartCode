@@ -212,7 +212,7 @@ function readImage(s, p) {
     }
     return `${rel}: the image is attached in the next message`
   }
-  return s.team?.().some((t) => t.images) ? prompt('agent/images-unseen', { files: rel }) : `${rel} is an image, and you can't see images.`
+  return s.team?.().some((t) => t.images) ? prompt('agent/tool-images', { files: rel, unseen: true }) : `${rel} is an image, and you can't see images.`
 }
 
 export function searchFiles(root, query, sub = '', limit = 50) {
@@ -387,7 +387,7 @@ const PLACEHOLDER = /(\.\.\.|…)\s*(rest|existing|remaining|unchanged|other)|re
 // Shows the diff, asks the user, writes (next = null: deletes the file). Shared by both agent modes.
 export async function proposeWrite(s, rel, old, next) {
   if (old === next) return { status: 'unchanged' }
-  if (s.ui.permission === 'plan') return { status: 'rejected', feedback: prompt('agent/plan-refused') } // both modes write through here
+  if (s.ui.permission === 'plan') return { status: 'rejected', feedback: prompt('agent/plan-refused', { command: false }) } // both modes write through here
   const ops = diffLines(old, next ?? '')
   s.ui.print(renderDiff(ops, rel))
   if (next !== null && PLACEHOLDER.test(next) && !PLACEHOLDER.test(old)) s.ui.warn('the new content seems to contain a placeholder like "rest of code unchanged"')
@@ -468,12 +468,12 @@ export async function runConfirmed(s, cmd, signal, background = false, wait) {
   s.ui.step(background ? 'run in background' : 'run', cmd)
   if (s.ui.permission === 'plan' && !readOnlyCommand(cmd)) {
     s.ui.result('not run: plan mode')
-    return prompt('agent/plan-refused-command')
+    return prompt('agent/plan-refused', { command: true })
   }
   if (searchesOutside(cmd, s.root)) {
     log('command', `refused (searches outside the project): ${cmd}`)
     s.ui.result('not run: searches outside the project')
-    return prompt('agent/command-too-wide', { root: s.root })
+    return prompt('agent/outside-project', { root: s.root, wide: true })
   }
   const ok = s.ui.permission === 'plan' ? true : await s.ui.confirm(`Run ${c.bold(cmd)}?`, 'command') // plan mode: only read-only ones get here
   if (ok !== true) return declined(s, ok, 'The user declined to run this command.')
@@ -617,7 +617,7 @@ const READ_ONLY = /^(cd|ls|cat|head|tail|wc|grep|egrep|rg|find|fd|tree|pwd|file|
 function outsideNote(root, cmd) {
   const dirs = [...cmd.matchAll(/(?:^|&&|;|\|\|)\s*cd\s+("[^"]+"|'[^']+'|\S+)/g)].map((m) => m[1].replace(/^["']|["']$/g, '').replace(/^~(?=\/|$)/, os.homedir()))
   const out = dirs.map((d) => path.resolve(root, d)).find((d) => d !== root && !d.startsWith(root + path.sep) && !readableOutside(d))
-  return out ? `\n\n${prompt('agent/outside-project', { dir: out, root })}` : ''
+  return out ? `\n\n${prompt('agent/outside-project', { dir: out, root, wide: false })}` : ''
 }
 
 export function readOnlyCommand(cmd) {
@@ -667,7 +667,7 @@ export function extraTools(s) {
   if (s.memory) {
     out.push({
       name: 'memory',
-      description: prompt('agent/tool-memory'),
+      description: prompt('agent/tool-memory', { tags: s.memory.tagSummary() || '(none yet)' }),
       parameters: obj({ action: { type: 'string', enum: ['write', 'read', 'search', 'delete'] }, name: str, description: str, type: str, tags: str, scope: { type: 'string', enum: ['project', 'global'] }, content: str, query: str }, ['action']),
     })
   }
@@ -678,8 +678,8 @@ export function extraTools(s) {
   }
   if (!s.isSub && s.subagent) {
     const team = s.team?.() ?? []
-    const model = { type: 'string', description: prompt('agent/tool-agent-model') }
-    const images = { type: 'array', items: str, description: prompt('agent/tool-agent-images') }
+    const model = { type: 'string', description: 'Which of your models does the job ("provider model" from "Your other models"). Left out: yours, or with images you can\'t see, the first of yours that can.' }
+    const images = { type: 'array', items: str, description: 'Image paths or URLs for the helper to look at. Needs a model that sees images.' }
     out.push({ name: 'agent', description: prompt('agent/tool-agent'), parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }) }, ['description', 'prompt']) })
   }
   return [...out, ...(s.director && !s.appendSystem ? s.director.toolDefs(s) : [])] // manage (director.js); not when a program gives the instructions (--append-system-prompt)
@@ -713,7 +713,11 @@ async function todoTool(s, args, signal, id) {
   const open = todos.filter((t) => t.status === 'pending')
   const askSplit = !parts && !s.isSub && !s.splitAsked && open.length >= 3 && !todos.some((t) => t.parallel || t.model) && s.subagent && s.team?.().length && s.ui.permission !== 'plan'
   if (askSplit) s.splitAsked = true
-  return `Todo list saved: ${done} of ${todos.length} done.${next ? ` Next: ${next.content}` : ''}${parts ? `\n\n${parts}` : ''}${askSplit ? `\n\n${prompt('agent/split-check')}` : ''}`
+  // a plan of a few steps made without looking anything up: asked once a message whether it uses something to read up on
+  const askResearch = !parts && !s.isSub && !s.researchAsked && !s.lookedUp && open.length >= 2
+  if (askResearch) s.researchAsked = true
+  const check = askSplit || askResearch ? `\n\n${prompt('agent/plan-check', { split: askSplit, research: askResearch })}` : ''
+  return `Todo list saved: ${done} of ${todos.length} done.${next ? ` Next: ${next.content}` : ''}${parts ? `\n\n${parts}` : ''}${check}`
 }
 
 // The plan's parts marked parallel (or given to another model): each started at once as a helper
@@ -752,11 +756,14 @@ async function runParts(s, todos, signal, id) {
   return prompt('agent/parts-done', { reports: reports.join('\n\n'), unknown: unknown.join(', '), models: yours.map((y) => `${y.provider} ${y.model}`).join(', ') })
 }
 
-// ask_user: a question for the user mid-task, with choices (and their own answer) or free text.
+// ask_user: a question for the user mid-task, with choices (and their own answer). Nobody answers for
+// ASK_WAIT seconds (each key starts the wait again): the recommended one, the first, is taken.
+const ASK_WAIT = 30
 async function askUser(s, args) {
   const question = String(args.question ?? '').trim()
   if (!question) return 'error: ask_user needs "question"'
-  if (s.ui.noUser) return prompt('agent/ask-nobody')
+  if (s.ui.noUser) return prompt('agent/no-answer')
+  s.askedUser = true // asked through the dialog this message (not as text: see askedInText)
   let options = args.options ?? []
   if (typeof options === 'string') {
     try {
@@ -766,13 +773,13 @@ async function askUser(s, args) {
     }
   }
   const items = [options].flat().map((o) => (typeof o === 'string' ? { label: o.trim() } : { label: String(o?.label ?? o?.value ?? '').trim(), desc: o?.description })).filter((o) => o.label)
+  // always a recommended answer (the first option): taken when nobody answers (ASK_WAIT seconds without a key)
+  if (!items.length) return 'error: ask_user needs options: 2-4 short answers, your recommended one first (the user can still type their own)'
+  items[0].desc = ['recommended', items[0].desc].filter(Boolean).join(' · ')
   s.ui.stopSpin()
-  let answer
-  if (items.length) {
-    const got = [await s.ui.pick(question, [...items, { label: 'Something else', desc: 'type your own answer', own: true }], { multi: Boolean(args.multiple) })].flat().filter(Boolean)
-    const own = got.some((x) => x.own) ? await s.ui.ask(`${c.bold('Your answer')} ${c.dim('›')} `) : ''
-    answer = [...got.filter((x) => !x.own).map((x) => x.label), own?.trim()].filter(Boolean).join(', ')
-  } else answer = (await s.ui.ask(`${c.yellow('?')} ${c.bold(question)} `))?.trim()
+  const got = [await s.ui.pick(question, [...items, { label: 'Something else', desc: 'type your own answer', own: true }], { multi: Boolean(args.multiple), auto: { item: items[0], secs: ASK_WAIT } })].flat().filter(Boolean)
+  const own = got.some((x) => x.own) ? await s.ui.ask(`${c.bold('Your answer')} ${c.dim('›')} `) : ''
+  const answer = [...got.filter((x) => !x.own).map((x) => x.label), own?.trim()].filter(Boolean).join(', ')
   log('ask', question, answer)
   // how the user wants the work done: kept with the conversation (a "continue" later still knows), the
   // first such question of a new message starts them afresh; steers the checks and reviews
@@ -781,12 +788,14 @@ async function askUser(s, args) {
     s.choicesFresh = true
     s.chat.choices.push(`${question} → ${answer}`)
   }
-  return answer ? `The user answered: ${answer}` : prompt('agent/ask-no-answer')
+  if (s.ui.autoPicked) return `No answer in ${ASK_WAIT} seconds, so your recommended one was taken: ${answer}`
+  return answer ? `The user answered: ${answer}` : prompt('agent/no-answer')
 }
 
 async function webTool(s, name, args, signal) {
   const what = name === 'web_search' ? String(args.query ?? '') : String(args.url ?? '')
   if (!what.trim()) return `error: ${name} needs ${name === 'web_search' ? '"query"' : '"url"'}`
+  s.lookedUp = true // looked something up this message (the plan check doesn't ask then)
   const ok = await s.ui.confirm(name === 'web_search' ? `Search the web for ${c.bold(what)}?` : `Fetch ${c.bold(what)}?`, 'read')
   if (ok !== true) return declined(s, ok, 'The user declined this.')
   // what this message's research is for: the page's look_for, else the last search, else the task
@@ -1043,7 +1052,7 @@ async function callMcp(s, server, tool, a, signal) {
       }
     }
     note = `\n(${s.pendingImages.length - shown} image(s): shown to you in the next message${left.length ? `; not shown: ${left.join('; ')}` : ''})`
-  } else if (files.length && s.team?.().some((t) => t.images)) note = `\n${prompt('agent/images-unseen', { files: files.join('\n') })}`
+  } else if (files.length && s.team?.().some((t) => t.images)) note = `\n${prompt('agent/tool-images', { files: files.join('\n'), unseen: true })}`
   else if (files.length) note = `\n(${files.length} image(s) not shown: this model can't see images)`
   const mendNote = mended.fixed.length ? `\n(HeartCode corrected the arguments: ${mended.fixed.join('; ')}. Use them that way next time.)` : ''
   return `${r.isError ? 'error: ' : ''}${text || '(no text)'}${note}${mendNote}`
@@ -1278,12 +1287,12 @@ async function toolRun(name, args, s, signal, id) {
   // hooks see an MCP tool by its own name (mcp__server__tool), also when called through "mcp"
   const hookName = name === 'mcp' && args?.server && args?.tool ? mcpName(String(args.server), String(args.tool)) : name
   const pre = await runHooks(s, 'PreToolUse', { tool_name: hookName, tool_input: args }, signal)
-  if (pre.block) return prompt('agent/hook-blocked-tool', { reason: pre.block })
+  if (pre.block) return prompt('agent/hook', { reason: pre.block, blocked: true })
   const notMine = s.ownFiles && partPaths(name, args).find((f) => !s.ownFiles.includes(path.resolve(s.root, f)))
   if (notMine) return prompt('agent/part-files', { file: notMine, files: s.ownFiles.map((f) => path.relative(s.root, f)).join(', ') })
   let out = await tool(name, args, s, signal, id)
   const post = await runHooks(s, 'PostToolUse', { tool_name: hookName, tool_input: args, tool_response: out }, signal)
-  if (post.block) out += `\n\n${prompt('agent/hook-after-tool', { reason: post.block })}`
+  if (post.block) out += `\n\n${prompt('agent/hook', { reason: post.block, after: true })}`
   log('tool', `${name} result:`, clip(out, 4000))
   return out
 }
@@ -1332,7 +1341,7 @@ async function tool(name, args, s, signal, id) {
   try {
     const { root } = s
     if (s.ui.permission === 'plan') {
-      if (PLAN_HIDDEN.has(name) || name === 'append_file' || name === 'manage' && args.action !== 'list' && args.action !== 'show' && args.action !== 'help') return prompt('agent/plan-refused')
+      if (PLAN_HIDDEN.has(name) || name === 'append_file' || name === 'manage' && args.action !== 'list' && args.action !== 'show' && args.action !== 'help') return prompt('agent/plan-refused', { command: false })
     }
     switch (name) {
       case 'read_file':

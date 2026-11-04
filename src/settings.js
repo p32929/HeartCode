@@ -10,7 +10,7 @@ import crypto from 'node:crypto'
 import os from 'node:os'
 import { HOME, saveConfig, readJson, writeJson, byName, takeIn, whatOf, VERSION, speedOf, SPEED_LIMITS } from './config.js'
 import { newer } from './update.js'
-import { DEFAULT_SERVERS, mcpAuth } from './mcp.js'
+import { DEFAULT_SERVERS, mcpAuth, serverName } from './mcp.js'
 import { sections, BUILTIN_PROMPTS, prompt, reloadPrompts } from './prompts.js'
 import { Client } from './client.js'
 import { clip, TOOL_DEFS } from './tools.js'
@@ -55,7 +55,7 @@ const DETAILS = ['full', 'summary']
 const FILES = [
   ['mcp.json', 'MCP servers: programs that give the model more tools', true, '{\n  "mcpServers": {\n    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] },\n    "docs": { "url": "https://mcp.example.com/mcp" }\n  }\n}'],
   ['hooks.json', 'Your commands, run before or after the model uses a tool (one can block it)', true, '{\n  "hooks": {\n    "PreToolUse": [\n      { "matcher": "run_command", "hooks": [{ "type": "command", "command": "./check-command.sh" }] }\n    ]\n  }\n}'],
-  ['keybindings.json', 'Your own keys: an action, or a /command to send', true, '{\n  "ctrl+o": "cycle_permissions",\n  "ctrl+g": "/toggle_thinking"\n}'],
+  ['keybindings.json', 'Your own keys: an action, or a /command to send', true, '{\n  "alt+o": "cycle_permissions",\n  "alt+g": "/toggle_thinking"\n}'],
   ['theme.json', 'Your own colors, on top of the theme you chose', true, '{\n  "brand": "#ff6b9d",\n  "background": "#101014"\n}'],
   ['format.json', 'The formatter to run on each kind of file HeartCode writes', true, '{\n  ".go": "gofmt -w {file}",\n  ".py": "ruff format {file}"\n}'],
   ['HEARTCODE.md', 'Your instructions for every project (like AGENTS.md, for all of them)', false, '- Answer briefly.\n- Use pnpm, not npm.'],
@@ -92,12 +92,28 @@ function setPrompt(file, name, text) {
 
 // MCP servers: yours (mcp.json), each on or off (an entry with neither command nor url only switched off a
 // server HeartCode used to come with: not listed).
+// A local server's flags, to tick on and off: what comes after the package or script it runs (npx's
+// own -y isn't one), a value kept with its flag ("--port 3000"); the ones ticked off are kept in its
+// offFlags, so they can come back.
+const RUNNER_WORDS = new Set(['dlx', 'exec', 'run', 'x', 'tool'])
+function flagsOf(c) {
+  const args = c.args ?? []
+  const at = args.findIndex((a, i) => !a.startsWith('-') && !RUNNER_WORDS.has(a) && !(i === 0 && c.command === 'docker'))
+  const on = []
+  for (let i = at + 1; at >= 0 && i < args.length; i++) {
+    if (!args[i].startsWith('-')) continue
+    const value = args[i + 1] !== undefined && !args[i + 1].startsWith('-') && !args[i].includes('=') ? args[++i] : null
+    on.push(value === null ? args[i] : `${args[i - 1]} ${value}`)
+  }
+  return [...on.map((flag) => ({ flag, on: true })), ...(c.offFlags ?? []).filter((f) => !on.includes(f)).map((flag) => ({ flag, on: false }))]
+}
+
 function mcpServers() {
   const own = readJson(path.join(HOME, 'mcp.json'), {})?.mcpServers ?? {}
   const from = Object.fromEntries(Object.keys(DEFAULT_SERVERS).map((n) => [n, 'built in']))
   const all = structuredClone(DEFAULT_SERVERS)
   for (const [n, c] of Object.entries(own)) all[n] = { ...all[n], ...c }
-  return Object.entries(all).filter(([, c]) => c.command || c.url).map(([name, c]) => ({ name, from: from[name] ?? 'yours', on: !c.disabled, remote: Boolean(c.url), auth: mcpAuth(c), what: c.url ?? [c.command, ...(c.args ?? [])].filter(Boolean).join(' '), description: c.description ?? '' }))
+  return Object.entries(all).filter(([, c]) => c.command || c.url).map(([name, c]) => ({ name, from: from[name] ?? 'yours', on: !c.disabled, remote: Boolean(c.url), auth: mcpAuth(c), what: c.url ?? [c.command, ...(c.args ?? [])].filter(Boolean).join(' '), description: c.description ?? '' , flags: c.url ? [] : flagsOf(c) }))
 }
 
 // The model list: #1 is the model (cfg.provider/model), the rest cfg.rotation.then, in order.
@@ -840,8 +856,6 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     },
     // a server of yours, from the form: a command on this machine, or a remote URL
     'POST /api/mcp/add': ({ name, command, url }) => {
-      name = safeName(name)
-      if (!name) throw new Error('a name is needed')
       const words = String(command ?? '').match(/"[^"]*"|'[^']*'|\S+/g)?.map((w) => w.replace(/^(["'])(.*)\1$/, '$2')) ?? []
       url = String(url ?? '').trim()
       if (!words.length === !url) throw new Error('give a command, or a URL')
@@ -850,8 +864,32 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       if (fs.existsSync(file) && !readJson(file, null)) throw new Error("mcp.json isn't valid JSON: fix it first")
       const data = readJson(file, null) ?? {}
       const servers = (data.mcpServers ??= {})
-      if (servers[name] && !servers[name].disabled && (servers[name].command || servers[name].url)) throw new Error(`there's a server "${name}" already`)
+      // its name: as given, else from the command or URL; a name in use by a working server gets -2, -3…
+      const inUse = Object.entries(servers).filter(([, c]) => c.command || c.url).map(([n]) => n)
+      name = safeName(name) || serverName(url || String(command ?? ''), inUse)
+      if (inUse.includes(name)) throw new Error(`there's a server "${name}" already`)
       servers[name] = url ? { url } : { command: words[0], args: words.slice(1) }
+      writeJson(file, data)
+      changed('mcp')
+      return state()
+    },
+    // a flag of a local server ticked on (back into its command) or off (kept aside in offFlags)
+    'POST /api/mcp/flag': ({ name, flag, on }) => {
+      const file = path.join(HOME, 'mcp.json')
+      if (fs.existsSync(file) && !readJson(file, null)) throw new Error("mcp.json isn't valid JSON: fix it first")
+      const data = readJson(file, null) ?? {}
+      const c = data.mcpServers?.[name]
+      if (!c?.command) throw new Error(`no local MCP server "${name}" of yours`)
+      flag = String(flag ?? '').trim().replace(/\s+/g, ' ')
+      const words = flag.split(' ')
+      if (!/^-/.test(words[0]) || words.length > 2) throw new Error('a flag starts with - (and may have one value: --port 3000)')
+      const args = c.args ?? []
+      const at = args.findIndex((a, i) => a === words[0] && (words.length === 1 || args[i + 1] === words[1]))
+      if (at >= 0) args.splice(at, words.length)
+      if (on) args.push(...words)
+      c.args = args
+      c.offFlags = on ? (c.offFlags ?? []).filter((f) => f !== flag) : [...new Set([...(c.offFlags ?? []), flag])]
+      if (!c.offFlags.length) delete c.offFlags
       writeJson(file, data)
       changed('mcp')
       return state()

@@ -23,6 +23,34 @@ import { savedToken, signIn, hasToken } from './oauth.js'
 // servers, /mcp, or ~/.heart/mcp.json). Kept as a map so a server could be built in again by name.
 export const DEFAULT_SERVERS = {}
 
+// A server's name from how it's started, so nobody has to make one up: the package or program it
+// runs, without its scope, version and "mcp"/"server" words (npx -y chrome-devtools-mcp@latest →
+// chrome-devtools; uvx mcp-server-fetch → fetch; docker run -i mcp/github → github), or a URL's site
+// (https://mcp.notion.com/mcp → notion). taken: names in use (then -2, -3…). The settings page has a copy.
+const RUNNERS = new Set(['npx', 'bunx', 'pnpx', 'uvx', 'pipx', 'node', 'python', 'python3', 'deno', 'bun', 'docker', 'pnpm', 'yarn', 'uv'])
+const RUNNER_WORDS = new Set(['dlx', 'exec', 'run', 'x', 'tool'])
+export function serverName(given, taken = []) {
+  const s = String(given ?? '').trim()
+  let base = ''
+  if (/^https?:\/\//i.test(s)) {
+    try {
+      const parts = new URL(s).hostname.replace(/^(www|api|mcp)\./, '').split('.')
+      base = parts.length > 1 ? parts.at(-2) : parts[0]
+    } catch {}
+  } else {
+    const words = s.match(/"[^"]*"|'[^']*'|\S+/g)?.map((w) => w.replace(/^(["'])(.*)\1$/, '$2')) ?? []
+    const what = words.find((w, i) => !(i === 0 && RUNNERS.has(path.basename(w))) && !w.startsWith('-') && !RUNNER_WORDS.has(w)) ?? words[0] ?? ''
+    const pkg = what.replace(/^(@?[^@]+)@.*$/, '$1')
+    base = pkg.split(/[\\/]/).pop().replace(/\.(m?js|ts|py)$/, '')
+    base = base.replace(/^(mcp[-_]server[-_]|server[-_]|mcp[-_])/, '').replace(/([-_]mcp[-_]server|[-_]mcp|[-_]server)$/, '')
+    if (/^(mcp|server|mcp-server)?$/.test(base) && pkg.startsWith('@')) base = pkg.slice(1).split('/')[0] // @playwright/mcp → playwright
+  }
+  base = base.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'server'
+  let name = base
+  for (let n = 2; taken.includes(name); n++) name = `${base}-${n}`
+  return name
+}
+
 // extra: more configs from the caller (--mcp-config: a file path or JSON text); strict: only those
 // (no built-in or configured servers), like Claude Code's --strict-mcp-config.
 export function loadServers(root, { extra = [], strict = false, includeDisabled = false } = {}) {

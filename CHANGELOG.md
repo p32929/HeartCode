@@ -2,6 +2,30 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.54 (2026-11-04)
+
+- **Questions always come with a recommended answer**: ask_user needs options, the first one marked
+  "recommended"; nobody answers within 30 seconds (each key starts the wait again) and it's taken,
+  shown as such, and the model is told it was. A model that types its questions as text instead is
+  sent back once to ask them in the dialog.
+- **Fewer, shorter prompts** (128 → 101), written for small models: variants of one message merged
+  (hooks, "not done yet", output shortened, repeats, bad replies…), every rule kept, about a quarter
+  less sent with each request. A plan made without looking anything up is asked once whether it uses
+  something to read the current docs for. "Plan first" says plainly that nothing was written. The
+  reviewer is told when a long change is shortened, so it no longer calls a whole file truncated.
+- **Guided mode no longer loops**: a tiny model that kept picking "read" after the work was done
+  now finishes (the menu doesn't offer a step that just repeated with nothing new).
+- **Alt, never Ctrl**: Alt+O shows all of the thinking (was Ctrl+O), Alt+A / Alt+N tick all / none in
+  a multi-select; the Ctrl+PgUp/PgDn/Home/End alternatives are gone. Only Ctrl+C and Ctrl+D remain.
+- **MCP servers**: added from the command alone (the name comes from it), and each flag is a pill
+  to tick on and off in the list.
+- **System prompt page redesigned** like the Skills page: kinds to switch between (System, Tools,
+  Notes & replies, Guided mode, Summaries, Tests), search, "Changed by you", readable names, and
+  labelled parts (what it is, placeholders to click in, the prompt). On phones, the lists of the
+  prompts, skills and files pages no longer push the editor off the screen.
+- **README**: easier to read, what happens when you ask it to make something, and a recommended
+  step: the design skill, Chrome DevTools MCP and computer use MCP, with why and how.
+
 ## 0.1.53 (2026-11-04)
 
 - **Your models, in your order, and nothing picks for you**: #1 answers, the next one in your list

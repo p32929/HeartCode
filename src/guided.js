@@ -36,7 +36,7 @@ export function nextActions(st) {
   if (!st.reads && st.hasFiles) first = ['read', 'search']
   else if (st.wantsChange && !st.edits) first = st.hasFiles ? ['edit', 'create', 'read'] : ['create']
   else first = ['finish', 'edit', 'run']
-  return [...new Set([...first, ...ACTIONS.map(([n]) => n)])].filter((n) => n !== 'delegate' || st.canDelegate)
+  return [...new Set([...first, ...ACTIONS.map(([n]) => n)])].filter((n) => (n !== 'delegate' || st.canDelegate) && n !== st.avoid) // a step that just repeated with nothing new isn't offered again (a small model picks it over and over)
 }
 
 // A reply may be plain text or JSON like {"path": "a.js"}.
@@ -172,7 +172,7 @@ class Guided {
   }
 
   async yesNo(question, fallback) {
-    const res = await this.query(prompt('guided/yes-no', { question }), { room: 20, oneLine: true })
+    const res = await this.query(question, { room: 20, oneLine: true })
     const m = /\b(yes|no)\b/i.exec(answerText(res.content))
     return m ? m[1].toLowerCase() === 'yes' : fallback
   }
@@ -284,6 +284,7 @@ class Guided {
       }
       repeats = sig === last ? repeats + 1 : 0
       last = sig
+      this.st.avoid = repeats ? action : null
       if (repeats >= 2) {
         // the next of your models carries on; with none, it goes on being told (only Esc stops it)
         const was = this.s.client.model
@@ -326,35 +327,36 @@ class Guided {
   async pickAction() {
     const names = nextActions(this.st)
     const menu = names.map((n, i) => `${i + 1}. ${n} - ${DESC[n]}`).join('\n')
-    let q = prompt('guided/next-action', { menu })
+    let q = prompt('guided/next-action', { menu, reply: '', count: names.length })
     for (let i = 0; i < 2; i++) {
       const res = await this.query(q, { room: 16, oneLine: true })
       const a = parsePick(res.content, names)
       if (a) return a
-      q += '\n\n' + prompt('guided/next-action-retry', { reply: clip(res.content, 40), count: names.length })
+      q = prompt('guided/next-action', { menu, reply: clip(res.content, 40) || '(nothing)', count: names.length })
     }
     return 'finish'
   }
 
-  async pickFile(question, candidates) {
+  // edit: the file to change (else the file to read)
+  async pickFile(edit, candidates) {
     if (!candidates.length) {
       this.note(null, 'note', prompt('guided/note-no-files'))
       return null
     }
-    let q = prompt('guided/pick-file', { question })
+    let q = prompt('guided/pick-file', { edit, said: '', choices: '' })
     for (let i = 0; i < 2; i++) {
       const res = await this.query(q, { room: 60, oneLine: true })
       const said = answerText(res.content)
       const f = matchFile(candidates, said)
       if (f) return f
-      q = prompt('guided/pick-file-retry', { question, said: clip(said, 60), choices: closest(candidates, said, 15).join('\n') })
+      q = prompt('guided/pick-file', { edit, said: clip(said, 60) || '(nothing)', choices: closest(candidates, said, 15).join('\n') })
     }
     this.note(null, 'note', prompt('guided/note-unknown-file'))
     return null
   }
 
   async read() {
-    const f = await this.pickFile(prompt('guided/which-file-to-read'), this.files)
+    const f = await this.pickFile(false, this.files)
     if (f) this.readNote(f)
     return `read:${f}`
   }
@@ -375,7 +377,7 @@ class Guided {
     // Weak models pick the first option: offer the code under test before the tests themselves.
     let files = [...new Set([...seen, ...this.files])]
     files = [...files.filter((x) => !TEST_FILE.test(x)), ...files.filter((x) => TEST_FILE.test(x))]
-    let f = await this.pickFile(prompt('guided/which-file-to-edit'), files)
+    let f = await this.pickFile(true, files)
     if (!f) return 'edit:'
     const old = fs.readFileSync(resolveIn(this.s.root, f), 'utf8')
     this.ui.step('edit', f)

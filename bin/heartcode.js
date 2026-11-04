@@ -57,7 +57,7 @@ ${c.bold('options')}
       --api-key <key>    API key for --base-url
   -y, --yes              do everything without asking (the default)
       --ask              ask before every edit and command, this run
-      --hide-thinking    the model's thinking: only its last two lines while it thinks (the default; Ctrl+O shows all of it)
+      --hide-thinking    the model's thinking: only its last two lines while it thinks (the default; Alt+O shows all of it)
   -C, --cwd <dir>        project folder (default: current folder)
       --temp             keep nothing: a throwaway settings folder (your providers, model info,
                          prices and notes copied in), shared by the --temp runs going on at once
@@ -103,7 +103,7 @@ const SECTIONS = [
     ['/select_model', 'pick the model(s) for this session: one pins it, several rotate among them, auto = your whole list', true],
   ]],
   ['settings', [
-    ['/toggle_thinking', "the model's thinking: its last two lines, or all of it (Ctrl+O)"],
+    ['/toggle_thinking', "the model's thinking: its last two lines, or all of it (Alt+O)"],
     ['/voice', 'say your message (or Space in an empty box): it shows in the box as you speak, Enter sends it, Esc cancels'],
   ]],
   ['session', [
@@ -157,7 +157,7 @@ function keysHelp(keys = {}, mouse = false) {
   const rows = [
     ['Space', 'voice: listens at once, Enter sends what you said (in an empty box)'],
     ['Enter', 'send · while it works, queue the message (commands like /help, /cost, /select_model run at once)'],
-    ['Option/Shift/Ctrl+Enter', 'new line in the box'],
+    ['Option+Enter or Shift+Enter', 'new line in the box'],
     ['Esc', 'stop the task (press twice to confirm)'],
     ['Esc Esc', 'rewind to an earlier message (at the prompt)'],
     ['Shift+Tab', 'change what runs without asking (permissions)'],
@@ -1693,7 +1693,7 @@ async function slash(app, line, working = false) {
     }
     case 'toggle_thinking':
       ui.showThinking = !ui.showThinking
-      ui.print(c.dim(ui.showThinking ? 'thinking: all of it, as it comes (Ctrl+O: its last two lines)' : 'thinking: its last two lines while it thinks (Ctrl+O: all of it)'))
+      ui.print(c.dim(ui.showThinking ? 'thinking: all of it, as it comes (Alt+O: its last two lines)' : 'thinking: its last two lines while it thinks (Alt+O: all of it)'))
       if (ui.showThinking && !ui.thinkTail) ui.showLastThought() // the one just over: all of it now
       return
   }
@@ -1818,7 +1818,7 @@ async function repl(app, f = {}) {
       return ui.clearInput()
     }
     if (again) return quit() // the second within 2s (also when the first stopped the work)
-    ui.notice(others() ? `Press Ctrl+C again to quit HeartCode (all ${others() + 1} tabs; Ctrl+Q closes just this one)` : 'Press Ctrl+C again to quit', 2000)
+    ui.notice(others() ? `Press Ctrl+C again to quit HeartCode (all ${others() + 1} tabs; Alt+W closes just this one)` : 'Press Ctrl+C again to quit', 2000)
   }
   // Pinned to the top of the screen; /clear_chat and scrolling leave it alone.
   const home = process.env.HOME
@@ -2035,7 +2035,7 @@ async function main() {
         saveConfig(cfg)
       }
     }
-    ui.showThinking = false // the thinking's last two lines while it thinks; Ctrl+O shows all of it (--hide-thinking: the same)
+    ui.showThinking = false // the thinking's last two lines while it thinks; Alt+O shows all of it (--hide-thinking: the same)
     const app = new App(cfg, ui, root)
     usePromptsFrom(app.root) // its .heartcode/prompts override the built-in sections
     ui.suggest = (line, cursor) => app.suggest(line, cursor)

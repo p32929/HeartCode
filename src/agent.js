@@ -117,7 +117,7 @@ export class Session {
     // A model shown its own work tends to carry on with it (calling tools, or writing tool calls
     // as text) instead of summarizing: so it's told what it is, and a reply that isn't a summary
     // is asked for again once; then the compaction fails (the conversation is trimmed instead).
-    const request = (extra) => prompt('compact/summarize', { conversation: cut(), focus }) + extra
+    const request = (extra) => prompt('compact/summarize', { conversation: cut(), focus, branch: false, files: '' }) + extra
     const send = (extra) =>
       client.chat({ messages: [{ role: 'system', content: prompt('compact/summarizer') }, { role: 'user', content: request(extra) }] }, { signal })
     const ask = (extra = '') => send(extra)
@@ -182,7 +182,7 @@ export class Session {
     if (!this.isSub) for (const e of takeConfigErrors()) ui.warn(e) // a hooks.json or mcp.json that doesn't parse
     const hook = await runHooks(this, 'UserPromptSubmit', { prompt: task }, signal)
     if (hook.block) {
-      const answer = prompt('agent/hook-blocked-prompt', { reason: hook.block })
+      const answer = prompt('agent/hook', { reason: hook.block, blocked: true })
       ui.warn(answer)
       return answer
     }
@@ -372,7 +372,7 @@ export class Session {
     const { client, strat } = this
     const room = Math.floor((strat.context * 0.6 * 3.5) / (strat.ratio ?? 1))
     const text = conversation.length > room ? `[… the earliest part is cut]\n${conversation.slice(-room)}` : conversation
-    const request = prompt('compact/branch-summarize', { conversation: text, files: files.join(', ') })
+    const request = prompt('compact/summarize', { conversation: text, files: files.join(', '), branch: true, focus: '' })
     const messages = [{ role: 'system', content: prompt('compact/summarizer') }, { role: 'user', content: request }]
     const summary = notSummary((await client.chat({ messages }, { signal })).content)
     if (!summary) throw new Error('the model did not write a summary')
@@ -545,16 +545,12 @@ const alwaysSkill = (k) => {
 const SYSTEM = (s) => {
   const instructions = userInstructions(s.root)
   return [
-    prompt('agent/system', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), rootList: rootList(s.root), servers: serversNote(s.root), files: '', more: '', caller: Boolean(s.appendSystem) }),
+    prompt('agent/system', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), rootList: rootList(s.root), servers: serversNote(s.root), files: '', more: '', caller: Boolean(s.appendSystem), see: Boolean(s.strat.vision) }), // models that can see often say they can't: told they can
     instructions && prompt('agent/instructions', { instructions }),
     ...[...(s.skills?.values() ?? [])].filter((k) => k.use === 'always').map(alwaysSkill), // skills that say how to work (use: always), with the files they bring
-    s.memory && prompt('agent/memory', { tags: s.memory.tagSummary() || '(none yet)' }),
-    s.strat.vision && prompt('agent/you-see'), // models that can see often say they can't
-    s.director && !s.appendSystem && s.director.app.cfg.director !== false && prompt('agent/director'),
     !s.isSub && teamPrompt(s),
     s.isSub && prompt('agent/subagent'),
-    s.appendSystem && prompt('agent/caller'),
-    s.appendSystem,
+    s.appendSystem && prompt('agent/instructions', { instructions: s.appendSystem, caller: true }),
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -807,11 +803,8 @@ async function runNative(s, task, images, signal) {
   // pages already read for this project that match: titles only (the model opens one when needed)
   const pages = s.isSub || !s.memory ? [] : findResearch(s.root, task, 6).filter((r) => r.kind !== 'search' && !sent.has(`research:${r.name}:${r.fetched}`))
   s.chat.sentNotes = [...sent, ...notes.map(key), ...pages.map((r) => `research:${r.name}:${r.fetched}`)]
-  const known = [
-    notes.length && prompt('agent/memory-relevant', { notes: notes.map((n) => `[[${n.name}]] — ${n.description}`).join('\n') }),
-    pages.length && prompt('agent/research-known', { pages: pages.map((r) => `- ${r.title} — ${r.url} (read ${r.fetched}) → ${r.file}`).join('\n') }),
-  ].filter(Boolean)
-  const text = known.length ? `${task}\n\n${known.join('\n\n')}` : task
+  const known = notes.length || pages.length ? prompt('agent/known', { notes: notes.map((n) => `[[${n.name}]] — ${n.description}`).join('\n'), pages: pages.map((r) => `- ${r.title} — ${r.url} (read ${r.fetched}) → ${r.file}`).join('\n') }).trim() : ''
+  const text = known ? `${task}\n\n${known}` : task
   if (!s.isSub) Object.assign(s, { research: [], ran: [], lastQuery: '', dirsBefore: foldersOf(s.root), noResearch: !s.memory }) // this message's pages and commands (helpers add theirs), and the folders there were, for the wrap-up
   const planning = ui.permission === 'plan'
   const said = planning && !s.isSub ? `${text}\n\n${prompt('agent/plan-mode')}` : text
@@ -838,7 +831,9 @@ async function runNative(s, task, images, signal) {
   let nudged = 0 // reminders sent this message about open todo items, a premature stop, or a Stop hook
   let sinceNudge = true // a tool call made since the last reminder: one that changed nothing isn't sent again (no count: it goes on while the model gets on)
   s.planAsked = false // asked for a plan before its first change, this message
+  s.askedUser = s.askNudged = false // asked with ask_user / told to, this message (a reply of questions as text: askedInText)
   s.splitAsked = false // asked whether a plan's parts could run side by side, this message
+  s.lookedUp = s.researchAsked = false // searched or read the web this message / asked whether the plan needs it
   // what changed and when it was last checked, this message: a change not run/tested since isn't done
   Object.assign(s, { changed: new Set(), seq: 0, lastChangeAt: -1, lastCheckAt: -1, reviewedAt: -1, checksSince: 0, spots: new Map() })
 
@@ -930,7 +925,7 @@ async function runNative(s, task, images, signal) {
         looping = 0
       } else ui.warn(`${client.model} went into a loop; cut, and asked again`)
       if (res.content.trim()) s.messages.push({ role: 'assistant', content: res.content })
-      s.messages.push({ role: 'user', content: prompt('agent/looped', { sample: res.looped }) })
+      s.messages.push({ role: 'user', content: prompt('agent/bad-reply', { sample: res.looped }) })
       continue
     }
     s.messages.push({ role: 'assistant', content: res.content || '', ...(res.toolCalls.length && { tool_calls: res.toolCalls }), ...(res.reasoning && res.toolCalls.length && { reasoning_content: res.reasoning }) }) // client.js sends it by the name the provider uses, or not at all
@@ -951,7 +946,7 @@ async function runNative(s, task, images, signal) {
     if (markup && garbled++ < 2) {
       log('task', `${client.model}: a tool call written as text; asking again`, res.content)
       s.messages.pop()
-      s.messages.push({ role: 'user', content: prompt('agent/garbled-call') })
+      s.messages.push({ role: 'user', content: prompt('agent/bad-reply', { sample: '' }) })
       continue
     }
     if (markup) {
@@ -1043,7 +1038,7 @@ async function runNative(s, task, images, signal) {
       // refused one is easily taken for refused too), once a message; not a helper's (its job is its plan)
       const planFirst = !s.isSub && (!s.planAsked || s.planHeldIn === res) && EDITS.has(name) && args && allowed(s, name) && ui.permission !== 'plan' && !s.todoTouched && !(s.chat.todos ?? []).some((t) => t.status !== 'completed')
       if (planFirst) Object.assign(s, { planAsked: true, planHeldIn: res })
-      const refused = planFirst ? prompt('agent/plan-first') : pre ? (pre.refused ?? null) : !together.has(call.id) && args && allowed(s, name) ? guard.before(name, args) : null
+      const refused = planFirst ? prompt('agent/plan-first', { file: String(args.path ?? args.file ?? 'the file') }) : pre ? (pre.refused ?? null) : !together.has(call.id) && args && allowed(s, name) ? guard.before(name, args) : null
       let out = refused ?? (pre ? await pre.running : together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal, call.id) : 'error: the tool arguments were not valid JSON')
       if (!refused && args) out += guard.after(name, args, out)
       if (guard.stuck) stuck ??= guard.stuck
@@ -1074,7 +1069,7 @@ async function runNative(s, task, images, signal) {
       const sig = `${name} ${call.function.arguments}`
       inRow = sig === lastCall ? inRow + 1 : 1
       lastCall = sig
-      if (inRow >= 3) out += `\n\n${prompt('agent/repeating', { n: inRow })}`
+      if (inRow >= 3) out += `\n\n${prompt('agent/repeating', { n: inRow, failed: false })}`
       if (inRow >= 5) stuck = `made the same ${name} call five times in a row`
       if (name === 'read_file' || name === 'search' || name === 'list_files' || name === 'web_fetch' || name === 'web_search' || name === 'changes') ui.result(`${out.split('\n').length} lines`)
       else if (name === 'agent' && !failed(out)) ui.result(`${s.ui.permission === 'plan' ? 'planned' : 'done'}: ${clip(out.split('\n').find((l) => l.trim()) ?? '', 100)}`)
@@ -1106,7 +1101,7 @@ async function runNative(s, task, images, signal) {
     }
     // screenshots from MCP tools: tool results are text only, so images follow as a message
     if (s.pendingImages?.length) {
-      s.messages.push({ role: 'user', content: [{ type: 'text', text: prompt('agent/tool-images', { files: s.pendingImages.map((p) => p.file).join(', ') }) }, ...s.pendingImages.map(({ url }) => ({ type: 'image_url', image_url: { url } }))] })
+      s.messages.push({ role: 'user', content: [{ type: 'text', text: prompt('agent/tool-images', { unseen: false, files: s.pendingImages.map((p) => p.file).join(', ') }) }, ...s.pendingImages.map(({ url }) => ({ type: 'image_url', image_url: { url } }))] })
       s.pendingImages = []
     }
   }
@@ -1151,14 +1146,14 @@ export function newGuard() {
     if (!was || (name === 'run_command' && Date.now() - was.at > 20_000)) return null
     repeats++
     if (repeats >= 10) g.stuck = 'kept making calls it had already made (10 repeats)' // going round, not finding anything new
-    return prompt('agent/already-done', { result: was.out }) + (repeats >= 3 ? `\n\n${prompt('agent/circling')}` : '')
+    return prompt('agent/already-done', { result: was.out, circling: repeats >= 3 })
   }
   g.after = (name, a, out) => {
     let note = ''
     if (name === 'run_command') {
       const code = Number(/^exit code (-?\d+)/.exec(out)?.[1] ?? 0)
       failing = code ? failing + 1 : 0
-      if (failing >= 4) note += `\n\n${prompt('agent/failing-in-row', { n: failing })}`
+      if (failing >= 4) note += `\n\n${prompt('agent/repeating', { n: failing, failed: true })}`
       if (failing >= 8) g.stuck = 'had eight commands in a row fail'
       if (!readOnlyCommand(String(a.command ?? ''))) epoch++ // it may have changed things: what came before can be done again
     }
@@ -1242,31 +1237,45 @@ const PROMISED_MORE =
 
 // Is the task really done, or did the model stop early? Open todo items, or (after it did real work)
 // a reply that only promises more, get one nudge to keep going. Then any Stop hook. null = truly done.
+// A reply that is mostly questions for the user, written as text: only ask_user opens the dialog to
+// answer them in (weaker models type them out and stop). At least two questions, and most of what it says.
+export function askedInText(reply) {
+  const sentences = String(reply).replace(/```[\s\S]*?```/g, '').split(/(?<=[.?!])\s+|\n+/).map((x) => x.trim()).filter((x) => /\w/.test(x))
+  const questions = sentences.filter((x) => /\?["')\]]*$/.test(x)).length
+  return questions >= 2 && questions / sentences.length >= 0.4
+}
+
 export async function notDone(s, signal, again, reply = '') {
+  // questions typed out instead of asked: once a message, asked again with the tool (someone's there to answer)
+  if (!s.isSub && !s.ui.noUser && !s.askedUser && !s.askNudged && askedInText(reply)) {
+    s.askNudged = true
+    log('task', 'asked its questions as text; told to use ask_user')
+    return prompt('agent/not-done', { asked: true })
+  }
   const open = s.todoTouched && s.ui.permission !== 'plan' ? (s.chat.todos ?? []).filter((t) => t.status !== 'completed') : [] // plan mode: they wait for the approval
   if (open.length) {
     log('task', `stopped with ${open.length} open todo item(s); reminding`)
-    return prompt('agent/todo-unfinished', { items: open.map((t) => `- ${t.content}`).join('\n') })
+    return prompt('agent/not-done', { todos: open.map((t) => `- ${t.content}`).join('\n') })
   }
   // changed files and hasn't run anything since: not proven to work
   const changed = [...(s.changed ?? [])]
   if (changed.length && s.lastCheckAt < s.lastChangeAt && !changed.every((f) => DOC_FILE.test(f)) && s.ui.permission !== 'plan') {
     log('task', `finished with changes not checked since (${changed.join(', ')}); asking for a check`)
-    return prompt('agent/unchecked', { files: changed.join(', ') })
+    return prompt('agent/not-done', { unchecked: changed.join(', ') })
   }
   // says it made files that aren't there
   const missing = missingFiles(s.root, reply)
   if (missing.length) {
     log('task', `the answer names files that don't exist: ${missing.join(', ')}`)
-    return prompt('agent/missing-files', { files: missing.join(', ') })
+    return prompt('agent/not-done', { missing: missing.join(', ') })
   }
   if (s.acted && reply && PROMISED_MORE.test(reply)) {
     log('task', 'reply names a next step but no tool call followed; nudging to finish')
-    return prompt('agent/stopped-early')
+    return prompt('agent/not-done', { early: true })
   }
   if (s.isSub) return null // a helper: the Stop hooks are the main conversation's
   const hook = await runHooks(s, 'Stop', { stop_hook_active: again }, signal)
-  return hook.block ? prompt('agent/hook-stop', { reason: hook.block }) : null
+  return hook.block ? prompt('agent/hook', { reason: hook.block, stop: true }) : null
 }
 
 // Files the final answer says were made, that aren't in the project: a path in backticks, or one
@@ -1340,7 +1349,9 @@ export async function review(s, task, answer, signal) {
     } catch {}
     if (now === before) continue
     const text = before === null ? `${rel} (new file):\n${now ?? ''}` : now === null ? `${rel}: deleted` : renderDiff(diffLines(before, now), rel, false, 3, 400)
-    const piece = clip(text, Math.min(5000, room))
+    // cut to save room, said so in words: a bare "…" reads as a file left unfinished
+    const most = Math.min(5000, room)
+    const piece = text.length > most ? `${text.slice(0, most)}\n[${text.length - most} more characters of this change not shown here, to save room. The file itself is whole.]` : text
     room -= piece.length
     diffs.push(piece)
     if (room <= 500) {
@@ -1450,7 +1461,7 @@ export function fitResult(s, name, out, file) {
   if (out.length <= max) return out
   file ??= saveOutput(s.chat?.id, name, out)
   log('tool', `${name}: ${out.length} characters, ${max} shown${file ? `; all of it in ${file}` : ''}`)
-  return `${out.slice(0, max)}\n…\n${prompt('agent/output-cut', { shown: max, total: out.length, file })}`
+  return `${out.slice(0, max)}\n…\n${prompt('agent/output-cut', { shown: max, total: out.length, file, call: '' })}`
 }
 
 // Results longer than this are saved to a file when they come (so they can leave the conversation later).
@@ -1477,7 +1488,7 @@ function callOf(messages, id) {
 // provider's prompt cache (the conversation's unchanged start) is broken rarely, not every step.
 // An older conversation's results (no file yet) are saved now, before they're cut.
 export function trimOldResults(s, keep = 4, most = 8) {
-  const long = s.messages.filter((m) => m.role === 'tool' && typeof m.content === 'string' && m.content.length > SAVE_AT && !shortened.has(m) && !/^\[older output/.test(m.content) && !s.staleCopies?.has(m))
+  const long = s.messages.filter((m) => m.role === 'tool' && typeof m.content === 'string' && m.content.length > SAVE_AT && !shortened.has(m) && !/^\[older output/i.test(m.content) && !s.staleCopies?.has(m))
   if (long.length <= most) return
   dropStale(s) // the conversation changes here anyway: the older copies of files read again go too
   for (const m of long.slice(0, -keep)) {
@@ -1485,7 +1496,7 @@ export function trimOldResults(s, keep = 4, most = 8) {
     const read = /^read_file /.test(call) ? call.slice('read_file '.length) : '' // a project file: read it again
     const file = read || s.chat.outputs?.[m.tool_call_id] || saveOutput(s.chat?.id, 'older', m.content)
     if (file && !read) (s.chat.outputs ??= {})[m.tool_call_id] = file
-    m.content = `${prompt('agent/output-old', { call, total: m.content.length, file })}\n${m.content.slice(0, 300)}\n…`
+    m.content = `${prompt('agent/output-cut', { call, shown: Math.min(300, m.content.length), total: m.content.length, file })}\n${m.content.slice(0, 300)}\n…`
     shortened.add(m)
   }
   log('tool', `older tool output cut: ${long.length - keep} results`)
@@ -1553,7 +1564,7 @@ export function contextReport(s) {
     const ago = msgs.length - 1 - i
     if (i === 0 && m.role === 'system') return void (parts.system += n)
     if (m.role === 'tool') {
-      const old = typeof m.content === 'string' && /^\[older output/.test(m.content)
+      const old = typeof m.content === 'string' && /^\[older output/i.test(m.content)
       old ? (parts.pointers += n, cut++) : (parts.results += n, whole++)
       pieces.push({ tokens: n, what: `${callOf(msgs, m.tool_call_id)} (result${old ? ', a pointer' : ''})`, ago })
     } else if (m.role === 'assistant') {

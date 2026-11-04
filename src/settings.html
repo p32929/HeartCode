@@ -154,6 +154,18 @@
   .k-files summary { cursor: pointer; }
   .k-files ul { margin: 8px 0 0; padding: 8px 12px; list-style: none; columns: 2 220px; column-gap: 24px; max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); font-size: 12px; }
   .k-files li { break-inside: avoid; padding: 1px 0; }
+  /* System prompt: a bar (the kinds, search, yours only), the list, and a panel in labelled parts */
+  .r-bar { flex-wrap: wrap; padding: 8px 10px; }
+  .r-bar input[type=search] { flex: 1; min-width: 180px; height: 34px; }
+  .r-bar .seg { max-width: 100%; overflow-x: auto; }
+  .r-bar .seg label { white-space: nowrap; gap: 6px; }
+  .r-count { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .r-bar .seg .dot { margin: 0; }
+  .r-about { margin: 0; font-size: 13.5px; line-height: 1.55; max-width: 90ch; }
+  .r-vars { display: flex; flex-wrap: wrap; gap: 6px; }
+  .r-var { height: 26px; padding: 0 8px; font-size: 12px; border-radius: 6px; }
+  .r-card .k-use-about { min-height: 1.5em; }
+  .r-card textarea.editor { min-height: 200px; }
   .md.solo .list { display: none; }
   .md.solo .detail > .card { height: auto !important; }
   /* a long list (the prompts): list and editor fill the screen's height, like an editor app */
@@ -563,6 +575,7 @@
   .mt-filters select { height: 34px; width: auto; max-width: 118px; text-overflow: ellipsis; padding-top: 0; padding-bottom: 0; line-height: 32px; }
   .mt-filters select.on { border-color: var(--accent); background-color: color-mix(in srgb, var(--accent-soft) 50%, var(--input)); }
   .f-togs { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+  .mcp-flags { display: flex; margin-top: 8px; } .mcp-flags .f-tog { height: 30px; font-size: 12px; }
   .mt-tools .mt-outcomes { border-bottom: 0; border-top: 1px solid var(--line); padding: 9px 18px; }
   .mt-hwrap { overflow: hidden; border-top: 1px solid var(--line); }
   .mt-hwrap .mt-h { border-bottom: 0; }
@@ -683,7 +696,7 @@
     .grid, .cols { grid-template-columns: 1fr; }
     .md { grid-template-columns: 1fr; }
     .md .list { position: static; max-height: 300px; }
-    .md.fill .list { height: auto !important; max-height: 300px; }
+    .md.fill .list, .md.fill:not(.tabs) .list { height: auto !important; max-height: 300px; }
     .md.fill .detail > .card { height: auto; }
     .md.fill .detail > .card > textarea.editor { min-height: 260px; }
     .prov-head, .prov-body { padding-left: 14px; padding-right: 14px; }
@@ -987,9 +1000,14 @@
 
     <!-- System prompt and the other prompts -->
     <section class="page" id="page-prompts">
-      <div class="head"><div><h1>System prompt</h1><p class="lead">What HeartCode tells the model. Change a prompt and save: a running HeartCode uses yours from the next message. <span class="mono">{{names}}</span> are filled in by HeartCode; Reset puts HeartCode's back.</p></div></div>
+      <div class="head"><div><h1>System prompt</h1><p class="lead">What HeartCode tells the model: the system prompt, and the notes and replies it adds as it works. Saved changes are used from the next message.</p></div></div>
+      <div class="k-install r-bar">
+        <div class="seg" id="r-kinds" role="radiogroup" aria-label="Kind of prompt"></div>
+        <input type="search" id="r-search" placeholder="Search all prompts" aria-label="Search all prompts">
+        <label class="f-tog" title="Only the prompts you changed"><input type="checkbox" id="r-mine">Changed by you</label>
+      </div>
       <div class="md">
-        <div class="list"><div class="top"><input type="search" id="r-search" placeholder="Search prompts…"></div><div class="items" id="r-items"></div></div>
+        <div class="list"><div class="items" id="r-items"></div></div>
         <div class="detail" id="r-detail"></div>
       </div>
     </section>
@@ -1060,9 +1078,8 @@
 </dialog>
 <dialog id="c-form" aria-labelledby="c-title">
   <h2 id="c-title">Add a server</h2>
-  <p class="sub">The command that starts it on this machine, or the URL of a remote one (a sign-in page opens if it needs one).</p>
+  <p class="sub">The command that starts it on this machine, or the URL of a remote one (a sign-in page opens if it needs one). Its name comes from the command; its flags can be ticked on and off in the list.</p>
   <div class="row">
-    <div style="width:200px"><label class="f" for="c-name">Name</label><input type="text" id="c-name" placeholder="github"></div>
     <div><label class="f">Kind</label><div class="seg" id="c-kind">
       <label class="on"><input type="radio" name="c-kind" value="command" checked>Command</label><label><input type="radio" name="c-kind" value="url">URL</label>
     </div></div>
@@ -1217,7 +1234,7 @@ const TITLE_ICONS = [
 // Icons put where they belong, as things are drawn (one pass: a button or title that has one is left alone)
 function decorate(root = document.body) {
   for (const b of root.querySelectorAll('button:not([data-ic])')) {
-    if (b.closest('.acts, .mt-h:not(.mt-hpick), .chip, .pill, .seg, .subtabs, .theme-btn, .f-tog, .sw, nav, [data-no-ic]') || b.querySelector('.icon')) continue
+    if (b.closest('.acts, .mt-h:not(.mt-hpick), .chip, .pill, .seg, .subtabs, .theme-btn, .f-tog, .sw, nav, .md .it, .r-var, [data-no-ic]') || b.querySelector('.icon')) continue
     const text = b.textContent.trim()
     const hit = BUTTON_ICONS.find(([re]) => re.test(text))
     if (!hit || text.length < 3) continue
@@ -1585,7 +1602,7 @@ $('p-save').onclick = async () => {
   closeForm()
   document.querySelector(`[data-provider="${added.name}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
-for (const id of ['c-name', 'c-what']) $(id).addEventListener('keydown', (e) => e.key === 'Enter' && $('c-add').click())
+$('c-what').addEventListener('keydown', (e) => e.key === 'Enter' && $('c-add').click())
 for (const id of ['p-name', 'p-url', 'p-key']) $(id).addEventListener('keydown', (e) => e.key === 'Enter' && $('p-save').click())
 
 // model names in a natural order: "glm-5.2" before "glm-5.10", case doesn't matter
@@ -3085,28 +3102,99 @@ async function openReq(r) {
 }
 
 // --- prompts: a list, and the chosen one to edit ---
+// A prompt's note, split: what it's for (the words before its first "{{name}}: …"), and what each
+// {{placeholder}} it uses holds ("{{a}}, {{b}}: …" and "{{a}} and {{b}} are …" name several).
+function promptParts(p) {
+  const defs = [...p.note.matchAll(/((?:\{\{\w+\}\}(?:,\s*|\s+(?:and|or)\s+)?)+)(:|\s+(?=are\b))\s*/g)]
+  const about = (defs.length ? p.note.slice(0, defs[0].index) : p.note).replace(/\s+/g, ' ').trim()
+  const said = new Map()
+  defs.forEach((m, i) => {
+    const text = p.note.slice(m.index + m[0].length, defs[i + 1]?.index ?? p.note.length).replace(/\s+/g, ' ').replace(/[;,]\s*$/, '').trim()
+    for (const [, v] of m[1].matchAll(/\{\{(\w+)\}\}/g)) said.set(v, text)
+  })
+  const used = [...new Set([...p.builtin.matchAll(/\{\{\s*(?:#if\s+)?(\w+)\s*\}\}/g)].map((m) => m[1]).filter((v) => v !== 'else'))]
+  return { about, vars: [...new Set([...said.keys(), ...used])].map((v) => ({ v, text: said.get(v) ?? '' })) } // in the note's order
+}
+// the kinds of prompt, one shown at a time (a search looks through all of them)
+const PROMPT_KINDS = [
+  ['system', 'System', 'The system prompt: what every request starts with', (p) => Boolean(p.title)],
+  ['tools', 'Tools', 'What the model is told each tool does', (p) => p.id.startsWith('agent/tool-')],
+  ['agent', 'Notes & replies', 'What HeartCode adds or answers while the model works', (p) => !p.title && p.id.startsWith('agent/') && !p.id.startsWith('agent/tool-')],
+  ['guided', 'Guided mode', 'For models without tool calls: they write their actions as text', (p) => !p.title && p.id.startsWith('guided/')],
+  ['compact', 'Summaries', 'Compacting a long conversation into a summary', (p) => p.id.startsWith('compact/')],
+  ['tests', 'Tests', 'What Test asks your models', (p) => p.id.startsWith('tests/')],
+]
+// a prompt's name to read: "output-cut" → "Output cut", a tool's by the tool's own name ("tool-read_file" → "read_file")
+const promptName = (p) => {
+  if (p.title) return p.id === 'agent/system' ? 'System prompt' : 'System prompt, guided mode'
+  const name = p.id.split('/')[1]
+  if (name.startsWith('tool-')) return name.slice(5)
+  return (name[0].toUpperCase() + name.slice(1).replace(/-/g, ' ')).replace(/\bmcp\b|\bMcp\b/g, 'MCP')
+}
 let promptQuery = ''
-$('r-search').oninput = (e) => ((promptQuery = e.target.value.toLowerCase()), S && drawPrompts(S))
+let promptKind = 'system'
+let promptMine = false
+$('r-search').oninput = (e) => ((promptQuery = e.target.value.toLowerCase().trim()), S && drawPrompts(S))
+$('r-mine').onchange = (e) => ((promptMine = e.target.checked), S && drawPrompts(S))
 function drawPrompts(s) {
-  const match = (p) => !promptQuery || `${p.id} ${p.title ?? ''} ${p.note}`.toLowerCase().includes(promptQuery)
-  const item = (p) => ({ id: p.id, title: p.title ? p.title.replace(/^System prompt /, 'System ') : p.id.split('/')[1], sub: p.title ? p.id : p.note.split('\n')[0], badge: p.changed ? h('span', { className: 'tag brand', textContent: 'yours' }) : null, p })
-  const groups = [{ title: 'System prompts', items: s.prompts.filter((p) => p.title && match(p)).map(item) }]
-  for (const file of ['tests', 'agent', 'guided', 'compact']) groups.push({ title: { agent: 'Tools, notes and replies', guided: 'Guided mode (models without tool calls)', compact: 'Summaries', tests: 'Tests (what Test asks your models)' }[file], items: s.prompts.filter((p) => !p.title && p.id.startsWith(file + '/') && match(p)).map(item) })
+  const kindOf = (p) => PROMPT_KINDS.find((k) => k[3](p))
+  const match = (p) => (!promptMine || p.changed) && (promptQuery ? `${p.id} ${promptName(p)} ${p.note}`.toLowerCase().includes(promptQuery) : kindOf(p)?.[0] === promptKind)
+  // the switch: each kind with how many there are (yours changed: a dot)
+  put($('r-kinds'), PROMPT_KINDS.map(([v, t, about, is]) => {
+    const all = s.prompts.filter(is)
+    return h('label', { className: v === promptKind && !promptQuery ? 'on' : '', title: about },
+      h('input', { type: 'radio', name: 'r-kind', checked: v === promptKind, onchange: () => ((promptKind = v), (promptQuery = $('r-search').value = ''), (SEL.prompts = null), drawPrompts(S)) }),
+      t, h('span', { className: 'r-count', textContent: String(all.length) }), all.some((p) => p.changed) ? h('span', { className: 'dot', title: 'some changed by you' }) : null)
+  }))
+  const aboutOf = (p) => promptParts(p).about || (p.id.startsWith('agent/tool-') ? `What the model is told the ${promptName(p)} tool does` : '')
+  const item = (p) => ({ id: p.id, title: promptName(p), sub: aboutOf(p), badge: p.changed ? h('span', { className: 'tag brand', textContent: 'yours' }) : null, p })
+  const shown = s.prompts.filter(match)
+  const groups = promptQuery ? PROMPT_KINDS.map(([, t, , is]) => ({ title: t, items: shown.filter(is).map(item) })) : [{ items: shown.map(item) }]
   masterDetail('prompts', $('r-items'), $('r-detail'), groups, (x) => {
-    if (!x) return h('div', { className: 'card empty', textContent: 'No prompt matches.' })
+    if (!x) return h('div', { className: 'card' }, h('h2', { textContent: promptMine ? 'None changed yet' : 'No prompt matches' }), h('p', { className: 'sub', textContent: promptMine ? "You're using HeartCode's prompts as they come. Change one and save it: it shows here." : 'Try other words, or clear the search.' }))
     const p = x.p
+    const { vars } = promptParts(p)
+    const about = aboutOf(p)
+    const kind = kindOf(p)
     const ta = editor('prompts', p.id, p.text)
-    return h('div', { className: 'card' },
-      h('div', { className: 'row', style: 'justify-content:space-between;align-items:center' }, h('h2', { style: 'margin:0', textContent: p.title ?? p.id }), p.changed ? h('span', { className: 'tag brand', textContent: 'yours' }) : h('span', { className: 'tag', textContent: "HeartCode's" })),
-      h('div', { className: 'mono muted', style: 'margin:2px 0 10px', textContent: p.id }),
-      p.note ? h('p', { className: 'sub', textContent: p.note, style: 'white-space:pre-wrap' }) : null,
+    const undo = h('button', { className: 'ghost', textContent: 'Undo my changes', onclick: () => (saved('prompts', p.id), drawPrompts(S)) })
+    const unsaved = h('span', { className: 'tag need', textContent: 'not saved' })
+    const dirty = () => {
+      const changed = DRAFTS.prompts[p.id] !== undefined
+      undo.hidden = unsaved.hidden = !changed
+      const t = $('r-items').querySelector('.it.on .t') // the list's dot for unsaved changes, as you type
+      if (t && changed !== Boolean(t.querySelector('.dot'))) changed ? t.prepend(h('span', { className: 'dot', title: 'not saved' })) : t.querySelector('.dot').remove()
+    }
+    ta.addEventListener('input', dirty)
+    dirty()
+    // the placeholders: pointed at, what HeartCode puts there; clicked, put in where the cursor is
+    const HINT = 'HeartCode fills these in. Point at one to see what goes there; click it to put it in the prompt.'
+    const hint = h('p', { className: 'k-use-about', textContent: HINT })
+    const insert = (v) => {
+      ta.focus()
+      ta.setRangeText(`{{${v}}}`, ta.selectionStart, ta.selectionEnd, 'end')
+      ta.dispatchEvent(new Event('input'))
+    }
+    const show = (v, text) => (hint.textContent = text ? `{{${v}}}: ${text}` : `{{${v}}}`)
+    return h('div', { className: 'card k-card r-card' },
+      h('div', { className: 'k-head' },
+        h('h2', { textContent: promptName(p) }),
+        h('span', { className: 'tag brand', textContent: kind?.[1] ?? '' }),
+        h('span', { className: 'tag', textContent: p.changed ? 'yours' : "HeartCode's" }),
+        unsaved),
+      h('div', { className: 'k-path mono', textContent: p.changed ? `${p.id} · yours in ${s.home}/prompts/${p.id.split('/')[0]}.md` : p.id }),
+      about ? [h('label', { className: 'f', textContent: 'What it is' }), h('p', { className: 'r-about', textContent: about })] : null,
+      vars.length ? [h('label', { className: 'f', textContent: 'Placeholders' }),
+        h('div', { className: 'r-vars', onmouseleave: () => (hint.textContent = HINT) }, vars.map(({ v, text }) => h('button', { className: 'r-var mono', textContent: `{{${v}}}`, 'aria-label': `Put {{${v}}} in the prompt${text ? `: ${text}` : ''}`, onmouseenter: () => show(v, text), onfocus: () => show(v, text), onclick: () => insert(v) }))),
+        hint] : null,
+      h('label', { className: 'f', textContent: 'The prompt' }),
       ta,
       h('div', { className: 'actions' },
         h('button', { className: 'primary', textContent: 'Save', onclick: () => saveItem('prompts', p.id, '/api/prompt', { id: p.id, text: ta.value }, 'saved: used from the next message') }),
-        DRAFTS.prompts[p.id] !== undefined ? h('button', { className: 'ghost', textContent: 'Undo my changes', onclick: () => (saved('prompts', p.id), drawPrompts(S)) }) : null,
+        undo,
         h('span', { className: 'spacer' }),
         p.changed ? h('button', { textContent: "Reset to HeartCode's", onclick: () => confirm("Put HeartCode's prompt back? Yours is deleted.") && saveItem('prompts', p.id, '/api/prompt', { id: p.id, text: null }, "HeartCode's prompt again") }) : null))
-  })
+  }, { tabs: false })
 }
 
 // --- MCP ---
@@ -3117,17 +3205,28 @@ for (const r of document.querySelectorAll('input[name="c-kind"]')) r.onchange = 
   $('c-what').placeholder = mcpKind() === 'url' ? 'https://mcp.example.com/mcp' : 'npx -y @modelcontextprotocol/server-github'
 }
 $('c-add').onclick = async () => {
-  const r = await act('/api/mcp/add', { name: $('c-name').value, [mcpKind()]: $('c-what').value }, `added ${$('c-name').value.trim()}: it starts from the next message`)
-  if (r) ($('c-name').value = $('c-what').value = ''), $('c-form').close()
+  const had = new Set(S.mcp.map((m) => m.name))
+  const r = await act('/api/mcp/add', { [mcpKind()]: $('c-what').value })
+  if (!r) return
+  toast(`added ${r.mcp.find((m) => !had.has(m.name))?.name ?? 'the server'}: it starts from the next message`) // its name, made from the command
+  $('c-what').value = ''
+  $('c-form').close()
 }
-$('c-open').onclick = () => ($('c-form').showModal(), $('c-name').focus())
+$('c-open').onclick = () => ($('c-form').showModal(), $('c-what').focus())
 $('c-cancel').onclick = () => $('c-form').close()
+// a local server's flags as pills to tick on and off, and a box to add one
+function mcpFlags(m) {
+  const set = (flag, on) => act('/api/mcp/flag', { name: m.name, flag, on }, `${m.name}: ${flag} ${on ? 'on' : 'off'}`)
+  const add = h('input', { type: 'text', className: 'mono', placeholder: '+ flag', 'aria-label': `add a flag to ${m.name}`, style: 'width:120px;height:30px', onkeydown: (e) => e.key === 'Enter' && e.target.value.trim() && set(e.target.value.trim(), true) })
+  return h('div', { className: 'f-togs mcp-flags' },
+    m.flags.map((f) => h('label', { className: 'f-tog mono', title: f.on ? `${f.flag} is on: untick to start it without` : `${f.flag} is off: tick to add it back` }, h('input', { type: 'checkbox', checked: f.on, onchange: (e) => set(f.flag, e.target.checked) }), f.flag)), add)
+}
 function drawMcp(s) {
   const authTag = (a) => (a === 'in' ? h('span', { className: 'tag ok', textContent: 'signed in' }) : h('span', { className: 'tag need', textContent: 'sign-in needed' }))
-  put($('c-list'), h('h2', { textContent: 'Servers' }), h('p', { className: 'sub', textContent: 'Built in, and yours. Remote ones (a URL) may need signing in; local ones don\'t. Switch one off to keep it without using it.' }),
+  put($('c-list'), h('h2', { textContent: 'Servers' }), h('p', { className: 'sub', textContent: 'Remote ones (a URL) may need signing in; local ones don\'t. Tick a flag off to start it without that flag; switch a server off to keep it without using it.' }),
     s.mcp.length ? s.mcp.map((m) => h('div', { className: 'opt mcp-row' },
       tile(m.remote ? 'globe' : m.name.includes('chrome') || m.name.includes('browser') ? 'globe' : m.name.includes('computer') ? 'cpu' : 'plug', m.on ? 'teal' : 'gray'),
-      h('div', { className: 't' }, h('b', {}, m.name, ' ', h('span', { className: 'tag', textContent: m.from }), m.remote ? authTag(m.auth) : null), m.description ? h('span', { textContent: m.description }) : null, h('div', { className: 'mono muted', style: 'word-break:break-all;margin-top:3px', textContent: m.what })),
+      h('div', { className: 't' }, h('b', {}, m.name, ' ', h('span', { className: 'tag', textContent: m.from }), m.remote ? authTag(m.auth) : null), m.description ? h('span', { textContent: m.description }) : null, h('div', { className: 'mono muted', style: 'word-break:break-all;margin-top:3px', textContent: m.what }), m.from === 'yours' && !m.remote ? mcpFlags(m) : null),
       m.remote ? h('button', { className: 'small', textContent: m.auth === 'in' ? 'Sign in again' : 'Sign in', onclick: () => act('/api/mcp/login', { name: m.name }, `signed in to ${m.name}`) }) : null,
       m.from === 'yours' ? h('button', { className: 'small danger', textContent: 'Remove', onclick: () => confirm(`Remove the MCP server ${m.name}?`) && act('/api/mcp/remove', { name: m.name }, `removed ${m.name}`) }) : null,
       sw({ checked: m.on, 'aria-label': `${m.name} on`, onchange: (e) => act('/api/mcp/toggle', { name: m.name, on: e.target.checked }, `${m.name}: ${e.target.checked ? 'on' : 'off'}`) }))) : h('div', { className: 'empty', textContent: 'No MCP servers.' }))

@@ -67,6 +67,7 @@ export function prompt(id, vars = {}) {
       if (!(k in vars)) throw new Error(`prompt "${id}" needs {{${k}}}`)
       return String(vars[k])
     })
+    .trim() // a part left out ({{#if}}) leaves no blank lines behind
 }
 
 // The user's standing instructions: ~/.heart/HEARTCODE.md, then the project's own file. The project's

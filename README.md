@@ -2,93 +2,88 @@
 
 # HeartCode
 
-A coding agent for your terminal that works with any OpenAI-compatible model.
+A coding agent for your terminal. It works with any OpenAI-compatible model: free ones, paid
+ones, local ones, several at once.
 
-**Zero dependencies.** Nothing in `node_modules`, no install scripts, no packages pulled in
-behind your back: only Node.js (22 or newer) and HeartCode's own code. What you install is
-what you can read.
+**Zero dependencies.** Only Node.js (22 or newer) and HeartCode's own code. No `node_modules`, no
+install scripts. What you install is what you can read.
 
 <!-- image: HeartCode in the terminal, answering a message -->
 ![HeartCode in the terminal](https://res.cloudinary.com/m0jnrul4/image/upload/v1793485425/Screenshot_2026-11-01_at_2.23.35_AM.png)
 
 ## Why I made it
 
-Not to compete with other coding CLIs. I made it for my own use, because none of the ones I
-tried did what I needed:
+Not to compete with other coding CLIs. I made it for myself, because none of the ones I tried
+did what I needed.
 
-- **No dependencies, so no supply-chain attack.** Coding CLIs run with your files, your keys and
-  your shell. Most pull in hundreds of npm packages, and any one of them, or any package those
-  depend on, can be hijacked and ship malware in an update. HeartCode has none: no
-  `node_modules`, no install scripts, only Node.js and HeartCode's own code. There's nothing for
-  anyone else to poison, and you can read everything you run.
-- **None of the other CLIs I've used did these**, so HeartCode does:
-  - **Rotates through your models on its own, across providers.** Give it a list (free ones
-    included). When one hits a rate limit, goes down or fails, the next answers, from another
-    provider first, and the work goes on. A ↻ in the status bar shows when a fallback is answering.
-  - **Moves to a bigger model instead of forgetting.** When the conversation outgrows a model's
-    context window, it switches to one of your models with room before it summarizes anything away.
-  - **Researches before it builds.** It assumes what it remembers is out of date and reads the
-    current official docs first, not blogs or memory.
-  - **Learns, per project, and keeps it.** Every web page it reads is kept whole in
-    `.heartcode/research/`. When a task ends it saves what's worth knowing as notes
-    (`.heartcode/memory/`), drops the junk and removes throwaway files, in the background, while
-    you go on. A mistake it fixes becomes a
-    lesson it won't repeat. The next task starts from what's known instead of searching again.
-  - **Checks its work before calling it done**: a plan first, a run after every change, and another
-    model reviewing the result against what you asked. Going round in circles hands the work to
-    your next model; only you (Esc) stop it.
-  - **Gets good work out of weak and local models.** Models that can't call tools are guided step
-    by step. Edits by line number save a model that can't repeat text exactly. Each model's
-    abilities come from [models.dev](https://models.dev), so nothing is spent finding out.
-  - **Sends only what's needed.** MCP tools go as names until one is used, old tool output becomes a
-    pointer to its saved file, and guides arrive when the task needs them.
-  - **Tells you on Telegram** when a task finishes, fails or waits for you, so you can walk away.
-  - **Never sends `max_tokens`**, so no provider cuts a reply short by a limit you didn't choose.
+**Safety first.** A coding CLI runs with your files, your keys and your shell. Most pull in
+hundreds of npm packages, and any of them can be hijacked to ship malware in an update. HeartCode
+has none, so there's nothing for anyone to poison.
 
-### And the rest you'd expect
+## What it does differently
 
-- **Any OpenAI-compatible provider**, several at once: OpenRouter, Groq, NVIDIA, Gemini, Ollama,
-  LM Studio, your own proxy…
-- **Set up in a web page** on your own machine (`/settings`), not by editing config files.
-- **Usable by other tools and AI agents**: `heart -p` runs one task headless, like `claude -p`
+**It keeps working when a model doesn't**
+- Give it a list of models, from any providers (free ones too). When one hits a rate limit, goes
+  down or fails, the next one answers and the work goes on. A ↻ in the status bar shows it.
+- When a conversation gets too long for a model, it moves to one of your models with more room
+  instead of summarizing things away.
+- When a model goes round in circles, the next one takes over. Only you stop it (Esc).
+
+**It works carefully**
+- It asks what you want before it builds, reads the current docs before it uses something, and
+  makes a plan before it changes anything.
+- It runs and tests what it changed before it says "done", and another of your models checks the
+  result against what you asked.
+- It writes the least code that works and changes only what the task needs.
+
+**It learns, per project**
+- Every web page it reads is saved in `.heartcode/research/`.
+- After a task, it saves what's worth knowing as notes (`.heartcode/memory/`) and deletes the junk
+  and throwaway files, in the background.
+- A mistake it fixes becomes a lesson it won't repeat.
+
+**It gets good work out of small and local models**
+- Models that can't call tools are guided one simple question at a time.
+- What each model can do comes from [models.dev](https://models.dev), so nothing is wasted
+  finding out.
+- It sends only what's needed, and never sends `max_tokens`, so no reply is cut short.
+
+**And the rest you'd expect**
+- **Set up in a web page** (`/settings`), not by editing config files.
+- **Skills, MCP servers and hooks** in Claude Code's formats; `/import` brings yours over.
+- **Tabs** (`Alt+T`) and git worktrees, for work kept apart.
+- **Servers in the background**: the model starts a dev server and keeps working. `Alt+B` shows
+  their logs live.
+- **Telegram messages** when a task finishes, fails or waits for you.
+- **Logs** of exactly what you choose (seven kinds, all off by default), readable on the settings page.
+- **`heart -p`** runs one task without the screen, for other tools and AI agents, like `claude -p`
   (see [SKILL.md](SKILL.md)).
-- **Logs what you need, nothing else**: seven kinds, each switched on by itself (all off by
-  default): requests, tools & commands, model choices, the agent's decisions, errors, the
-  conversation, debug. Read them on the settings page, searched and live.
-- **Takes skills, MCP servers and hooks** in Claude Code's formats; `/import` brings yours over.
-- **Tells you when a newer version is out** (a check with npm each time it starts, in the status bar):
-  `/update` shows what changed and installs it the way you installed HeartCode. Switch it off in
-  `/settings` → General.
-- **Your models, in your order**: #1 answers; when it fails, the next one in your list does. Your
-  models page shows what each can do and costs (from your providers and models.dev) and its places in
-  LMArena's public rankings for coding, web apps and vision (**Update model info** gets both); sort by
-  any of them, then keep the order you like. #1 can
-  hand a part of a job to your other models (the agent tool), picking one that can do it (one that
-  sees images, for a picture). `heartcode page index.html` checks a web page in a real browser
-  (errors, a blank page, text too faint to read, content hidden at load, icons that don't draw) and
-  saves desktop and phone screenshots.
-- **Works with discipline by default**: its rules (from Karpathy's guidelines, Grill Me,
-  Superpowers, Ponytail and Caveman) have it ask before building, find a bug's root cause first,
-  write the least code that works, change only what the task needs, prove it before saying done,
-  then stop, and answer short. A skill with `use: always` adds rules of your own to every message.
-- **Tabs** (`Alt+T`), each with its own conversation, and git worktrees for work kept apart.
-- **Servers and watchers in the background**: the model starts one and goes on working, reads its
-  output when it needs to, and stops it. `Alt+B` (or `/background`) shows their logs live above the input,
-  a tab each (←/→ or a click switches), while you work; nothing outlives HeartCode.
-- **`/context`**: what fills the context window, part by part (system prompt, tools, messages, tool
-  results) and the biggest single pieces.
+- **`heartcode page index.html`** checks a web page in a real browser (errors, blank page, faint
+  text, missing icons) and saves desktop and phone screenshots.
+- **`/context`** shows what fills the context window. `/update` installs a newer version.
 
-## How I set it up and use it
+## What happens when you ask it to make something
+
+1. **It asks first.** If your request leaves something open (how it should look, how far to go,
+   whether to test it), it asks you, with its own suggestion first. Small fixes it just does.
+2. **It reads up** on whatever it's about to use, instead of trusting its memory.
+3. **It makes a plan**: a todo list you can see. It can't change a file before there's one.
+4. **It does the work**: reading files, running commands, editing.
+5. **It may split the work.** Your #1 model can hand a job to a helper, or run separate parts at
+   the same time, each on its own files. Helpers use your models in your order. The model decides.
+6. **It checks before it says it's done**: it must have tested what it changed, finished its todo
+   list and made the files it names. Then your next models say yes or no; a no sends it back.
+7. **It tidies up** in the background: saves notes for next time, removes throwaway files.
+
+## How to set it up
 
 ### 1. Install
-
-From npm:
 
 ```sh
 npm install -g heartcode
 ```
 
-Or from source:
+Or from source (a `git pull` then updates it):
 
 ```sh
 git clone https://github.com/p32929/HeartCode.git
@@ -96,11 +91,7 @@ cd HeartCode
 npm start
 ```
 
-`npm start` links the `heart` command to that folder, so a `git pull` updates it.
-
-### 2. Run `heart`
-
-In the project you want to work on:
+### 2. Run `heart` in your project
 
 ```sh
 cd ~/code/my-app
@@ -109,24 +100,20 @@ heart
 
 ### 3. Open the settings page
 
-Type `/settings`. The settings page opens in your browser. The link shown has your machine's
-network address (like `http://192.168.1.108:43135/?t=…`), so it opens from another device on the
-same network too: HeartCode on a server over SSH, the page on your laptop. Only that link works:
-it has a secret key, and the page answers only to this machine's own addresses. A running
-HeartCode picks up what you change right away.
+Type `/settings`. The page opens in your browser. Its link also works from another device on your
+network (handy when HeartCode runs on a server over SSH). Only that link works: it has a secret
+key. A running HeartCode picks up your changes right away.
 
 <!-- image: the settings page -->
 ![The settings page](https://res.cloudinary.com/m0jnrul4/image/upload/v1793485584/8396c407-f5f8-48af-a242-0b5cbc1c0331.png)
 
-The sidebar, in four groups:
+What's in the sidebar:
 
-- **Models**: *Your list* (the models HeartCode uses, in order) and *Providers* (where they
-  come from).
-- **General**: *Settings* (what it may do without asking, terminal colors, features, thinking
-  effort, voice input, web search: your own SearXNG and the engines' order, and which outside tools are ready) and *Status bar* (drag and drop what the
-  bottom lines show, with a live preview). **Notifications**: Telegram.
-- **Skills**, **MCP servers** and **System prompt**: what HeartCode can do and how it's told.
-- **Advanced**: *Logs* (seven kinds, each on or off, and a viewer) and *Files* (the rest of the settings, as files).
+- **Models**: *Your list* (the models HeartCode uses, in order) and *Providers* (where they come from).
+- **General**: what it may do without asking, colors, thinking effort, voice input, web search,
+  and the *Status bar* (drag and drop what it shows). **Notifications**: Telegram.
+- **Skills**, **MCP servers** and **System prompt**: what HeartCode can do and what it's told.
+- **Advanced**: *Logs* and *Files* (the rest of the settings, as files).
 
 ### 4. Add a provider and pick models
 
@@ -134,65 +121,93 @@ On **Models → Providers**:
 
 ![The settings page](https://res.cloudinary.com/m0jnrul4/image/upload/v1793485944/HeartCode-Settings-11-01-2026_02_28_AM_1.png)
 
-1. **Add a provider**: its name, base URL and API key. Pick one of the presets to fill in the URL.
-2. **Choose the models to use**: click a model to add it to your list. I use the free models.
+1. **Add a provider**: its name, base URL and API key. A preset fills in the URL.
+2. **Pick models**: click a model to add it to your list. I use the free ones.
 
 ### 5. Put your list in order
 
 On **Models → Your list**:
 
-1. **Sort them by context and abilities.** Click the *Abilities* column, then *Context*: the
-   models that can do the most come first, the biggest context window first among those (each
-   column clicked breaks the ties of the ones before; click one again to reverse it, a third time to
-   drop it). Click **Save order** to keep it.
-2. **Rearrange a bit more.** Drag a row to move it. #1 is the one HeartCode uses; the others are
-   its fallbacks, tried in order.
-3. **Test them** (optional): **Test all** sends each a short message and shows which really answer and
-   how fast (Works?; sort by it for the fastest first). **Test** on a row tests one, the eye shows
-   exactly what was sent and what came back. Each test waits up to 10 seconds; **Tests wait** changes that.
-4. **Filter them** (optional): by name, provider, test result (works, doesn't, not tested, or one
-   error like 402), context, tools, thinking, images or free. **Test N** then tests only the ones
-   shown, and **Use only these N** makes them the models HeartCode uses, in the order you see (the
-   others stay under Providers). Filter to the working ones, sort by Works?, Use only these: HeartCode
-   uses your working models, fastest first.
+1. **Sort.** Click *Abilities*, then *Context*: the most capable models come first, the biggest
+   context window first among those. Click **Save order**.
+2. **Drag rows** to fine-tune. #1 is the one HeartCode uses; the rest are its fallbacks, in order.
+3. **Test** (optional): **Test all** sends each model a short message and shows which answer and
+   how fast (*Works?*). Sort by it to put the fastest first.
+4. **Filter** (optional): by name, provider, test result, context, abilities or free. **Use only
+   these** keeps just the ones you see, in that order.
 
-If a model says *not found* in models.dev, **Retry** looks it up again, or **Set up** tells
-HeartCode what it can do.
+**Update model info** fetches what each model can do and costs (from models.dev) and its places in
+LMArena's public rankings for coding, web apps and vision, as columns to sort by. A model *not
+found* in models.dev: **Retry** looks it up again, or **Set up** tells HeartCode what it can do.
 
-### 6. Optional: notifications and logs
+### 6. Recommended: let it see what it builds
 
-- **Notifications**: a Telegram message when a task finishes, fails or waits for you. Make a bot
-  with [@BotFather](https://t.me/BotFather), paste its token, press Start in the bot, and
-  HeartCode finds your chat.
-- **Advanced → Logs**: switch on only the kinds you need (requests, tools & commands, model choices,
-  the agent's decisions, errors, the conversation, debug), and read them there: by run, searched, live.
-  Logs older than 3 days are deleted (you can change that).
+Out of the box, HeartCode reads, writes and runs code. It can't see a page it made or click
+through an app. These three fix that. They're optional, but you'll get much better results with
+them, especially for anything with a screen.
+
+**The design skill**: so the pages and apps it makes look right.
+AI-made interfaces often look generic, crowded or broken. This skill gives the model a method
+(understand the job, break the design down, take every size and color from one system, check it)
+plus a theme, a starter page and guides for common components, in shadcn/ui's look.
+- Install: **Skills** → paste `p32929/p32929_design_skill` in *Install a skill* → **Install**.
+  Or type `/install_skill p32929/p32929_design_skill` in HeartCode.
+- The model loads it when a task is about how something looks. To have it in every message, set
+  *Who uses it* to *Always on*.
+
+**Chrome DevTools MCP**: so it can check web pages in a real browser.
+The model opens what it built in Chrome, clicks through it, reads the console errors and takes
+screenshots, instead of guessing whether it works.
+- Install: **MCP servers** → **+ Add a server** → paste `npx -y chrome-devtools-mcp@latest --isolated`
+  → **Add server**. Its name (*chrome-devtools*) comes from the command.
+- `--isolated` gives it a fresh browser profile each time, so it never touches your own Chrome.
+  Add `--headless` with the *+ flag* box to hide the window; untick a flag to turn it off.
+- Needs Google Chrome installed.
+
+**Computer use MCP**: so it can use apps outside the browser.
+Screenshots, mouse, keyboard and apps on your computer: for testing a desktop app or a game, or
+anything a browser can't reach.
+- Install: **+ Add a server** → paste `npx -y @zavora-ai/computer-use-mcp@latest` → **Add server**.
+  Its name is *computer-use*.
+- On macOS, give your terminal app **Accessibility** and **Screen Recording** access (System
+  Settings → Privacy & Security), and install the Xcode command line tools
+  (`xcode-select --install`).
+- It can click anything on your screen. Switch it off in the list when you don't need it.
+
+For screenshots to be useful, one of your models must be able to see images. If #1 can't, it
+hands the looking to the first of your models that can.
+
+**Also useful:**
+- **Notifications**: a Telegram message when a task finishes, fails or waits for you. Make a bot with
+  [@BotFather](https://t.me/BotFather), paste its token, press Start in the bot; HeartCode finds your chat.
+- **Advanced → Logs**: switch on only the kinds you need and read them there (by run, searched,
+  live). Logs older than 3 days are deleted.
 
 ### 7. Back to HeartCode
 
-Go back to the terminal. While the settings page is on, HeartCode shows a dialog and waits.
-Your changes are already in.
+Go back to the terminal. While the settings page is on, HeartCode shows a dialog and waits. Your
+changes are already in.
 
 ### 8. Press Enter to stop the settings page
 
-**Turn off** is selected: press Enter. The page stops and HeartCode is yours again.
+**Turn off** is selected: press Enter.
 
 <!-- image: the "settings page is on" dialog -->
 ![The settings dialog](https://res.cloudinary.com/m0jnrul4/image/upload/v1793486060/Screenshot_2026-11-01_at_2.34.15_AM.png)
 
 ### 9. Send "Hi" as a test
 
-Type `Hi` and press Enter. Wait for the reply: your model works.
+Type `Hi` and press Enter. A reply means your model works.
 
 ### 10. Start using it
 
-Use HeartCode like any other coding agent: ask it to read, change, run and fix things in your
-project. `/` shows every command, `Shift+Tab` changes what it may do without asking, `Esc` stops
-it, and `heart --help` lists everything else. While it works, commands that leave the conversation
-alone (`/help`, `/cost`, `/diff`, `/select_model`, `/settings`, `/tab`, `/exit`…) run at once; the
-ones that change it (`/compact`, `/rewind`, `/resume`…) wait until it's done. Pickers, questions and what
-commands show (`/help`, `/context`, `/diff`…) open in a dialog over the conversation; `Esc`
-closes it.
+Ask it to read, change, run and fix things in your project, like any coding agent.
+
+- `/` shows every command; `heart --help` lists the rest.
+- `Shift+Tab` changes what it may do without asking.
+- `Esc` stops it, or closes a dialog.
+- While it works, commands that don't change the conversation (`/help`, `/cost`, `/diff`,
+  `/settings`…) run at once; the ones that do (`/compact`, `/rewind`…) wait until it's done.
 
 ## Thanks
 
@@ -202,7 +217,9 @@ models: sending a "no, do this instead" as your own message, counting code's tok
 keeping the provider's prompt cache, checking what uses a changed function, saving what the model
 found before compacting), [OpenCode](https://github.com/anomalyco/opencode),
 [Cline](https://github.com/cline/cline), [OpenClaw](https://github.com/openclaw/openclaw) and
-[Pi](https://github.com/earendil-works/pi), for the many use cases like these they showed me.
+[Pi](https://github.com/earendil-works/pi), for the many use cases like these they showed me. Its
+working rules (ask before building, root cause first, the least code that works, prove it, answer
+short) come from Karpathy's guidelines, Grill Me, Superpowers, Ponytail and Caveman.
 
 ## License
 

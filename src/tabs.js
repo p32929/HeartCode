@@ -137,7 +137,7 @@ export class Tabs {
       mid += line('│') + label + line('│') + ' '
       bottom += (on ? c.brand(`╯${' '.repeat(w)}╰`) : c.ghost(`┴${'─'.repeat(w)}┴`)) + c.ghost('─')
     })
-    const hint = this.list.length > 1 ? 'Alt+T open a tab · Alt+W close this one · Alt+N/P (or Ctrl+PgUp/PgDn) switch tabs' : 'Alt+T open a new tab'
+    const hint = this.list.length > 1 ? 'Alt+T open a tab · Alt+W close this one · Alt+N/P switch tabs' : 'Alt+T open a new tab'
     mid += ` ${c.faint(hint)}`
     bottom += c.ghost('─'.repeat(Math.max(0, cols - width(bottom.replace(/\x1b\[[0-9;]*m/g, '')))))
     return [top, mid, bottom]
