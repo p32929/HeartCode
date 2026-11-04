@@ -8,7 +8,7 @@ import { est, estMessages, Client, writtenBy, tokensOf, COMPACT_SHARE } from './
 import { runGuided } from './guided.js'
 import { markUsed, removeResearch, findResearch } from './research.js'
 import { loadRankings, rankIn, rankings } from './rankings.js'
-import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, noteNamedPaths } from './tools.js'
+import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, searchesOutside, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, noteNamedPaths } from './tools.js'
 import { serversNote } from './lsp.js'
 import { newlyEnded, jobLine } from './background.js'
 import { loadHooks, runHooks } from './hooks.js'
@@ -219,7 +219,7 @@ export class Session {
       if (this.orchestrating && !this.team?.().length) this.orchestrating = false // no one to hand to: it does the work itself
       if (this.orchestrating) rankings().catch(() => {}) // their places, for its list of models: fetched behind (once a week), never waited for
       // never tested together (the settings page's Test): it picks by names and ranks alone, so say how to do better, once
-      if (this.orchestrating && !Session.tipped && !fs.existsSync(path.join(HOME, 'full-test.json'))) (Session.tipped = true), this.ui.warn(prompt('agent/orchestrator-untested'))
+      if (this.orchestrating && !this.ui.full && !Session.tipped && !fs.existsSync(path.join(HOME, 'full-test.json'))) (Session.tipped = true), this.ui.warn(prompt('agent/orchestrator-untested'))
       log('rotate', `this message starts on ${this.client.provider ?? ''} · ${this.client.model}${this.client.rotation ? ` (#${this.client.rotation.at + 1} of ${this.client.rotation.list.length}${this.orchestrating ? ', orchestrating' : ', your order'})` : ''}`)
     }
     log('task', `${text} (${this.strat.actions} mode, ${images.length} image(s))`)
@@ -284,15 +284,20 @@ export class Session {
       if (answer) {
         const ms = Date.now() - t0
         let checked = null
+        let unchecked = '' // why the check wasn't run
         if (check) {
           this.ui.step('check', clip(check, 80))
-          checked = await runCheck(this.root, check, signal)
-          log('agent', `check of ${name(t)}'s work: ${checked.report}`)
-          this.ui.step('check', `${checked.ok ? 'passed' : 'failed'}: ${clip(checked.report.split('\n')[0], 100)}`)
+          unchecked = await this.#mayCheck(check)
+          if (unchecked) this.ui.result(unchecked)
+          else {
+            checked = await runCheck(this.root, check, signal, (t) => this.ui.step('browser', t)) // Esc: an AbortError, not a failed check
+            log('agent', `check of ${name(t)}'s work: ${checked.report}`)
+            this.ui.step('check', `${checked.ok ? 'passed' : 'failed'}: ${clip(checked.report.split('\n')[0], 100)}`)
+          }
         }
         record(name(t), { ...about, ms, ok: true, ...(checked && { check: checked.ok ? 'pass' : 'fail', why: checked.ok ? undefined : clip(checked.report, 120) }) })
         const said = t === first ? answer : `(Answered by ${name(t)}, not ${name(first)}${failed.length ? `: ${failed.join('; ')}` : ''})\n\n${answer}`
-        return checked ? `${said}\n\n${prompt(checked.ok ? 'agent/check-passed' : 'agent/check-failed', { model: name(t), report: checked.report })}` : said
+        return checked ? `${said}\n\n${prompt(checked.ok ? 'agent/check-passed' : 'agent/check-failed', { model: name(t), report: checked.report })}` : unchecked ? `${said}\n\n(HeartCode didn't run the check: ${unchecked.replace(/^not run: /, '')}.)` : said
       }
       if (failed.length < i + 1) {
         record(name(t), { ...about, ms: Date.now() - t0, ok: false, why: 'no reply' })
@@ -305,6 +310,17 @@ export class Session {
     return `error: none of your models that can do it managed: ${failed.join('; ')}`
   }
 
+  // A handoff's check goes through what any command does: a page is only opened (always fine); a
+  // command isn't run in plan mode (unless it only reads), nor when it reaches outside the project,
+  // and the user's permission setting asks first. Returns why it isn't run, or ''.
+  async #mayCheck(check) {
+    if (/^page\s/i.test(check)) return ''
+    if (this.ui.permission === 'plan' && !readOnlyCommand(check)) return 'not run: plan mode'
+    if (searchesOutside(check, this.root)) return 'not run: it reaches outside the project'
+    const ok = this.ui.permission === 'plan' ? true : await this.ui.confirm(`Run the check ${c.bold(check)}?`, 'command')
+    return ok === true ? '' : 'not run: the user declined'
+  }
+
   // One helper on one model (t: this one, or another of yours), with its own connection (a helper's
   // failure moves no one else on to another model) that gives up after a few tries (then the next
   // model gets the job).
@@ -313,7 +329,7 @@ export class Session {
     if (this.engineFor) {
       ;({ client, profile, strat } = await this.engineFor(t))
       const was = client.retryIf
-      client.retryIf = (e, attempt) => attempt < 3 && !e.notStarted && e.status !== 429 && (!was || was(e, attempt)) // not answering in time or rate-limited: the next model, not another wait
+      client.retryIf = (e, attempt) => attempt < 3 && e.name !== 'TimeoutError' && e.status !== 429 && e.status !== 413 && (!was || was(e, attempt)) // silent (not starting, or stopping midway: each try would wait as long again), rate-limited or too large: the next model, not another try
     }
     const label = clip(`${client.model}: ${String(description ?? '').trim() || task.split('\n')[0]}`, 60)
     const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
@@ -585,6 +601,14 @@ const rootList = (root) => {
 export function orchestratorSetup(root, team) {
   const s = { root, orchestrating: true, subagent: true, fitMode: () => true, team: () => team, strat: {}, client: {} }
   return { system: SYSTEM(s), tools: [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name)).map((f) => ({ type: 'function', function: f })) }
+}
+
+// How big a model's first request is in a role (its system prompt and tools), in tokens: a model that
+// takes less in one request can't be used for it (usable.js). team: the models an orchestrator lists.
+export function firstRequest(root, orchestrating, team = []) {
+  const s = orchestrating ? null : { root, isSub: true, strat: {}, client: {} }
+  const { system, tools } = orchestrating ? orchestratorSetup(root, team) : { system: SYSTEM(s), tools: [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name)).map((f) => ({ type: 'function', function: f })) }
+  return est(system) + est(JSON.stringify(tools))
 }
 
 const SYSTEM = (s) => {

@@ -5,7 +5,7 @@
 A coding agent for your terminal that works with any OpenAI-compatible model.
 
 **Zero dependencies.** Nothing in `node_modules`, no install scripts, no packages pulled in
-behind your back: only Node.js (20 or newer) and HeartCode's own code. What you install is
+behind your back: only Node.js (22 or newer) and HeartCode's own code. What you install is
 what you can read.
 
 <!-- image: HeartCode in the terminal, answering a message -->
@@ -66,11 +66,11 @@ tried did what I needed:
   skill scores, and its record on the jobs it was handed before (the most similar ones shown to it),
   then LMArena's public rankings. One **Test** checks the whole team at once, live in one dialog: does
   each model answer, the skills of the ones that do the work, then each orchestrator handing them
-  work in a few short scenes (the best go first). Until it's run, HeartCode says so once.
+  work in a few short scenes (the best go first). Until it's run, HeartCode asks before your first message: test now, use your order, or send anyway.
 - **Work is checked, not taken on trust**: every job an orchestrator hands out comes with a check
   that HeartCode runs itself when the model is done: a command (the tests, the program) that must
   pass, or `page <file>`, which opens a web page in a real browser (Chrome, Chromium or Edge, found
-  on your computer; without one, a static check) and fails on errors, a blank page, or a click that
+  on your computer; with none, a headless one is fetched once into ~/.heart/browser) and fails on errors, a blank page, or a click that
   breaks it. A failed check goes back to the orchestrator with the output, to hand the fix on. Each
   result goes into the model's record, so it picks better over time. `heartcode page index.html`
   runs the same check from your shell and saves desktop and phone screenshots.

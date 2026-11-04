@@ -1,6 +1,6 @@
 {
   "name": "heartcode",
-  "version": "0.1.49",
+  "version": "0.1.50",
   "description": "A coding CLI for any local or OpenAI-compatible model, including small models without tool calling.",
   "keywords": [
     "ai",
@@ -34,7 +34,7 @@
     "heartcode": "bin/heart.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "start": "node scripts/install.js"

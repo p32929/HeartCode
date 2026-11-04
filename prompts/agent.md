@@ -286,7 +286,7 @@ Hand work to one of the models in the system prompt. It works with every tool (f
 ## tool-hand-check
 
 <!-- The agent tool's "check" for the orchestrator. -->
-How HeartCode proves the work when the model is done: a shell command run in the project that exits 0 only if it's right (e.g. "python3 -m pytest -q", "node test.js", "npm run build"), or "page <file>" (e.g. "page index.html") to open a web page in a browser. Must end by itself (no servers). Leave it out only when there's nothing to run (an answer, a look-up).
+How HeartCode proves the work when the model is done: a shell command run in the project that exits 0 when the work is right and only then (e.g. "python3 -m pytest -q", "node test.js", "npm run build"; that something is gone: "test ! -e <path>"), or "page <file>" (e.g. "page index.html") to open a web page in a browser. Must end by itself (no servers). Leave it out only when there's nothing to run (an answer, a look-up).
 
 ## check-passed
 
@@ -391,7 +391,7 @@ Tip: the orchestrator picks models best after a test: /settings → Your models 
 ## review
 
 <!-- A second look before a task is called done, in a request of its own (another model when there is one). {{request}}: the user's messages; {{plan}}: the todo list; {{answer}}: the agent's final reply; {{changes}}: the diffs; {{ran}}: commands run (newest last) with how they ended. -->
-You check a coding agent's work before it's handed to the user. Judge it against what the user asked, strictly: is it complete (every part, every item of "all"/"every"), correct (it would work: no bug, no wrong API, nothing left as a placeholder or TODO), and checked (what was run shows it working)? Don't judge style or taste, only whether it does what was asked.{{#if emphasis}} The user said how they want it: {{emphasis}}. Hold it to that: what they didn't choose (polish, extra features, tests, edge cases) is not missing.{{/if}}
+You check a coding agent's work before it's handed to the user. Judge it against what the user asked, strictly: is it complete (every part, every item of "all"/"every"), correct (it would work: no bug, no wrong API, nothing left as a placeholder or TODO), checked (what was run shows it working), and clean (no scratch files or folders the agent made by hand left in the project — experiments, copies, test pages; caches and build output that tools make, like .pytest_cache or node_modules, are fine)? Don't judge style or taste, only whether it does what was asked.{{#if emphasis}} The user said how they want it: {{emphasis}}. Hold it to that: what they didn't choose (polish, extra features, tests, edge cases) is not missing.{{/if}}
 
 The user asked:
 {{request}}
@@ -686,6 +686,6 @@ The user's request, in their own words (do what it asks, as well as it asks):
 {{request}}
 {{#if choices}}They answered: {{choices}}
 {{/if}}
-Don't stop to ask questions back: where something isn't said, choose what serves the request best, do the whole job, and say what you chose.
+Don't stop to ask questions back: where something isn't said, choose what serves the request best, do the whole job, and say what you chose. Leave only what the job needs: remove any scratch files and folders you made by hand along the way (experiments, copies, test pages; tools' caches can stay).
 {{#if check}}When you're done, HeartCode checks your work with: {{check}} — make sure it passes: run it yourself first (`{{run}}`) and fix what it reports.
 {{/if}}

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import path from 'node:path'
 import { parseArgs } from 'node:util'
-import { Client } from '../src/client.js'
+import { Client, limitSaid } from '../src/client.js'
 import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, TEMP, AUTO_MODEL, isAuto, parseModel, takeIn, whatOf, VERSION } from '../src/config.js'
 import { loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
-import { learnFromUsage, LIMIT_MS } from '../src/context.js'
-import { Session, transcript, contextReport } from '../src/agent.js'
+import { learnFromUsage, LIMIT_MS, RATE_CAP_MS } from '../src/context.js'
+import { whyUnusable } from '../src/usable.js'
+import { Session, transcript, contextReport, firstRequest } from '../src/agent.js'
 import { listJobs, getJob, stopJob, removeJob, runningJobs, tailLines, ago as ranFor } from '../src/background.js'
 import { checkUpdate, installKind, UPDATE_COMMANDS, packageDir, whatsNew } from '../src/update.js'
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
@@ -344,6 +345,17 @@ class App {
       const k = `${t.provider} ${t.model}`
       this.failures[k] = (this.failures[k] ?? 0) + 1
       if (Number(e.retryAfter) > 60) this.resting[k] = Date.now() + Number(e.retryAfter) * 1000
+      // "too large" with the limit stated (Groq: "Limit 2000 … tokens per minute"): kept in its profile,
+      // so it isn't sent what it can't take, and is left out where its first request is bigger (usable.js)
+      const said = limitSaid(e)
+      if (said) {
+        const cl = this.client(t.provider, t.model)
+        const p = loadProfile(cl) || profileFrom(cl, limitsOf(t.provider, cl.baseUrl, t.model))
+        if (said.rate) p.rateCap = { tokens: said.tokens, until: Date.now() + RATE_CAP_MS }
+        else Object.assign(p, { inputLimit: said.tokens, inputLimitAt: Date.now() })
+        writeJson(profilePath(cl), p)
+        log('context', `${k}: ${said.rate ? 'a per-minute cap' : 'a request limit'} of ${said.tokens} tokens, from its provider`)
+      }
     }
     // the model list (settings page): another model answered
     client.onSwitch = (t) => {
@@ -831,17 +843,29 @@ class App {
     const now = this.s?.client.rotation?.list[this.s.client.rotation.at] ?? this.sessionModels()[0]
     const lead = this.s?.orchestrating ? this.orchestrators() : []
     const tested = readJson(path.join(HOME, 'model-tests.json'), {}) // Test all's and Test skills' results: how quick, which did a job with a tool, the skill scores (ponytail: read each time, it's small)
+    const need = (this.workerNeed ??= firstRequest(this.root, false))
     return this.sessionModels()
       .filter((t) => ![now, ...lead].some((o) => t.provider === o?.provider && t.model === o?.model))
-      .map((t) => ((r) => ({ ...t, ...this.abilities(t), toolsOk: r?.toolsOk, replyMs: r?.ok ? r.ms : undefined, skills: r?.skills }))(tested[`${t.provider}/${t.model}`]))
+      .map((t) => ((r) => ({ ...t, ...this.abilities(t), toolsOk: r?.toolsOk, replyMs: r?.ok ? r.ms : undefined, skills: r?.skills, test: r }))(tested[`${t.provider}/${t.model}`]))
+      .filter((t) => !this.leftOut(t, whyUnusable({ test: t.test, context: t.context, need }))) // what can't work isn't offered
+  }
+
+  // A model HeartCode leaves out (usable.js): said once per session per model, in the log
+  leftOut(t, why) {
+    if (why && !(this.saidOut ??= new Set()).has(`${t.provider} ${t.model}`)) this.saidOut.add(`${t.provider} ${t.model}`), log('fit', `left out: ${t.provider} ${t.model}: ${why}`)
+    return Boolean(why)
   }
 
   // The models that orchestrate (Pick: "an orchestrator hands it out"): those picked on Your models
   // that are in this session's set and call tools; none picked: your first that calls tools.
   orchestrators() {
+    const tested = readJson(path.join(HOME, 'model-tests.json'), {})
+    const last = readJson(path.join(HOME, 'full-test.json'), null)?.orchestrators ?? []
+    const need = firstRequest(this.root, true, this.sessionModels()) // its list of the others: about the same size
+    const able = (t) => !this.leftOut(t, whyUnusable({ test: tested[`${t.provider}/${t.model}`], context: this.abilities(t).context, need, orch: last.find((r) => r.provider === t.provider && r.model === t.model) }))
     const mine = this.sessionModels().filter((t) => this.abilities(t).tools)
-    const picked = (this.cfg.orchestrators ?? []).map((o) => mine.find((t) => o.provider === t.provider && o.model === t.model)).filter(Boolean) // in their own order (Test orchestrators sets it)
-    return picked.length ? picked : mine.slice(0, 1)
+    const picked = (this.cfg.orchestrators ?? []).map((o) => mine.find((t) => o.provider === t.provider && o.model === t.model)).filter((t) => t && able(t)) // in their own order (Test sets it)
+    return picked.length ? picked : mine.filter(able).slice(0, 1)
   }
 
   // What a model can do, from its saved profile or models.dev (guessed: neither knows it).
@@ -1427,23 +1451,26 @@ async function slash(app, line, working = false) {
       return ui.print(`${c.ok('✓')} ${c.muted(`reset: ${it.label.toLowerCase()}`)}${it.level === 'settings' ? '' : c.dim(' · add a provider on /settings')}`)
     }
     case 'settings': {
-      settingsPage ??= startSettings({ cfg, root: app.root, onLoginMcp: (name) => signInMcp(app, name, null), apply: (what) => applySettings(app.tabs ? app.tabs.list.map((t) => t.app) : [app], cfg, what) })
+      settingsPage ??= startSettings({ cfg, root: app.root, onLoginMcp: (name) => signInMcp(app, name, null), onTested: () => settingsDone?.(), apply: (what) => (applySettings(app.tabs ? app.tabs.list.map((t) => t.app) : [app], cfg, what), what === 'setting:modelChoice' && !fitMode(cfg) && settingsDone?.()) })
       const { url, local, close } = await settingsPage
-      openBrowser(local)
-      ui.print(`${c.info('↗')} ${c.bold('settings')} ${c.muted('opened in your browser:')}\n  ${c.faint(url)}`)
+      const test = settingsDone ? '&test=1#models' : '' // opened to run the Test (testedFirst): the page starts it
+      openBrowser(local + test)
+      ui.print(`${c.info('↗')} ${c.bold('settings')} ${c.muted(test ? 'opened in your browser, testing:' : 'opened in your browser:')}\n  ${c.faint(url + test)}`)
       // a dialog until it's turned off: nothing else meanwhile, in any tab (Esc turns it off too).
       // Not busy meanwhile: what's changed on the page applies at once, here too (opened while a task
       // works: once it's done).
       if (!working) ui.idle()
       if (app.tabs) app.tabs.locked = true
+      let done = false // ended by what it was opened for (testedFirst): the page stays, to read the results
+      const was = settingsDone
+      if (was) settingsDone = () => ((done = true), was())
       try {
         await ui.pick('The settings page is on', [{ label: 'Turn off', desc: 'stops the page and gives HeartCode back' }], { fixed: true, body: `It's open in your browser:\n${url}\n\nWhat you change there applies right away.` })
       } finally {
         if (app.tabs) app.tabs.locked = false
-        close()
-        settingsPage = null
+        if (!done) close(), (settingsPage = null)
       }
-      return ui.print(c.dim('settings page turned off'))
+      return ui.print(c.dim(done ? 'the settings page stays open in your browser for now (/settings turns it off)' : 'settings page turned off'))
     }
     case 'tab': {
       const { tabs } = app
@@ -1725,9 +1752,46 @@ async function slash(app, line, working = false) {
   }
 }
 
+// An orchestrator whose models were never tested together (the settings page's Test) would pick by
+// names and public ranks alone: before the message goes, ask what to do. Test (the message waits for
+// the settings page), your order instead, or send it anyway (not asked again this session).
+async function testedFirst(app) {
+  const { ui, cfg } = app
+  const untested = () => ui.full && fitMode(cfg) && !app.untestedOk && app.sessionModels().length > 1 && !fs.existsSync(path.join(HOME, 'full-test.json'))
+  if (!untested()) return true
+  const it = await ui.pick('Test your models first?', [
+    { label: 'Open settings and run Test', desc: 'checks your orchestrators and models work together; your message waits', act: 'test' },
+    { label: 'Use my order instead', desc: '#1 answers, the next one when it fails (switch back in /settings)', act: 'order' },
+    { label: 'Send it anyway', desc: 'the orchestrator guesses from names and ranks (not asked again this session)', act: 'send' },
+  ], { fixed: true, body: "An orchestrator picks which of your models does each job, by how they did in a test. Yours haven't been tested yet." })
+  if (!it) return ui.print(c.dim('not sent')), false
+  if (it.act === 'send') app.untestedOk = true
+  if (it.act === 'order') {
+    cfg.modelChoice = 'order'
+    modelChoiceFlag = undefined
+    saveConfig(cfg)
+    applySettings(app.tabs ? app.tabs.list.map((t) => t.app) : [app], cfg, 'setting:modelChoice')
+    ui.print(`${c.ok('✓')} ${c.muted('your models in your order now (/settings to change it)')}`)
+  }
+  if (it.act === 'test') {
+    // the page's done when the Test is (or you switch to your order there): it turns off, and the message goes
+    ui.print(c.dim('The Test starts on the settings page. When it\'s done, your message goes.'))
+    settingsDone = () => ui.cancelAsk('done')
+    try {
+      await slash(app, '/settings')
+    } finally {
+      settingsDone = null
+    }
+    if (untested()) (app.untestedOk = true), ui.print(c.dim('not tested yet: this time the orchestrator picks by names and ranks'))
+  }
+  return true
+}
+let settingsDone = null // what the settings page ends when it's done (testedFirst)
+
 async function runTask(app, task, ctl) {
   const { ui } = app
   try {
+    if (!(await testedFirst(app))) return false
     const s = await app.session()
     if (!s) return false
     let answer
@@ -1904,7 +1968,10 @@ async function repl(app, f = {}) {
 }
 
 async function main() {
-  if (process.argv[2] === 'page') return (process.exitCode = await (await import('../src/check.js')).pageCommand(process.argv[3])) // a web page checked in a browser (src/check.js)
+  // "heartcode page <file|url>": a web page checked in a browser (src/check.js). Only that: a prompt
+  // that starts with "page" ("page fix the footer") is a prompt
+  const target = process.argv[3]
+  if (process.argv[2] === 'page' && process.argv.length === 4 && (/^https?:\/\//.test(target) || fs.existsSync(target))) return (process.exitCode = await (await import('../src/check.js')).pageCommand(target))
   // "--resume <id>" (as in Claude Code) vs a bare "--resume" (pick one): an id follows it
   const argv = process.argv.slice(2)
   const print = argv.includes('-p') || argv.includes('--print') // headless: an id after --resume is always an id

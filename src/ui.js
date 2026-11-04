@@ -1827,7 +1827,7 @@ export class UI {
           this.inputMark = this.log.length - 1 // where this message starts, for /rewind
           const picked = Array.isArray(pick?.chosen) ? pick.chosen.map((x) => x.label).join(', ') : pick?.chosen?.label
           if (pick?.quiet) this.render()
-          else if (pick) this.write(echo + (picked ?? c.dim('cancelled')) + '\n')
+          else if (pick) this.write(echo + (picked ?? c.dim(pick.closedAs ?? 'cancelled')) + '\n')
           else if (l !== null && history && this.isCommand(l.trim()) && !/^\s*\/skill:/.test(l)) this.notice(/^\S+/.exec(l.trim())[0], 3000, '›') // a command isn't part of the conversation: its name for a moment (not its arguments: maybe a key)
           else if (l !== null) this.write(echo + c.bright(l.replace(/\n/g, '\n' + ' '.repeat(width(echo.replace(/\x1b\[[0-9;]*m/g, ''))))) + '\n')
           else this.render()
@@ -1839,7 +1839,9 @@ export class UI {
     )
   }
 
-  cancelAsk() {
+  // as: what the dialog it closes says it came to (the default: cancelled)
+  cancelAsk(as) {
+    if (as && this.menu.pick) this.menu.pick.closedAs = as
     for (const w of this.waiters.splice(0)) w(null)
   }
 

@@ -103,7 +103,7 @@ hooks, skills, MCP servers. `--temp` runs share one throwaway folder, so a chang
 other `--temp` runs going on, never the real ones.
 
 `heart` is installed by `npm start` in the HeartCode folder. `heartcode` is the same command.
-Needs Node.js 20 or newer. No providers? See "Setting up a model" below.
+Needs Node.js 22 or newer. No providers? See "Setting up a model" below.
 
 ## Run a task
 

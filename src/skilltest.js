@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { TOOL_DEFS } from './tools.js'
 import { browse, findChrome } from './check.js'
 
@@ -20,7 +20,17 @@ const codeOf = (text, lang) => {
   const blocks = [...String(text ?? '').matchAll(/```([\w-]*)\n([\s\S]*?)```/g)]
   return (blocks.find((b) => b[1].toLowerCase() === lang) ?? blocks[0])?.[2] ?? String(text ?? '')
 }
-const node = (file) => execFileSync(process.execPath, [file], { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'pipe'] })
+// A model's code, run by Node in its permission model: it may read its own folder and nothing else
+// (no writing, no other programs, no workers), for 10 s at most; not waited on with the rest stopped.
+// Resolves with what it printed; rejects with { stdout, stderr, status } like a failed command.
+const [major, minor] = process.versions.node.split('.').map(Number)
+const LOCKED = major > 23 || (major === 23 && minor >= 5) ? '--permission' : '--experimental-permission'
+const node = (file, real = fs.realpathSync(file)) => // (the permission model goes by real paths: macOS's temp folder is a link)
+  new Promise((ok, bad) =>
+    execFile(process.execPath, [LOCKED, `--allow-fs-read=${path.dirname(real)}`, real], { encoding: 'utf8', timeout: 10_000 }, (e, stdout, stderr) =>
+      e ? bad(Object.assign(e, { stdout, stderr, status: e.code ?? 1 })) : ok(stdout),
+    ),
+  )
 
 // --- code ---
 const CODE_ASK = `Write a JavaScript function parseDuration(text) that turns a duration like "1h30m", "45s", "2d 4h" or "1.5h" into milliseconds.
@@ -28,12 +38,12 @@ const CODE_ASK = `Write a JavaScript function parseDuration(text) that turns a d
 - Anything else returns null: an empty string, a number without a unit ("10"), an unknown unit ("5x"), a unit without a number ("h"), other characters ("1h-2m"), or something that isn't a string.
 Reply with only the code, in one \`\`\`js block.`
 const CODE_TESTS = [['1h30m', 5_400_000], ['45s', 45_000], ['2d 4h', 187_200_000], ['1.5h', 5_400_000], ['90m', 5_400_000], ['1H', 3_600_000], ['0s', 0], ['3d', 259_200_000], ['', null], ['10', null], ['5x', null], ['h', null], ['1h-2m', null], [null, null], [42, null]]
-function scoreCode(reply) {
+async function scoreCode(reply) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'heart-skill-'))
   try {
     const file = path.join(dir, 'test.mjs')
     fs.writeFileSync(file, `${codeOf(reply, 'js').replace(/^\s*export\s+(default\s+)?/gm, '')}\n;const cases = ${JSON.stringify(CODE_TESTS)};\nlet n = 0; for (const [i, want] of cases) { try { if (Object.is(parseDuration(i), want) || parseDuration(i) === want) n++ } catch {} }\nconsole.log(n)`)
-    const passed = Number(node(file).trim().split('\n').at(-1))
+    const passed = Number((await node(file)).trim().split('\n').at(-1))
     return { score: passed / CODE_TESTS.length, why: `${passed} of ${CODE_TESTS.length} hidden tests pass` }
   } catch (e) {
     return { score: 0, why: `its code doesn't run: ${String(e.stderr || e.message).split('\n').find((l) => /Error/.test(l)) ?? 'error'}`.slice(0, 160) }
@@ -179,8 +189,8 @@ async function scoreTools(client, ms, signal) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'heart-skill-'))
   fs.writeFileSync(path.join(dir, 'sum.js'), BUGGY)
   fs.writeFileSync(path.join(dir, 'test.js'), TEST)
-  const inside = (p) => ((f) => (f.startsWith(dir) ? f : null))(path.resolve(dir, String(p ?? '.')))
-  const run = (name, a) => {
+  const inside = (p) => ((f) => (f === dir || f.startsWith(dir + path.sep) ? f : null))(path.resolve(dir, String(p ?? '.')))
+  const run = async (name, a) => {
     if (name === 'list_files') return fs.readdirSync(dir).join('\n')
     const file = inside(a.path)
     if (name === 'read_file') return file && fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : 'error: no such file'
@@ -197,7 +207,8 @@ async function scoreTools(client, ms, signal) {
       const m = /^\s*(node|cat|ls)(?:\s+([\w./-]+))?\s*$/.exec(String(a.command ?? ''))
       if (!m) return 'error: only "node <file>", "cat <file>" and "ls" work here'
       try {
-        return m[1] === 'ls' ? fs.readdirSync(dir).join('\n') : m[1] === 'cat' ? fs.readFileSync(inside(m[2]), 'utf8') : `${node(inside(m[2]))}\n(exit 0)`
+        if (m[1] !== 'ls' && !inside(m[2])) return 'error: outside the folder'
+        return m[1] === 'ls' ? fs.readdirSync(dir).join('\n') : m[1] === 'cat' ? fs.readFileSync(inside(m[2]), 'utf8') : `${await node(inside(m[2]))}\n(exit 0)`
       } catch (e) {
         return `${e.stdout ?? ''}${e.stderr ?? e.message}\n(exit ${e.status ?? 1})`
       }
@@ -215,7 +226,7 @@ async function scoreTools(client, ms, signal) {
       for (const c of res.toolCalls) {
         let out
         try {
-          out = run(c.function.name, JSON.parse(c.function.arguments || '{}'))
+          out = await run(c.function.name, JSON.parse(c.function.arguments || '{}'))
         } catch {
           out = 'error: the arguments aren\'t valid JSON'
         }
@@ -225,7 +236,7 @@ async function scoreTools(client, ms, signal) {
     }
     let fixed = false
     try {
-      fixed = /^ok/.test(node(path.join(dir, 'test.js')))
+      fixed = /^ok/.test(await node(path.join(dir, 'test.js')))
     } catch {}
     return { score: fixed ? Math.max(0.5, 1 - 0.1 * bad) : 0, why: `${fixed ? 'fixed it' : steps >= ROUNDS ? `not fixed after ${ROUNDS} steps` : 'not fixed'} in ${steps} step${steps === 1 ? '' : 's'}${bad ? `, ${bad} failed tool call${bad === 1 ? '' : 's'}` : ''}` }
   } finally {
@@ -233,33 +244,36 @@ async function scoreTools(client, ms, signal) {
   }
 }
 
-// One model's tests: { code, page, vision, tools } each { score, ms, why } | { slow } | { error } |
-// { skipped }. can: { tools, images }. ms: how long each answer may take. onStep({ skill, now }) as
-// one starts, onStep({ skill, ...result }) as it ends.
-export async function testSkills(client, can, ms, signal, onStep = () => {}) {
+// One model's tests, all at once: { code, page, vision, tools } each { score, ms, why } | { slow } |
+// { error } | { skipped }. can: { tools, images }. ms: how long each answer may take. onStep({ skill,
+// now }) as one starts, onStep({ skill, ...result }) as it ends. gate(fn): runs fn when its provider
+// has room (the Test's limit of requests at once per provider); none: at once.
+export async function testSkills(client, can, ms, signal, onStep = () => {}, gate = (fn) => fn()) {
   const out = {}
-  for (const skill of SKILLS) {
-    if (signal?.aborted) break
-    if (skill === 'tools' && !can.tools) (out[skill] = { skipped: true, why: "it doesn't call tools" }), onStep({ skill, ...out[skill] })
-    if (skill === 'vision' && !can.images) (out[skill] = { skipped: true, why: "it can't see images" }), onStep({ skill, ...out[skill] })
-    if (out[skill]) continue
-    onStep({ skill, now: true })
-    const t0 = Date.now()
-    const ask = (content) => client.chat({ messages: [{ role: 'user', content }], stream: true }, { signal: AbortSignal.any([AbortSignal.timeout(ms), ...(signal ? [signal] : [])]) }).then((r) => r.content ?? '')
-    try {
-      let r
-      if (skill === 'code') r = scoreCode(await ask(CODE_ASK))
-      else if (skill === 'page') r = await scorePage(await ask(PAGE_ASK), signal)
-      else if (skill === 'vision') {
-        const s = scene()
-        r = scoreVision(await ask([{ type: 'text', text: VISION_ASK }, { type: 'image_url', image_url: { url: s.url } }]), s)
-      } else r = await scoreTools(client, ms, signal)
-      out[skill] = r.skipped ? r : { ...r, ms: Date.now() - t0 }
-    } catch (e) {
-      if (signal?.aborted) break
-      out[skill] = e.name === 'TimeoutError' ? { slow: true, why: /aborted due to timeout/i.test(e.message) ? `no answer within ${Math.round(ms / 1000)} s` : String(e.message).slice(0, 160) } : { error: true, why: String(e.message).slice(0, 160) } // (the client's own: it didn't start, or went quiet)
-    }
-    onStep({ skill, ...out[skill] })
+  const ask = (content) => client.chat({ messages: [{ role: 'user', content }], stream: true }, { signal: AbortSignal.any([AbortSignal.timeout(ms), ...(signal ? [signal] : [])]) }).then((r) => r.content ?? '')
+  const one = async (skill) => {
+    if (skill === 'tools' && !can.tools) return (out[skill] = { skipped: true, why: "it doesn't call tools" }), onStep({ skill, ...out[skill] })
+    if (skill === 'vision' && !can.images) return (out[skill] = { skipped: true, why: "it can't see images" }), onStep({ skill, ...out[skill] })
+    await gate(async () => {
+      if (signal?.aborted) return
+      onStep({ skill, now: true })
+      const t0 = Date.now() // from when it's sent: waiting for room isn't the model's time
+      try {
+        let r
+        if (skill === 'code') r = await scoreCode(await ask(CODE_ASK))
+        else if (skill === 'page') r = await scorePage(await ask(PAGE_ASK), signal)
+        else if (skill === 'vision') {
+          const s = scene()
+          r = scoreVision(await ask([{ type: 'text', text: VISION_ASK }, { type: 'image_url', image_url: { url: s.url } }]), s)
+        } else r = await scoreTools(client, ms, signal)
+        out[skill] = r.skipped ? r : { ...r, ms: Date.now() - t0 }
+      } catch (e) {
+        if (signal?.aborted) return
+        out[skill] = e.name === 'TimeoutError' ? { slow: true, why: /aborted due to timeout/i.test(e.message) ? `no answer within ${Math.round(ms / 1000)} s` : String(e.message).slice(0, 160) } : { error: true, why: String(e.message).slice(0, 160) } // (the client's own: it didn't start, or went quiet)
+      }
+      onStep({ skill, ...out[skill] })
+    })
   }
+  await Promise.all(SKILLS.map(one))
   return out
 }

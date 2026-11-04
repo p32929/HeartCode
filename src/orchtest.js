@@ -59,15 +59,17 @@ const didOf = (r) =>
   r.asked && !r.calls.length ? 'asked the user a question first' : r.calls.length ? r.calls.map((c) => (c.bad ? "a handoff that isn't JSON" : `handed to ${c.model || '(no model)'}: "${said(c.description || c.prompt, 70)}"`)).join('; ') : r.content.trim() ? `answered: "${said(r.content, 90)}"` : 'said nothing'
 
 // One orchestrator (client: its own, no retries) handing work to team, each answer awaited for ms
-// (the settings page's Tests wait): { passed, of, fails, slow, ms, steps: [{ scene, ok, why, did, ms, slow }] }
-// (fails: its mistakes; slow: scenes with no answer in time). onStep({ i, of, scene, asking }) as a
-// scene starts, onStep({ i, of, ...step }) as it ends.
-export async function testOrchestrator(client, root, team, ms, signal, onStep = () => {}) {
+// (the settings page's Tests wait): { passed, of, fails, slow, ms, steps: [{ i, scene, ok, why, did, ms, slow }] }
+// (fails: its mistakes; slow: scenes with no answer in time). Every scene at once, each request when
+// its provider has room (gate). onStep({ i, of, scene, asking }) as a scene starts, onStep({ i, of,
+// ...step }) as it ends (in any order: i says which).
+export async function testOrchestrator(client, root, team, ms, signal, onStep = () => {}, gate = (fn) => fn()) {
   const { system, tools } = orchestratorSetup(root, team)
   const real = (m) => team.some((t) => [`${t.provider} ${t.model}`, `${t.provider}/${t.model}`, t.model].includes(m) || String(m).endsWith(` ${t.model}`) || t.model.endsWith(`/${m}`)) // as the agent tool takes it
   const first = `${team[0].provider} ${team[0].model}`
   // one try of a scene: { ok, why, did, slow }
-  const once = async (scene) => {
+  const once = (scene, sent) => gate(() => (sent(), tryOnce(scene)))
+  const tryOnce = async (scene) => {
     const wait = AbortSignal.timeout(ms)
     try {
       const res = await client.chat({ messages: [{ role: 'system', content: system }, ...scene.messages(first)], tools }, { signal: signal ? AbortSignal.any([signal, wait]) : wait })
@@ -87,23 +89,26 @@ export async function testOrchestrator(client, root, team, ms, signal, onStep = 
       return wait.aborted ? { ok: false, slow: true, why: `no answer within ${ms / 1000} seconds`, did: 'no answer' } : { ok: false, why: `the request failed: ${said(e.message, 160)}`, did: 'no answer' }
     }
   }
-  const steps = []
   const t0 = Date.now()
-  for (const [i, scene] of SCENES.entries()) {
-    if (signal?.aborted) break
-    const s0 = Date.now()
-    onStep({ i, of: SCENES.length, scene: scene.name, asking: true })
-    let tries
-    try {
-      tries = await Promise.all([once(scene), once(scene)])
-    } catch {
-      break
-    }
-    // the worse: a mistake over no answer over a pass
-    const step = { scene: scene.name, ms: Date.now() - s0, ...(tries.find((x) => !x.ok && !x.slow) ?? tries.find((x) => x.ok) ?? tries[0]) }
-    steps.push(step)
-    onStep({ i, of: SCENES.length, ...step })
-  }
+  const steps = (
+    await Promise.all(
+      SCENES.map(async (scene, i) => {
+        if (signal?.aborted) return null
+        let s0 = 0
+        const sent = () => s0 || ((s0 = Date.now()), onStep({ i, of: SCENES.length, scene: scene.name, asking: true })) // its first request sent (not waiting for room)
+        let tries
+        try {
+          tries = await Promise.all([once(scene, sent), once(scene, sent)])
+        } catch {
+          return null // stopped
+        }
+        // the worse: a mistake over no answer over a pass
+        const step = { i, scene: scene.name, ms: Date.now() - s0, ...(tries.find((x) => !x.ok && !x.slow) ?? tries.find((x) => x.ok) ?? tries[0]) }
+        onStep({ of: SCENES.length, ...step })
+        return step
+      }),
+    )
+  ).filter(Boolean)
   const fails = steps.filter((x) => !x.ok && !x.slow).map((x) => ({ scene: x.scene, why: x.why }))
   return { passed: steps.filter((x) => x.ok).length, of: SCENES.length, fails, slow: steps.filter((x) => x.slow).length, ms: Date.now() - t0, steps }
 }

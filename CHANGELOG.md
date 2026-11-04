@@ -2,6 +2,57 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.50 (2026-11-04)
+
+- **Asks before an untested orchestrator starts**: with an orchestrator whose models were never
+  tested together, the first message waits for a choice: open the settings page and run Test (the
+  message goes when the page is turned off), use your order instead, or send it anyway (not asked
+  again that session). Esc leaves it unsent.
+- **Test is much faster**: each model's skill jobs run at once, every orchestrator's scenes run at
+  once, and the skills and the orchestrators are tested side by side, with at most 4 requests at a
+  time per provider (so a free tier isn't flooded); the first step tests 4 models at a time per
+  provider. All 56 models of a real list: about 8 minutes; five models: under 2. The dialog shows
+  the time, and what's running (a job waiting its turn shows as waiting, not running).
+- **Orchestrators are ranked by scenes passed** (one that never answers no longer ranks above one
+  that passed 5 of 6), and a Test where some didn't answer still puts the others in order, best
+  first, with those after them.
+- **Dialogs close once they're done**: "Open settings and run Test" opens the page straight into the
+  Test, already running; when it's done, HeartCode's dialog closes by itself ("done"), your message
+  goes, and the page stays open with the results. Turned off before that (Esc), the question isn't
+  asked again: the message goes, with a line saying the models aren't tested yet. Switching to your
+  order on the page ends it too.
+- **HeartCode decides which of your models can be used**: you choose any models (and as many
+  orchestrators as you like); a model that can't work is left out for now, and Your models tags it
+  "not used" with why: its key or name refused (401, 403, 404, until it's tested again), a limit
+  smaller than its first request (its window, or a per-minute cap its provider states, like Groq's
+  2,000 tokens a minute, now kept when a provider says so), or an orchestrator that failed every
+  scene of the last Test.
+- **A model that goes silent, or says a request is too large, isn't tried again** as a helper: the
+  orchestrator hands the job on at once (it used to wait up to 150 s three times).
+- **A handoff's check asks like any command**: plan mode, a command reaching outside the project and
+  your permission setting apply ("Run the check …?"); a page check only opens a page.
+- **Page checks, sturdier**: every step has a time limit, so a page stuck in a loop fails ("stuck in a
+  loop") instead of hanging, and Esc stops a check at once (not counted against the model). A
+  computer too slow to draw a 3D page is told apart from a stuck one (screenshots left out, the rest
+  checked). A folder means its index.html; odd paths ("50%off.png") no longer crash HeartCode; the
+  browser and its temp folder are always cleaned up.
+- **No browser? HeartCode fetches one**: Google's headless browser for testing (about 100 MB, once,
+  into ~/.heart/browser), so page checks work on a server or Linux box without Chrome (Ubuntu's
+  AppArmor refusal handled).
+- **Test, sturdier**: one that fails says so (never "Tested"); one with no models left to hand work to
+  is refused at the start; a stopped skills step isn't counted as scored; a provider removed
+  meanwhile, or Test all pressed between steps, no longer leaves two runs going.
+- **Skills tests run the model's code locked down** (Node's permission model: its own folder only, no
+  writing, no other programs) and without freezing the settings page.
+- `heartcode page` screenshots are kept out of git (their own .gitignore); workers clean up the
+  scratch files they made, and the review looks for leftovers (not tools' caches).
+- `heartcode page fix the footer` is a prompt again (only a file or URL after "page" is a page check).
+- The model table stays pinned while you scroll in a narrow window (only a phone lets it scroll away);
+  "More columns" sits clear of the rows' buttons.
+- **Needs Node.js 22 or newer** (page checks use its built-in WebSocket).
+- **The table shows it scrolls sideways**: when there are more columns than fit, that side fades out
+  and a small "‹ More columns ›" stays in view at the bottom; click it (or Shift + scroll, or swipe).
+
 ## 0.1.49 (2026-11-04)
 
 - **Your models, simpler**: how a model is picked is a switch at the top, **Your order** or
