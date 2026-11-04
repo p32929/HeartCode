@@ -2917,7 +2917,7 @@ function drawUsing(s) {
 // --- General ---
 const PERM_INFO = { all: ['Everything', 'Edits files and runs commands without asking'], commands: ['Edits only', 'Edits files; asks before running commands'], ask: ['Ask first', 'Asks before every edit and command'] }
 const THEME_INFO = { dark: ["Your terminal's background", ['#1f2328', '#d4d4d8', '#ff6b9d', '#7aa2f7']], light: ['White background', ['#fafbfc', '#24292f', '#d6336c', '#0969da']], midnight: ['Deep blue background', ['#1a1b26', '#c0caf5', '#ff7ab2', '#7aa2f7']], mono: ['No colors: bold and dim', ['#000000', '#bbbbbb', '#ffffff', '#777777']] }
-const TOGGLE_INFO = { autoCompact: 'Compact long conversations', director: 'Let the model set things up', format: 'Format files after edits', lsp: 'Language server checks', updateCheck: 'Check for updates' }
+const TOGGLE_INFO = { autoCompact: 'Compact long conversations', director: 'Let the model set things up', format: 'Format files after edits', lsp: 'Language server checks', updateCheck: 'Check for updates', mouse: 'HeartCode takes the mouse' }
 function choices(id, list, cur, name) {
   put($(id), list.map(([v, title, desc, colors]) => h('label', { className: 'choice' + (v === cur ? ' on' : '') },
     h('input', { type: 'radio', name: id, checked: v === cur, onchange: () => act('/api/setting', { name, value: v }, `${title}: saved`) }),
@@ -2927,7 +2927,7 @@ function choices(id, list, cur, name) {
 function drawGeneral(s) {
   choices('g-perm', ['all', 'commands', 'ask'].map((p) => [p, ...PERM_INFO[p]]), s.settings.permissions, 'permissions')
   choices('g-theme', s.choices.theme.map((t) => [t, t[0].toUpperCase() + t.slice(1), ...(THEME_INFO[t] ?? ['', null])]), s.settings.theme, 'theme')
-  put($('g-effort'), s.choices.effort.map((e) => h('option', { value: e, textContent: { default: "The model's own setting", low: 'Low: quick, less thinking', medium: 'Medium', high: 'High: thinks the longest' }[e] ?? e })))
+  put($('g-effort'), s.choices.effort.map((e) => h('option', { value: e, textContent: { default: 'Low (the default): a little thinking, shown as it comes', low: 'Low: quick, less thinking', medium: 'Medium', high: 'High: thinks the longest' }[e] ?? e })))
   $('g-effort').value = s.settings.effort
   if (document.activeElement !== $('g-context')) $('g-context').value = s.settings.context ?? ''
   put($('g-toggles'), Object.entries(s.choices.toggles).map(([k, d]) => h('label', { className: 'opt' },
@@ -3304,7 +3304,7 @@ function drawPrompts(s) {
   const match = (p) => !promptQuery || `${p.id} ${p.title ?? ''} ${p.note}`.toLowerCase().includes(promptQuery)
   const item = (p) => ({ id: p.id, title: p.title ? p.title.replace(/^System prompt /, 'System ') : p.id.split('/')[1], sub: p.title ? p.id : p.note.split('\n')[0], badge: p.changed ? h('span', { className: 'tag brand', textContent: 'yours' }) : null, p })
   const groups = [{ title: 'System prompts', items: s.prompts.filter((p) => p.title && match(p)).map(item) }]
-  for (const file of ['agent', 'guided', 'compact']) groups.push({ title: { agent: 'Tools, notes and replies', guided: 'Guided mode (models without tool calls)', compact: 'Summaries' }[file], items: s.prompts.filter((p) => !p.title && p.id.startsWith(file + '/') && match(p)).map(item) })
+  for (const file of ['tests', 'agent', 'guided', 'compact']) groups.push({ title: { agent: 'Tools, notes and replies', guided: 'Guided mode (models without tool calls)', compact: 'Summaries', tests: 'Tests (what Test asks your models)' }[file], items: s.prompts.filter((p) => !p.title && p.id.startsWith(file + '/') && match(p)).map(item) })
   masterDetail('prompts', $('r-items'), $('r-detail'), groups, (x) => {
     if (!x) return h('div', { className: 'card empty', textContent: 'No prompt matches.' })
     const p = x.p

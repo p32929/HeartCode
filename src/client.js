@@ -102,35 +102,35 @@ export function normalizeBaseUrl(url) {
 }
 
 // Removes the thinking some models put in the normal content: a <think> block the reply starts
-// with (still open: all of it so far). A reply that only mentions the tag later keeps its text. A
-// closing tag with no opening one counts only for a model that thinks (some leave the opening out).
+// with (<thought> from Gemini; still open: all of it so far). A reply that only mentions the tag
+// later keeps its text. A closing tag with no opening one counts only for a model that thinks (some
+// leave the opening out).
 export function stripThink(text, thinks = false) {
   const t = String(text ?? '')
-  const lead = /^\s*<think>[\s\S]*?(<\/think>|$)/.exec(t)
+  const lead = /^\s*<(think|thought)>[\s\S]*?(<\/\1>|$)/.exec(t)
   if (lead) return t.slice(lead[0].length).trimStart()
   const close = thinks && !t.includes('<think>') ? t.indexOf('</think>') : -1
   return close !== -1 ? t.slice(close + 8).trimStart() : t
 }
 
-// What can be shown so far while streaming: holds back a half-received "<think>".
+// What can be shown so far while streaming: holds back a half-received "<think>" or "<thought>".
 function visible(full, thinks) {
   let v = stripThink(full, thinks)
-  for (let k = 7; k > 0; k--) {
-    if (v.endsWith('<think>'.slice(0, k))) return v.slice(0, -k)
-  }
+  for (const tag of ['<thought>', '<think>']) for (let k = tag.length - 1; k > 0; k--) if (v.endsWith(tag.slice(0, k)) && v.trim() === tag.slice(0, k)) return v.slice(0, -k)
   return v
 }
 
-// The text inside the <think> block the reply starts with, so far (an unclosed one counts),
-// holding back a half-received "</think>".
+// The text inside the <think> (or <thought>) block the reply starts with, so far (an unclosed one
+// counts), holding back a half-received closing tag.
 export function thinkOf(full) {
-  const m = /^\s*<think>/.exec(full)
+  const m = /^\s*<(think|thought)>/.exec(full)
   if (!m) return ''
-  const close = full.indexOf('</think>', m[0].length)
+  const end = `</${m[1]}>`
+  const close = full.indexOf(end, m[0].length)
   if (close !== -1) return full.slice(m[0].length, close)
   let rest = full.slice(m[0].length)
-  for (let k = 8; k > 0; k--) {
-    if (rest.endsWith('</think>'.slice(0, k))) return rest.slice(0, -k)
+  for (let k = end.length; k > 0; k--) {
+    if (rest.endsWith(end.slice(0, k))) return rest.slice(0, -k)
   }
   return rest
 }
@@ -172,7 +172,7 @@ export function fitFor(messages, can, model) {
 // Refusals a provider may make of one part of a request, learned when sending it without that
 // part works (then kept in the model's profile for a day): temperature, reasoning_effort, the
 // usage in a stream, the thinking sent back, the tools' full schemas, images.
-export const QUIRKS = ['noTemperature', 'noEffort', 'noStreamUsage', 'noReasoningBack', 'simpleSchemas', 'noImages', 'noParallel']
+export const QUIRKS = ['noTemperature', 'noEffort', 'noThoughts', 'noStreamUsage', 'noReasoningBack', 'simpleSchemas', 'noImages', 'noParallel']
 
 export class Client {
   constructor({ baseUrl, apiKey, model, provider, timeout = 600_000 } = {}) {
@@ -564,6 +564,8 @@ export class Client {
     if (this.quirks.simpleSchemas && req.tools) req.tools = req.tools.map((t) => ({ ...t, function: { ...t.function, parameters: simpleSchema(t.function.parameters) } }))
     if (this.quirks.noTemperature) delete req.temperature
     if (this.effort && !this.quirks.noEffort) req.reasoning_effort = this.effort
+    // Google's own Gemini (gemini-…, models/gemini-…) sends its thinking only when asked, in <thought> tags
+    if (this.effort && /^(models\/)?gemini/.test(this.model) && !this.quirks.noThoughts) req.extra_body = { google: { thinking_config: { include_thoughts: true } } }
     if (req.stream && !this.quirks.noStreamUsage) req.stream_options = { include_usage: true } // token counts for the status bar
     if (req.tools?.length && !this.quirks.noParallel) req.parallel_tool_calls = true // several calls in one reply (llama.cpp's default is one)
     let res
@@ -626,6 +628,7 @@ export class Client {
       const imagesSent = !this.quirks.noImages && req.messages?.some((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'))
       if (/temperature/i.test(said) && 'temperature' in req && !this.quirks.noTemperature) return without('noTemperature')
       if (/reasoning_effort/.test(said) && 'reasoning_effort' in req && !this.quirks.noEffort) return without('noEffort')
+      if (/extra_body|thinking_config|include_thoughts/i.test(said) && req.extra_body && !this.quirks.noThoughts) return without('noThoughts')
       if (/stream_options/.test(said) && req.stream_options && !this.quirks.noStreamUsage) return without('noStreamUsage')
       if (/parallel_tool_calls/.test(said) && req.parallel_tool_calls && !this.quirks.noParallel) return without('noParallel')
       if (/stream/i.test(said) && req.stream && body.stream === undefined && !this.quirks.noStream) return without('noStream') // streamed by HeartCode's choice: not again

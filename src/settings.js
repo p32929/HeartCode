@@ -11,7 +11,7 @@ import os from 'node:os'
 import { HOME, saveConfig, readJson, writeJson, byName, takeIn, whatOf, VERSION } from './config.js'
 import { newer } from './update.js'
 import { DEFAULT_SERVERS, mcpAuth } from './mcp.js'
-import { sections, BUILTIN_PROMPTS } from './prompts.js'
+import { sections, BUILTIN_PROMPTS, prompt, reloadPrompts } from './prompts.js'
 import { Client } from './client.js'
 import { clip, TOOL_DEFS } from './tools.js'
 import { loadProfile, strategy, profilePath, profileFrom } from './probe.js'
@@ -35,7 +35,7 @@ import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLog
 
 const PAGE = new URL('./settings.html', import.meta.url)
 const EFFORTS = ['default', 'low', 'medium', 'high']
-const TOGGLES = { autoCompact: 'compact the conversation when it fills 85% of the model\'s context window', director: 'let the model add skills, MCP servers and change settings when asked', format: "run the project's formatter on every file HeartCode writes", lsp: "show the model a language server's errors after each edit", updateCheck: 'check at every start whether a newer HeartCode is out (shown in the status bar; /update installs it)' }
+const TOGGLES = { autoCompact: 'compact the conversation when it fills 85% of the model\'s context window', director: 'let the model add skills, MCP servers and change settings when asked', format: "run the project's formatter on every file HeartCode writes", lsp: "show the model a language server's errors after each edit", updateCheck: 'check at every start whether a newer HeartCode is out (shown in the status bar; /update installs it)', mouse: "the wheel scrolls only the conversation (the tabs, the input and the status bar stay put) and dragging copies; Option+drag (Shift+drag elsewhere) is the terminal's own selection. Off: the terminal's own mouse, and its wheel scrolls the whole screen" }
 // The Logging page's: both off unless switched on; how much of each request ("full" or "summary")
 // The status-bar items the visual editor offers (id must match App.status in bin/heartcode.js).
 // `sample` is shown in the page's live preview.
@@ -66,7 +66,7 @@ const FILES = [
   ['HEARTCODE.md', 'Your instructions for every project (like AGENTS.md, for all of them)', false, '- Answer briefly.\n- Use pnpm, not npm.'],
 ]
 // The prompts the page edits: every section of these files (prompts/*.md); the system prompts first.
-const PROMPT_FILES = ['agent', 'guided', 'compact']
+const PROMPT_FILES = ['agent', 'guided', 'compact', 'tests']
 const FIRST = { 'agent/system': 'System prompt (models with tool calls)', 'guided/system': 'System prompt (guided mode: models without tool calls)' }
 const ownPrompts = (file) => path.join(HOME, 'prompts', `${file}.md`)
 const tilde = (p) => (p.startsWith(os.homedir() + path.sep) ? '~' + p.slice(os.homedir().length) : p)
@@ -149,6 +149,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   let importCache = [] // the last /api/imports listing, so /api/imports/run can execute by id
   const token = crypto.randomBytes(24).toString('hex')
   const changed = (what) => {
+    if (what === 'prompts') reloadPrompts() // this page's own Tests use them too (heart settings has no HeartCode to apply them)
     try {
       apply(what)
     } catch (e) {
@@ -403,7 +404,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     const t0 = Date.now()
     try {
       const signal = stop ? AbortSignal.any([AbortSignal.timeout(testWait()), stop]) : AbortSignal.timeout(testWait())
-      const r = await c.chat({ messages: [{ role: 'user', content: 'Reply with just the word OK.' }], stream: true }, { signal })
+      const r = await c.chat({ messages: [{ role: 'user', content: prompt('tests/hello') }], stream: true }, { signal })
       const reply = (r.content || '').trim()
       if (!reply && !r.toolCalls.length) return { ok: false, ms: Date.now() - t0, error: `it answered with nothing${r.usage?.completion_tokens ? ` (${r.usage.completion_tokens} tokens it said it wrote)` : ''}` }
       const ms = Date.now() - t0
@@ -419,7 +420,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     const tools = TOOL_DEFS.filter((f) => f.name === 'write_file').map((f) => ({ type: 'function', function: f }))
     try {
       const signal = stop ? AbortSignal.any([AbortSignal.timeout(testWait()), stop]) : AbortSignal.timeout(testWait())
-      const r = await c.chat({ messages: [{ role: 'user', content: 'Create the file notes.txt containing exactly: hello' }], tools, stream: true }, { signal })
+      const r = await c.chat({ messages: [{ role: 'user', content: prompt('tests/tool-check') }], tools, stream: true }, { signal })
       const call = r.toolCalls.find((x) => x.function.name === 'write_file')
       if (!call) return { toolsOk: false, toolsWhy: r.toolCalls.length ? `it called ${r.toolCalls[0].function.name} instead of write_file` : `it answered in text instead of calling the tool: "${clip((r.content || '').trim(), 80)}"` }
       let a

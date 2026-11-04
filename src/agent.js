@@ -989,7 +989,11 @@ async function runNative(s, task, images, signal) {
     try {
       res = await client.chat({ messages: s.messages, tools, stream }, { signal, onToken: out.text, onReasoning: out.think, onToolDelta, fit: !refitted })
     } catch (e) {
-      if (!e.tooBig) throw e
+      if (!e.tooBig) {
+        ui.stopSpin()
+        out.end() // what came of it is closed (a helper's turn to show its thinking ends)
+        throw e
+      }
       // The model list moved on (the one before failed) to a model whose window can't hold the
       // conversation: compacted for it (by it, to its size), then the same step again. Once: still
       // too big after that (its window can't even hold the start), it's sent anyway.
@@ -1011,6 +1015,7 @@ async function runNative(s, task, images, signal) {
       out.text(res.content)
     }
     out.end()
+    client.announceSwitch?.() // "↻ … answered": under the reply, on a line of its own
     // the reply went round and round (client.js cut it): told so, and asked again
     if (res.looped) {
       if (++looping > 3) {
@@ -1494,18 +1499,25 @@ export async function review(s, task, answer, signal) {
 // Its thinking is shown whole when its reply is in (helpers working at once don't mix), named.
 // Questions to the user (confirm, pick, ask) wait their turn: helpers working at once ask one by one.
 const asking = new WeakMap() // ui → the question being asked
+const streaming = new WeakMap() // ui → helper replies coming in now (only one: its thinking is shown as it comes)
 function helperUI(ui, label) {
-  // What the helper says is shown in full under its name. Held until its reply ends, then printed at
-  // once: helpers run side by side, and streamed text from two would interleave.
+  // What the helper says is shown in full under its name. Its thinking is shown as it comes, like the
+  // conversation's (an orchestrator's helpers work one at a time); with other helpers replying at the
+  // same time, held until its reply ends, then printed at once (two streams would interleave).
   const response = () => {
     const t0 = Date.now()
     let thought = ''
     let said = ''
+    const alone = !streaming.get(ui)
+    streaming.set(ui, (streaming.get(ui) ?? 0) + 1)
+    const live = alone ? ui.response(label, { helper: true }) : null // "✻ <model> is thinking…", then its thinking as it comes
     return {
-      think: (t) => (thought += t ?? ''),
+      think: (t) => (live ? live.think(t) : (thought += t ?? '')),
       text: (t) => (said += t ?? ''),
       end() {
-        if (thought.trim()) ui.print(c.faint(c.italic(`  ✻ ${label} thought for ${duration(Date.now() - t0)}`)) + (ui.showThinking ? `\n${c.think(c.italic(thought.trim().replace(/^/gm, '    ')))}` : ''))
+        streaming.set(ui, streaming.get(ui) - 1)
+        if (live) live.end()
+        else if (thought.trim()) ui.print(c.faint(c.italic(`  ✻ ${label} thought for ${duration(Date.now() - t0)}`)) + (ui.showThinking ? `\n${c.think(c.italic(thought.trim().replace(/^/gm, '    ')))}` : ''))
         if (!said.trim()) return
         ui.print(`  ${c.bright(c.bold('●'))} ${c.bold(label)}`)
         let block = new Block((x) => ui.write(x), { marker: '    ', style: c.text })

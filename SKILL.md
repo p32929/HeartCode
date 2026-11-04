@@ -85,9 +85,14 @@ image, one that can't call tools gets the tool calls as text.
 models the user chose as orchestrators, in their order (none chosen: their first that calls tools). It answers
 at once, streaming, when it can (a greeting, a question), and otherwise hands the work to the
 user's other models through its `agent` tool, one handoff at a time. It picks which one (the quickest
-that has done such jobs well), knowing what each can do, how quick it is, its Test skills scores, its
-record on earlier jobs (`~/.heart/model-stats.json`) and its places in the public LMArena rankings;
-a model that fails or is out of quota is reported back, and it picks another. Each handoff can carry
+that has done such jobs well), knowing what each can do, how quick it is, its skill scores (from the
+settings page's Test), its record on earlier jobs (`~/.heart/model-stats.json`) and its places in the
+public LMArena rankings; a model that fails or is out of quota is reported back, and it picks another.
+HeartCode leaves out, for now, the user's models that can't work (a key or model name refused, a
+limit smaller than the model's first request, an orchestrator that failed every scene of the last
+Test), whatever the user chose. Until the user has run Test once, an orchestrator picks by names and
+ranks alone: headless, nothing asks, so tell the user to run Test (`heart settings` → Your models)
+for better picks, or use `--model-choice order`. Each handoff can carry
 a `check` that HeartCode runs when the model is done: a command that must exit 0, or `page <file>`
 (the page opened in a headless browser: errors, a blank page, a click that breaks it fail it). A
 failed check goes back to the orchestrator with its output; every result goes into that model's record.
@@ -174,7 +179,7 @@ heart -p -m auto "…"                            # the user's list, with its fa
 heart -p -m groq/openai/gpt-oss-120b "…"       # that provider and model alone, for this run
 heart -p -m groq/openai/gpt-oss-120b --fallback-model openrouter/qwen/qwen3-coder "…"   # and that one when it fails
 heart -p --provider ollama -m qwen3-coder "…"   # the same, written apart
-heart -p --effort high "…"                      # how hard a thinking model thinks
+heart -p --effort high "…"                      # how hard a thinking model thinks (low unless set)
 ```
 
 What a model can do (tool calls, context size, thinking, images) comes from models.dev, at once;
@@ -261,6 +266,11 @@ Stdout: one JSON event per line, `system`/`init` (its `tools` include the MCP se
 `user` (`tool_result`), and a `result` after each message. It runs until stdin closes. An MCP
 call's `tool_use` is named as in Claude Code, `mcp__<server>__<tool>`, with the tool's own
 arguments as `input`.
+
+With `--include-partial-messages`, each reply also comes as it's written, as Claude Code sends it:
+`stream_event` lines (`message_start`, `content_block_start`, `content_block_delta` with a
+`thinking_delta` or `text_delta`, `content_block_stop`, `message_stop`), before its whole
+`assistant` line. Helpers' replies come whole only (their `assistant` lines, with their parent).
 
 A helper's steps (the `agent` tool: another of the user's models, or the same one, doing a job;
 several can run at once) come as `assistant` and `user` lines too, as Claude Code sends a

@@ -119,7 +119,7 @@ export const keyId = (key, s = '') => CONTROL_KEYS[key.sequence ?? s] ?? [key.ct
 // Alt+N/P (or Ctrl+PgDn/PgUp), Alt+1…9: tabs; Shift+↑↓ and Alt+↑↓ scroll the conversation (as
 // PgUp/PgDn and the mouse wheel do), Alt+Shift+↑↓ (or Ctrl+Home/End) to its top and bottom.
 // keybindings.json can move any of them.
-export const DEFAULT_KEYS = { 'alt+b': 'background_log', 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+shift+up': 'scroll_top', 'alt+shift+down': 'scroll_bottom', 'ctrl+home': 'scroll_top', 'ctrl+end': 'scroll_bottom', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', 'ctrl+pagedown': 'next_tab', 'ctrl+pageup': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
+export const DEFAULT_KEYS = { 'ctrl+o': '/toggle_thinking', 'alt+b': 'background_log', 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+shift+up': 'scroll_top', 'alt+shift+down': 'scroll_bottom', 'ctrl+home': 'scroll_top', 'ctrl+end': 'scroll_bottom', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', 'ctrl+pagedown': 'next_tab', 'ctrl+pageup': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
 export function loadKeys(file = path.join(HOME, 'keybindings.json')) {
   let raw = {}
   try {
@@ -135,9 +135,11 @@ export function loadKeys(file = path.join(HOME, 'keybindings.json')) {
 const MOUSE_ON = '\x1b[?1000h\x1b[?1002h\x1b[?1006h'
 const MOUSE_OFF = '\x1b[?1006l\x1b[?1002l\x1b[?1000l'
 
-// The system clipboard (pbcopy, clip, wl-copy, xclip, xsel); else the terminal's (OSC 52, works over SSH too).
+// The system clipboard (pbcopy, clip, wl-copy, xclip, xsel); else the terminal's (OSC 52). Over SSH,
+// the terminal's only: the system's would be the remote machine's, not the one you're at.
 export function copyText(text) {
-  const tools = process.platform === 'darwin' ? [['pbcopy']] : process.platform === 'win32' ? [['clip']] : [['wl-copy'], ['xclip', '-selection', 'clipboard'], ['xsel', '-b', '-i']]
+  const remote = Boolean(process.env.SSH_CONNECTION || process.env.SSH_TTY || process.env.SSH_CLIENT)
+  const tools = remote ? [] : process.platform === 'darwin' ? [['pbcopy']] : process.platform === 'win32' ? [['clip']] : [['wl-copy'], ['xclip', '-selection', 'clipboard'], ['xsel', '-b', '-i']]
   for (const [cmd, ...args] of tools) if (spawnSync(cmd, args, { input: text, stdio: ['pipe', 'ignore', 'ignore'] }).status === 0) return 'system'
   process.stdout.write(`\x1b]52;c;${Buffer.from(text).toString('base64')}\x07`)
   return 'osc'
@@ -652,6 +654,7 @@ export const PERMISSIONS = [
   ['plan', 'plan first: look around without changing anything, then approve the plan'],
 ]
 
+let drewLast = null // the UI (tab) that last drew the screen: only its own last frame can be diffed against
 export class UI {
   constructor({ yes = false, input = process.stdin, output = process.stdout } = {}) {
     this.permission = yes ? 'all' : 'ask' // see PERMISSIONS
@@ -670,7 +673,8 @@ export class UI {
     this.onInterrupt = null
     this.timer = null
     this.label = ''
-    this.showThinking = true
+    this.showThinking = false // all of it as it comes (Ctrl+O); off: its last two lines, live, above the spinner
+    this.thinkTail = '' // the thinking coming in now, for those two lines
     this.tail = ''
     // suggest(line, cursor) → [{ value, desc, start, end, space, insertOnly }] for the menu under the prompt
     this.suggest = null
@@ -843,21 +847,33 @@ export class UI {
     const write = (x) => this.write(x)
     let think = null
     let text = null
-    let thought = false
+    let thought = '' // all of it so far: shown whole when Ctrl+O switches to all of it midway
     const summary = () => {
-      if (thought && !this.showThinking) this.print(c.faint(c.italic(`✻ ${who ? `${who} ` : ''}thought for ${secs()}`)))
+      this.thinkTail = ''
+      if (thought.trim() && !think) {
+        // what it thought stays in the conversation: its last two lines (all of it: Ctrl+O)
+        const last = thought.split('\n').map((l) => l.trim()).filter(Boolean).slice(-2)
+        this.print(c.faint(c.italic(`✻ ${who ? `${who} ` : ''}thought for ${secs()} · Ctrl+O shows all of it`)))
+        this.print(c.think(c.italic(last.map((l) => `  ${l}`).join('\n'))))
+        this.lastThought = { who, text: thought } // Ctrl+O shows it, now that it's over (showLastThought)
+      }
     }
     return {
       think: (t) => {
         if (!t || text) return
-        thought = true
-        if (!this.showThinking) return this.spinner(`thinking · ${secs()}`)
+        thought += t
+        if (!this.showThinking && !think) {
+          this.thinkTail = thought.slice(-4000) // its last two lines, live (render)
+          return this.spinner(`thinking · ${secs()}`)
+        }
         if (!think) {
+          this.thinkTail = ''
           this.gap()
           this.print(c.faint(c.italic(`✻ ${who ? `${who} is thinking` : 'Thinking'}…`)))
           const style = (x) => c.think(c.italic(x))
           think = new Block(write, { style })
           if (color) think = new Markdown(think, style)
+          return think.push(thought) // what came before the switch too
         }
         think.push(t)
       },
@@ -879,6 +895,16 @@ export class UI {
         this.afterBlock = Boolean(text || think)
       },
     }
+  }
+
+  // The thinking that was shown as two lines, all of it (Ctrl+O after it's over): true when there was some
+  showLastThought() {
+    const t = this.lastThought
+    if (!t?.text.trim()) return false
+    this.lastThought = null
+    this.print(c.faint(c.italic(`✻ ${t.who ? `${t.who}'s` : 'The'} thinking, all of it:`)))
+    this.print(c.think(c.italic(t.text.trim().replace(/^/gm, '  '))))
+    return true
   }
 
   #rl() {
@@ -915,6 +941,7 @@ export class UI {
     // alternate screen · kitty keyboard protocol (Shift/Cmd+Enter are told apart) · bracketed paste
     // · mouse reports (SGR), when HeartCode takes the mouse
     this.out.write('\x1b[?1049h\x1b[H\x1b[2J\x1b[>1u\x1b[?2004h' + this.mouseOn)
+    this.frame0 = null
     this.out.on('resize', () => this.render())
     this.#rl()
     process.on('exit', () => this.leaveFullscreen())
@@ -933,9 +960,16 @@ export class UI {
       this.rl?.resume()
       if (wasFull) {
         this.out.write('\x1b[?1049h\x1b[>1u\x1b[?2004h' + this.mouseOn)
+        this.frame0 = null
         this.render()
       }
     }
+  }
+
+  // Taking the mouse, or giving it back to the terminal, now (the settings page's switch)
+  setMouse(on) {
+    this.mouseOn = on ? MOUSE_ON : ''
+    if (this.full) this.out.write(on ? MOUSE_ON : MOUSE_OFF)
   }
 
   // The mouse: the wheel scrolls the conversation; dragging selects in it, copied when let go
@@ -951,7 +985,7 @@ export class UI {
     if (b & 64) {
       if ((b & 0xc3) !== 64 && (b & 0xc3) !== 65) return
       if (this.dialog) return this.dialog.key?.({ name: b & 1 ? 'down' : 'up', wheel: true }), this.render()
-      return this.scrollBy(b & 1 ? -3 : 3) // 64 up, 65 down
+      return this.#wheel(b & 1 ? -1 : 1) // 64 up, 65 down
     }
     if ((b & 3) !== 0 && !up) return // the left button only (a release says 3 in some terminals)
     const press = !(b & 32) && !up
@@ -1060,6 +1094,16 @@ export class UI {
     this.scroll = Math.max(0, this.scroll + n) // Infinity: the top (render keeps it in range)
     this.render()
   }
+  // The wheel: a line per event when they come in a stream (a trackpad, a wheel spun fast), three for a
+  // lone notch; the screen drawn once a frame however many come (each its own drawing was jerky)
+  #wheel(dir) {
+    if (!this.full || this.out.hidden) return
+    const now = Date.now()
+    const step = now - (this.wheelAt ?? 0) < 60 ? 1 : 3
+    this.wheelAt = now
+    this.scroll = Math.max(0, this.scroll + dir * step)
+    this.wheelDraw ??= setTimeout(() => ((this.wheelDraw = null), this.render()), 16)
+  }
   page() {
     return Math.max(1, (this.out.rows || 24) - 4)
   }
@@ -1141,7 +1185,13 @@ export class UI {
     if (this.timer && !this.asking) {
       // the spinner on its own line; the timer (and Esc) on the next, so neither line is crammed
       const request = this.requestSince?.()
-      const timer = this.busySince ? `responding ${duration(this.worked())}${request ? ` · waiting for model ${duration(Date.now() - request)}` : ''} · Esc to stop` : ''
+      const timer = this.busySince ? `responding ${duration(this.worked())}${request ? ` · waiting for model ${duration(Date.now() - request)}` : ''} · Esc to stop${this.thinkTail ? ' · Ctrl+O shows all thinking' : ''}` : ''
+      if (this.thinkTail) {
+        // the thinking's last two lines (long ones wrapped), dim, changing as it comes
+        const w = Math.max(20, cols - 6)
+        const lines = this.thinkTail.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).flatMap((l) => l.match(new RegExp(`.{1,${w}}(\\s|$)|.{${w}}`, 'g')) ?? [l]).map((l) => l.trim()).filter(Boolean)
+        for (const l of lines.slice(-2)) bottom.push(fit(`  ${c.think(c.italic(l))}`, cols))
+      }
       bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(this.#label())}`, cols))
       if (timer) bottom.push(fit(`  ${c.faint(timer)}`, cols))
     }
@@ -1179,13 +1229,25 @@ export class UI {
       const plainRow = row
       row = (line) => plainRow(`\x1b[2m${line.replace(/\x1b\[(0|22)?m/g, (m) => m + '\x1b[2m')}`)
     }
+    // only the rows that changed since the last frame are written (scrolling rewrote the whole screen
+    // every time); a dialog or a selection over it, or a resize: all of them
+    const overlay = Boolean(this.dialog || asked || this.ssel || this.flash)
+    const was = !overlay && !this.frameOverlay && this.frameSize === `${rows}x${cols}` && drewLast === this ? this.frame0 : null // another tab drew since: all of it
+    const frame = []
+    const put = (r, line, always = false) => {
+      const text = row(line)
+      frame[r] = text
+      if (always || was?.[r] !== text) s += `\x1b[${r};1H${text}`
+    }
     for (let r = 0; r < inputTop - 1; r++) {
       const i = r - head.length
-      const line = i < 0 ? head[r] : i < avail ? (view[i] ?? '') : bottom[i - avail]
-      s += `\x1b[${r + 1};1H${row(line)}`
+      put(r + 1, i < 0 ? head[r] : i < avail ? (view[i] ?? '') : bottom[i - avail])
     }
-    box.forEach((line, i) => (s += `\x1b[${inputTop + i};1H${row(line)}`))
-    below.forEach((line, i) => (s += `\x1b[${inputTop + inputRows + i};1H${row(line)}`))
+    // the input and what's under it, every time: readline clears from the cursor down on its own (Enter)
+    box.forEach((line, i) => put(inputTop + i, line, true))
+    below.forEach((line, i) => put(inputTop + inputRows + i, line, true))
+    ;[this.frame0, this.frameOverlay, this.frameSize] = [frame, overlay, `${rows}x${cols}`]
+    drewLast = this
     // what can be selected besides the conversation (screen rows from 1): the header's first line (the
     // project's folder), the input box, the status bar; with a dialog open, only what's in it
     const plain = (t) => String(t ?? '').replace(/\x1b\[[0-9;]*m/g, '')

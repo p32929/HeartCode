@@ -58,7 +58,7 @@ ${c.bold('options')}
       --api-key <key>    API key for --base-url
   -y, --yes              do everything without asking (the default)
       --ask              ask before every edit and command, this run
-      --hide-thinking    collapse the model's thinking to one line
+      --hide-thinking    the model's thinking: only its last two lines while it thinks (the default; Ctrl+O shows all of it)
   -C, --cwd <dir>        project folder (default: current folder)
       --temp             keep nothing: a throwaway settings folder (your providers, model info,
                          prices and notes copied in), shared by the --temp runs going on at once
@@ -105,7 +105,7 @@ const SECTIONS = [
     ['/select_model', 'pick the model(s) for this session: one pins it, several rotate among them, auto = your whole list', true],
   ]],
   ['settings', [
-    ['/toggle_thinking', "show or collapse the model's thinking"],
+    ['/toggle_thinking', "the model's thinking: its last two lines, or all of it (Ctrl+O)"],
     ['/voice', 'say your message (or Space in an empty box): it shows in the box as you speak, Enter sends it, Esc cancels'],
   ]],
   ['session', [
@@ -179,7 +179,7 @@ function keysHelp(keys = {}, mouse = false) {
     [mouse ? 'Drag' : '', 'select and copy: the conversation, a dialog, the folder, the input, the status bar'],
     [mouse ? 'Double-click' : '', 'copy the word under it (an address, a path, a model)'],
     [mouse ? (process.platform === 'darwin' ? 'Option+drag' : 'Shift+drag') : '', "the terminal's own selection, past HeartCode's"],
-    [mouse ? '' : 'Mouse', 'the terminal\'s own: select and copy as usual (HeartCode takes the mouse, for the wheel and drag to copy, with "mouse": true in config.json)'],
+    [mouse ? '' : 'Mouse', 'the terminal\'s own: select and copy as usual (switch "HeartCode takes the mouse" on in /settings → General for the wheel to scroll only the conversation)'],
   ].filter(([k]) => k)
   return rows
 }
@@ -195,7 +195,7 @@ const ALL_OFF = `${c.yellow('The providers of all your models are switched off.'
 // Choices for commands that take one (also offered in the "/" menu).
 const ARGS = {
   export: [['md', 'Markdown'], ['html', 'a web page'], ['json', 'the whole session file']],
-  set_effort: [['default', "the model's own setting"], ['low', 'quick, less thinking'], ['medium', 'balanced'], ['high', 'thinks the longest']],
+  set_effort: [['default', 'low: a little thinking, shown as it comes'], ['low', 'quick, less thinking'], ['medium', 'balanced'], ['high', 'thinks the longest']],
 }
 
 
@@ -307,7 +307,7 @@ class App {
       case 'effort':
         if (!ARGS.set_effort.some(([o]) => o === v)) return bad('default, low, medium or high')
         cfg.effort = v === 'default' ? undefined : v
-        if (this.s?.strat.thinking) this.s.client.effort = cfg.effort
+        if (this.s?.strat.thinking) this.s.client.effort = effortOf(cfg)
         return save(`effort: ${v}`)
       case 'auto_compact':
       case 'director':
@@ -358,9 +358,14 @@ class App {
       }
     }
     // the model list (settings page): another model answered
+    // told once the reply that came is closed (it's known before the reply's last line ends: it'd go on
+    // that line): the agent says it then (announceSwitch), else right after
+    let switched = null
+    client.announceSwitch = () => switched && (ui.print(switched), (switched = null))
     client.onSwitch = (t) => {
       const i = client.rotation.list.indexOf(t)
-      ui.print(c.dim(`↻ ${t.provider} · ${t.model} answered${i ? ` (#${i + 1} in your model list)` : ' (#1 again)'}`))
+      switched = c.dim(`↻ ${t.provider} · ${t.model} answered${i ? ` (#${i + 1} in your model list)` : ' (#1 again)'}`)
+      setImmediate(client.announceSwitch)
     }
     if (cfg.maxRetries !== undefined) client.retryIf = (e, attempt) => attempt < cfg.maxRetries // headless: then give up
     let profile = await getProfile(client, ui, quiet)
@@ -371,7 +376,7 @@ class App {
     const apply = () => {
       for (const k of Object.keys(strat)) delete strat[k]
       Object.assign(strat, strategy(profile, cfg))
-      Object.assign(client, { tokenRatio: profile.tokenRatio ?? 1, knownGood: profile.largestAccepted ?? 0, can: strat, effort: strat.thinking ? cfg.effort : undefined })
+      Object.assign(client, { tokenRatio: profile.tokenRatio ?? 1, knownGood: profile.largestAccepted ?? 0, can: strat, effort: strat.thinking ? effortOf(cfg) : undefined })
       for (const [q, at] of Object.entries(profile.quirks ?? {})) if (Date.now() - at < LIMIT_MS) client.quirks[q] = true
       price = priceOf(client.provider, client.baseUrl, client.model)
       if (this.s?.client === client) this.s.profile = profile // /model_info, the settings page
@@ -621,7 +626,7 @@ class App {
     const mine = this.commands().slice(COMMANDS.length)
     const sections = [...SECTIONS]
     if (mine.length) sections.push(['your skills (type /skill:name)', mine])
-    sections.push(['keyboard', keysHelp(this.ui.keys, this.cfg?.mouse === true)])
+    sections.push(['keyboard', keysHelp(this.ui.keys, this.cfg?.mouse !== false)])
     return helpText(sections)
   }
 
@@ -702,7 +707,7 @@ class App {
       provider: `${c.brand('●')} ${c.muted(now.provider)} ${c.faint(`(${on})`)}`,
       model,
       mode: strat ? c.muted(strat.actions === 'tools' ? 'tools' : 'guided') : c.dim('not loaded yet'),
-      thinking: strat?.thinking ? c.think(`thinking${cfg.effort ? ` · ${cfg.effort}` : ''}`) + (ui.showThinking ? '' : c.faint(' (collapsed)')) : null,
+      thinking: strat?.thinking ? c.think(`thinking · ${effortOf(cfg)}`) + (ui.showThinking ? c.faint(' (all)') : '') : null,
       images: strat?.vision ? c.muted('images') : null,
       ctx: null,
       tps: null,
@@ -1217,6 +1222,9 @@ let settingsPage = null
 // it reads as its own, and wants a quoted empty title first).
 // How HeartCode picks your models: "fit" (an orchestrator hands the work out) or your order; --model-choice for this run wins.
 let modelChoiceFlag
+// The thinking effort asked of a model that thinks: yours, or low when you haven't chosen (many think
+// only when asked: then they think a little, and you see it)
+const effortOf = (cfg) => cfg.effort ?? 'low'
 const fitMode = (cfg) => (modelChoiceFlag ?? cfg.modelChoice) === 'fit'
 
 function openBrowser(url) {
@@ -1256,8 +1264,9 @@ function applySettings(apps, cfg, what) {
     }
     if (what === 'provider') app.lists = {} // its list switched on or off, a model added by name
     if (what === 'setting:permissions') ui.setPermission(cfg.permissions)
+    if (what === 'setting:mouse') ui.setMouse(cfg.mouse !== false)
     if (what === 'setting:statusBar') ui.render?.() // the status bar's layout changed: redraw it now
-    if (what === 'setting:effort' && app.s?.strat.thinking) app.s.client.effort = cfg.effort
+    if (what === 'setting:effort' && app.s?.strat.thinking) app.s.client.effort = effortOf(cfg)
     if (what === 'setting:autoCompact' && app.s) app.s.autoCompact = cfg.autoCompact !== false
     if (what === 'setting:format' && app.s) app.s.noFormat = cfg.format === false
     if (what === 'setting:lsp' && app.s) app.s.noLsp = cfg.lsp === false
@@ -1724,7 +1733,9 @@ async function slash(app, line, working = false) {
     }
     case 'toggle_thinking':
       ui.showThinking = !ui.showThinking
-      return ui.print(c.dim(`thinking ${ui.showThinking ? 'shown' : 'collapsed'}`))
+      ui.print(c.dim(ui.showThinking ? 'thinking: all of it, as it comes (Ctrl+O: its last two lines)' : 'thinking: its last two lines while it thinks (Ctrl+O: all of it)'))
+      if (ui.showThinking && !ui.thinkTail) ui.showLastThought() // the one just over: all of it now
+      return
   }
   if (!['model_info', 'compact'].includes(cmd)) {
     app.skills = loadSkills(app.root) // edits to skill files apply right away
@@ -1816,7 +1827,7 @@ async function runTask(app, task, ctl) {
 
 async function repl(app, f = {}) {
   const { ui, cfg } = app
-  ui.fullscreen({ mouse: cfg.mouse === true }) // off: the terminal selects and copies text itself
+  ui.fullscreen({ mouse: cfg.mouse !== false }) // HeartCode's wheel and selection ("mouse": false: the terminal's own: then its wheel scrolls the whole screen)
   ui.onDoubleEscape = () => '/rewind'
   let ctl = null
   ui.onEscape = () => ctl?.abort()
@@ -2021,10 +2032,10 @@ async function main() {
       'max-turns': { type: 'string' },
       all: { type: 'boolean' }, // heart models --all
       json: { type: 'boolean' }, // heart models --json
+      'include-partial-messages': { type: 'boolean' }, // stream-json: the replies as they come (thinking too)
       // accepted for drop-in use where Claude Code is expected; nothing to do in HeartCode
       autocompact: { type: 'string' },
       'exclude-dynamic-system-prompt-sections': { type: 'boolean' },
-      'include-partial-messages': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean', short: 'v' },
     },
@@ -2104,7 +2115,7 @@ async function main() {
         saveConfig(cfg)
       }
     }
-    ui.showThinking = !f['hide-thinking']
+    ui.showThinking = false // the thinking's last two lines while it thinks; Ctrl+O shows all of it (--hide-thinking: the same)
     const app = new App(cfg, ui, root)
     usePromptsFrom(app.root) // its .heartcode/prompts override the built-in sections
     ui.suggest = (line, cursor) => app.suggest(line, cursor)
@@ -2166,7 +2177,7 @@ async function main() {
   if (headless) {
     app.allowTools = [...(f.allowedTools ?? []), ...(f['allowed-tools'] ?? [])]
     app.denyTools = [...(f.disallowedTools ?? []), ...(f['disallowed-tools'] ?? [])]
-    const code = await runHeadless(app, { prompt: positionals.join(' '), input: f['input-format'], output: f['output-format'], appendSystem: f['append-system-prompt'] })
+    const code = await runHeadless(app, { prompt: positionals.join(' '), input: f['input-format'], output: f['output-format'], appendSystem: f['append-system-prompt'], partial: f['include-partial-messages'] })
     if (wt && worktreeState(wt).empty) removeWorktree(wt) // else kept, for the caller to merge (its path is in the log)
     process.exit(code) // MCP servers are stopped by the exit hooks
   }

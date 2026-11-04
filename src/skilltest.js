@@ -12,6 +12,7 @@ import zlib from 'node:zlib'
 import { execFile } from 'node:child_process'
 import { TOOL_DEFS } from './tools.js'
 import { browse, findChrome } from './check.js'
+import { prompt } from './prompts.js' // what each job asks: prompts/tests.md
 
 export const SKILLS = ['code', 'page', 'vision', 'tools']
 
@@ -33,10 +34,6 @@ const node = (file, real = fs.realpathSync(file)) => // (the permission model go
   )
 
 // --- code ---
-const CODE_ASK = `Write a JavaScript function parseDuration(text) that turns a duration like "1h30m", "45s", "2d 4h" or "1.5h" into milliseconds.
-- Units: d, h, m, s (any case). A number may have decimals. Parts may be separated by spaces.
-- Anything else returns null: an empty string, a number without a unit ("10"), an unknown unit ("5x"), a unit without a number ("h"), other characters ("1h-2m"), or something that isn't a string.
-Reply with only the code, in one \`\`\`js block.`
 const CODE_TESTS = [['1h30m', 5_400_000], ['45s', 45_000], ['2d 4h', 187_200_000], ['1.5h', 5_400_000], ['90m', 5_400_000], ['1H', 3_600_000], ['0s', 0], ['3d', 259_200_000], ['', null], ['10', null], ['5x', null], ['h', null], ['1h-2m', null], [null, null], [42, null]]
 async function scoreCode(reply) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'heart-skill-'))
@@ -53,12 +50,6 @@ async function scoreCode(reply) {
 }
 
 // --- page ---
-const PAGE_ASK = `Write a single HTML file (CSS and JS inside it, nothing loaded from elsewhere): a shopping list app.
-- A text input with id "item", a button with id "add", a list with id "list" (each item an <li>), and an element with id "count" showing how many items there are (e.g. "2 items").
-- Add (the button, or Enter in the input) adds the typed text, trimmed, and clears the input; empty text adds nothing.
-- Each item has its own remove button (×) that removes it.
-- It must look good and tidy on a phone (390px wide) and on a desktop.
-Reply with only the file, in one \`\`\`html block.`
 // in the page, before and after Enter is pressed for real (a form's submit, a key handler: either works)
 const PAGE_BEFORE = `(async () => {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -157,7 +148,6 @@ export function scene(rand = Math.random) {
   for (let i = 0; i < 2; i++) circle(YELLOW) // to tell apart from the blue ones
   return { url: `data:image/png;base64,${png(W, H, px).toString('base64')}`, x: t.x, y: t.y, blue, green }
 }
-const VISION_ASK = 'This image is 640×400 pixels (x from the left, y from the top). Reply with only JSON: {"x": …, "y": …, "blue_circles": …, "green_squares": …}, where x and y are the pixel centre of the red triangle.'
 function scoreVision(reply, s) {
   let a
   try {
@@ -183,7 +173,6 @@ const ok = total('1, 2,3') === 6 && total('10') === 10 && total('') === 0
 console.log(ok ? 'ok' : 'FAIL: got ' + JSON.stringify([total('1, 2,3'), total('10'), total('')]))
 process.exit(ok ? 0 : 1)
 `
-const TOOLS_ASK = '`node test.js` fails in this folder. Find out why and fix sum.js so it passes. Use the tools; when it passes, say so in one line.'
 const ROUNDS = 12 // a test's end: a model still going after this many steps is going round in circles
 async function scoreTools(client, ms, signal) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'heart-skill-'))
@@ -217,7 +206,7 @@ async function scoreTools(client, ms, signal) {
   }
   try {
     const tools = TOOL_DEFS.filter((f) => ['read_file', 'list_files', 'edit_file', 'write_file', 'run_command'].includes(f.name)).map((f) => ({ type: 'function', function: f }))
-    const messages = [{ role: 'user', content: TOOLS_ASK }]
+    const messages = [{ role: 'user', content: prompt('tests/skill-tools') }]
     let bad = 0, steps = 0
     for (; steps < ROUNDS; steps++) {
       const res = await client.chat({ messages, tools, stream: true }, { signal: AbortSignal.any([AbortSignal.timeout(ms), ...(signal ? [signal] : [])]) })
@@ -260,11 +249,11 @@ export async function testSkills(client, can, ms, signal, onStep = () => {}, gat
       const t0 = Date.now() // from when it's sent: waiting for room isn't the model's time
       try {
         let r
-        if (skill === 'code') r = await scoreCode(await ask(CODE_ASK))
-        else if (skill === 'page') r = await scorePage(await ask(PAGE_ASK), signal)
+        if (skill === 'code') r = await scoreCode(await ask(prompt('tests/skill-code')))
+        else if (skill === 'page') r = await scorePage(await ask(prompt('tests/skill-page')), signal)
         else if (skill === 'vision') {
           const s = scene()
-          r = scoreVision(await ask([{ type: 'text', text: VISION_ASK }, { type: 'image_url', image_url: { url: s.url } }]), s)
+          r = scoreVision(await ask([{ type: 'text', text: prompt('tests/skill-vision') }, { type: 'image_url', image_url: { url: s.url } }]), s)
         } else r = await scoreTools(client, ms, signal)
         out[skill] = r.skipped ? r : { ...r, ms: Date.now() - t0 }
       } catch (e) {

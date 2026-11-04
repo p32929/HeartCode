@@ -1,12 +1,13 @@
 # Prompts
 
-Everything HeartCode sends to a model, in four files. Each `## name` heading is one prompt.
+Everything HeartCode sends to a model, in these files. Each `## name` heading is one prompt.
 
 | file | used for |
 |---|---|
 | `agent.md` | tool mode (capable models): the system prompt, tool descriptions, memory, notes HeartCode adds |
 | `guided.md` | guided mode (weak models): one question at a time |
 | `compact.md` | `/compact` and auto-compact |
+| `tests.md` | what the settings page's tests ask your models: does it answer, the skill jobs, the orchestrator scenes (each one's note says what its scoring relies on) |
 
 In a prompt, `{{name}}` is filled in by HeartCode (the note under each heading lists them),
 `{{#if name}} … {{else}} … {{/if}}` keeps a part only when `name` has a value, and a

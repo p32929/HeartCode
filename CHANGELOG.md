@@ -2,6 +2,41 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.51 (2026-11-04)
+
+- **Models that think now show it**: many (gemma4, Qwen on Groq, Gemini) think only when asked, and
+  HeartCode didn't ask unless you'd set an effort; now a model that can think is asked for low effort
+  by default (your setting wins), and Gemini's thinking is asked for and taken out of its answer.
+- **Thinking, two lines at a time**: while a model thinks, its last two lines show live above the
+  spinner; after its reply, those two lines stay above it under "thought for …", so you see what it
+  thought and what it answered. Ctrl+O shows all of it as it comes (what came before too), and again
+  goes back; once it's over, Ctrl+O shows the whole thought it just had. A helper's thinking (the work an orchestrator
+  hands out) shows as it comes too, not only when its reply ends (unless several helpers reply at
+  once).
+- "↻ … answered" (another model in your list answered) is on a line of its own under the reply, no
+  longer glued to its last line.
+- **Headless: replies as they come**: `heart -p --output-format stream-json --include-partial-messages`
+  now streams each reply's thinking and text as Claude Code does (`stream_event` lines with
+  `thinking_delta` and `text_delta`), before its whole `assistant` line (which, as before, has the
+  thinking in a `thinking` block).
+
+- **Smoother scrolling**: a trackpad or a fast-spun wheel moves the conversation a line per step (a
+  single notch still three), the screen is drawn at most once a frame however many scroll events
+  come, and only the rows that changed are written.
+- **The mouse wheel scrolls only the conversation again**: HeartCode takes the mouse by default, so
+  the tabs, the input and the status bar stay put while you scroll (with the terminal's own mouse,
+  its wheel scrolled the whole screen). Dragging selects and copies; over SSH the copy goes to the
+  computer you're at (through the terminal), not the remote one. Option+drag (Shift+drag elsewhere)
+  is still the terminal's own selection, and "HeartCode takes the mouse" in /settings → General
+  gives the mouse back to the terminal (at once, in an open HeartCode too).
+
+- **Every test prompt is in one place, as Markdown**: prompts/tests.md holds what Test asks your
+  models: the "does it answer" message, the tool check, the four skill jobs and the six orchestrator
+  scenes. They're on the settings page's System prompt page, in their own group (Tests) right under
+  the system prompts, to read, change and reset like any other prompt; each one's note says what
+  its scoring relies on (a name or id the check looks for). A change is used by the next Test, also
+  on a settings page started on its own (heart settings).
+
 ## 0.1.50 (2026-11-04)
 
 - **Asks before an untested orchestrator starts**: with an orchestrator whose models were never

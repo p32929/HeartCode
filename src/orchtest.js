@@ -3,31 +3,32 @@
 // is asked twice at once and the worse counts (a model answers differently each time). No answer in
 // time (Tests wait) is no result, not a mistake: what's scored is how it orchestrates.
 import { orchestratorSetup, codeLines } from './agent.js'
+import { prompt } from './prompts.js'
 
-const LRU = 'write lru.py: a thread-safe LRU cache with per-key TTL and O(1) get/put, plus test_lru.py with edge cases, and run the tests'
-const GAME = 'make me a car racing game in 3D with beautiful looking cars and nice roads, in the browser'
+// what each scene says: prompts/tests.md (read when the test runs: yours, if you changed them)
+const says = (name, vars) => prompt(`tests/scene-${name}`, vars)
 
 // scene: { name, messages(first) (after the system prompt; first: a model of the team), check(reply, first) → why it failed or '' }
 const SCENES = [
-  { name: 'answers "hi" itself', messages: () => [{ role: 'user', content: 'hi' }], check: (r) => (r.calls.length ? 'handed a greeting to another model' : !r.content.trim() ? 'said nothing' : '') },
-  { name: 'answers a question it knows itself', messages: () => [{ role: 'user', content: "in JavaScript, what's the difference between let and const?" }], check: (r) => (r.calls.length ? 'handed out a question it could answer' : !r.content.trim() ? 'said nothing' : '') },
-  { name: 'hands a small job to one model', messages: () => [{ role: 'user', content: 'list the files in this folder' }], check: (r) => one(r) },
-  { name: 'hands a big job to one model, with a prompt it can work from and a check', messages: () => [{ role: 'user', content: GAME }], check: (r) => (r.asked && !r.calls.length ? '' : one(r) || checked(r)) }, // asking the user how first is fine too
+  { name: 'answers "hi" itself', messages: () => [{ role: 'user', content: says('hello') }], check: (r) => (r.calls.length ? 'handed a greeting to another model' : !r.content.trim() ? 'said nothing' : '') },
+  { name: 'answers a question it knows itself', messages: () => [{ role: 'user', content: says('question') }], check: (r) => (r.calls.length ? 'handed out a question it could answer' : !r.content.trim() ? 'said nothing' : '') },
+  { name: 'hands a small job to one model', messages: () => [{ role: 'user', content: says('small-job') }], check: (r) => one(r) },
+  { name: 'hands a big job to one model, with a prompt it can work from and a check', messages: () => [{ role: 'user', content: says('big-job') }], check: (r) => (r.asked && !r.calls.length ? '' : one(r) || checked(r)) }, // asking the user how first is fine too
   {
     name: 'picks another model after a failure',
     messages: (first) => [
-      { role: 'user', content: LRU },
-      { role: 'assistant', content: '', tool_calls: [call('t1', { description: 'Write LRU cache and tests', model: first, prompt: `${LRU}. Report what you did and the test output.` })] },
-      { role: 'tool', tool_call_id: 't1', content: `error: ${first} is out of quota for 600 more minutes (its provider said so); hand it to another model` },
+      { role: 'user', content: says('job') },
+      { role: 'assistant', content: '', tool_calls: [call('t1', { description: 'Write LRU cache and tests', model: first, prompt: `${says('job')}. Report what you did and the test output.` })] },
+      { role: 'tool', tool_call_id: 't1', content: says('failure', { model: first }) },
     ],
     check: (r, first) => one(r) || (r.calls[0].model === first ? `handed it to ${first} again` : '') || checked(r),
   },
   {
     name: 'reports what was done',
     messages: (first) => [
-      { role: 'user', content: LRU },
-      { role: 'assistant', content: '', tool_calls: [call('t1', { description: 'Write LRU cache and tests', model: first, prompt: `${LRU}. Report what you did and the test output.` })] },
-      { role: 'tool', tool_call_id: 't1', content: 'Created lru.py (LRUCache: OrderedDict + a lock, per-key TTL checked on get) and test_lru.py (11 tests: eviction order, TTL expiry, update, capacity 1, threads).\n\n$ python3 -m pytest -q\n...........  11 passed in 0.31s' },
+      { role: 'user', content: says('job') },
+      { role: 'assistant', content: '', tool_calls: [call('t1', { description: 'Write LRU cache and tests', model: first, prompt: `${says('job')}. Report what you did and the test output.` })] },
+      { role: 'tool', tool_call_id: 't1', content: says('report') },
     ],
     check: (r) => (r.calls.length ? 'handed out the finished work again' : !r.content.trim() ? 'said nothing' : ''),
   },

@@ -48,8 +48,33 @@ export class HeadlessUI {
   setPermission(mode) {
     this.permission = mode
   }
-  response() {
-    return { text() {}, think() {}, end() {} }
+  // A model's reply as it comes, for --include-partial-messages (stream-json): Claude Code's events
+  // (message_start, a content block each for its thinking and its text with their deltas,
+  // message_stop) through this.partial. Without it, or a helper's reply (its steps come whole, with
+  // their parent): nothing.
+  response(who, { helper = false } = {}) {
+    const send = !helper && this.partial
+    if (!send) return { text() {}, think() {}, end() {} }
+    let started = false
+    let kind = null
+    let index = -1
+    const open = (k) => {
+      if (!started) (started = true), send({ type: 'message_start', message: { role: 'assistant', model: who, content: [] } })
+      if (kind === k) return
+      if (kind) send({ type: 'content_block_stop', index })
+      kind = k
+      send({ type: 'content_block_start', index: ++index, content_block: k === 'thinking' ? { type: 'thinking', thinking: '' } : { type: 'text', text: '' } })
+    }
+    return {
+      think: (t) => t && (open('thinking'), send({ type: 'content_block_delta', index, delta: { type: 'thinking_delta', thinking: t } })),
+      text: (t) => t && (open('text'), send({ type: 'content_block_delta', index, delta: { type: 'text_delta', text: t } })),
+      end: () => {
+        if (kind) send({ type: 'content_block_stop', index })
+        if (started) send({ type: 'message_stop' })
+        started = false
+        kind = null
+      },
+    }
   }
   async ask() {
     return null
@@ -125,6 +150,7 @@ export async function runHeadless(app, opts) {
   const asClaude = (name, input) => (name === 'mcp' && input?.server && input?.tool ? { name: mcpName(String(input.server), String(input.tool)), input: input.arguments ?? {} } : { name, input })
   let said = false // the model's text was already sent as an assistant message
   if (out === 'stream-json') {
+    if (opts.partial) app.ui.partial = (event) => emit({ type: 'stream_event', event, session_id, parent_tool_use_id: null }) // the replies as they come (--include-partial-messages)
     s.onEvent = (e) => {
       if (e.type === 'assistant') {
         const content = [
