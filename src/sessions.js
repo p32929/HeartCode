@@ -1,10 +1,25 @@
-// Saved conversations: one file per chat in ~/.heart/sessions, written after every message, so a
-// chat can be resumed later and rewound to any earlier message (conversation, files, or both).
+// Saved conversations: one file per chat in the project's .heartcode/sessions, written after every
+// message, so a chat can be resumed later and rewound to any earlier message (conversation, files,
+// or both). It stays with the project; the folder ignores itself in git (conversations can hold
+// secrets). Sessions from before (~/.heart/sessions) still list, and move over when next saved.
 import fs from 'node:fs'
 import path from 'node:path'
-import { HOME, readJson, writeJson } from './config.js'
+import { HOME, projectDir, readJson, writeJson } from './config.js'
 
-const DIR = path.join(HOME, 'sessions')
+const LEGACY = path.join(HOME, 'sessions') // where they all were; also where one goes if its project folder can't be written
+const INDEX = path.join(HOME, 'sessions.json') // id → its folder, so --resume <id> and an editor's session/load work from anywhere
+
+// The project a chat belongs to: a worktree's (<top>/.heartcode/worktrees/<name>) is its top's,
+// so removing the worktree doesn't take its sessions with it.
+const projectOf = (root) => path.resolve(root).replace(/[\\/]\.heartcode[\\/]worktrees[\\/][^\\/]+$/, '')
+function dirOf(root) {
+  const dir = projectDir(projectOf(root), 'sessions')
+  if (!fs.existsSync(path.join(dir, '.gitignore'))) {
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, '.gitignore'), '*\n')
+  }
+  return dir
+}
 
 // A chat: what the model has seen (messages for tool mode, history for guided mode), what the
 // screen showed (log), and per message ("turn") where each of those stood and the files as they
@@ -16,15 +31,29 @@ export function newChat(root) {
 }
 
 export function saveChat(chat) {
-  const file = path.join(DIR, `${chat.id}.json`)
+  const legacy = path.join(LEGACY, `${chat.id}.json`)
+  let dir = LEGACY
+  try {
+    dir = dirOf(chat.root)
+  } catch {} // a folder that can't be written (read-only, gone): the global one
+  const file = path.join(dir, `${chat.id}.json`)
   const first = chat.turns[0] ?? chat.branches?.[0]?.state.turns[0] // gone back to the start: its branches remain
   if (!first) {
     fs.rmSync(path.join(HOME, 'outputs', chat.id), { recursive: true, force: true }) // its saved tool output goes with it
+    fs.rmSync(legacy, { force: true })
     return fs.rmSync(file, { force: true }) // nothing (left) worth keeping
   }
   chat.updated = new Date().toISOString()
   chat.title = chat.name || first.task.split('\n')[0].slice(0, 80) // its name (/rename), else the first message, even after a rewind
-  writeJson(file, chat)
+  try {
+    writeJson(file, chat)
+  } catch {
+    dir = LEGACY
+    writeJson(legacy, chat)
+  }
+  if (dir !== LEGACY) fs.rmSync(legacy, { force: true }) // an older session, now moved into its project
+  const index = readJson(INDEX, {})
+  if (index[chat.id] !== dir) writeJson(INDEX, { ...index, [chat.id]: dir })
 }
 
 // /fork: a copy of the chat to go on with (the original stays as it is, in /resume).
@@ -94,20 +123,30 @@ ${body.join('\n')}
 `
 }
 
-// One chat by its id (any folder), or null.
-export function loadChat(id) {
-  return /^[\w.-]+$/.test(id) ? readJson(path.join(DIR, `${id}.json`), null) : null
+// One chat by its id, or null: in this folder's project, wherever the index last saw it, or the old place.
+export function loadChat(id, root = process.cwd()) {
+  if (!/^[\w.-]+$/.test(id)) return null
+  const here = projectDir(projectOf(root), 'sessions')
+  for (const dir of new Set([here, readJson(INDEX, {})[id], LEGACY].filter(Boolean))) {
+    const chat = readJson(path.join(dir, `${id}.json`), null)
+    if (chat) return chat
+  }
+  return null
 }
 
-// This folder's chats, newest first.
-export function listChats(root) {
-  let files = []
+const chatsIn = (dir) => {
   try {
-    files = fs.readdirSync(DIR).filter((f) => f.endsWith('.json'))
-  } catch {}
-  return files
-    .map((f) => readJson(path.join(DIR, f), null))
-    .filter((c) => c && c.root === root && (c.turns?.length || c.branches?.length))
+    return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => readJson(path.join(dir, f), null))
+  } catch {
+    return []
+  }
+}
+
+// This folder's chats, newest first: the project's own, and older ones still in the global place.
+export function listChats(root) {
+  const seen = new Set()
+  return [...chatsIn(projectDir(projectOf(root), 'sessions')), ...chatsIn(LEGACY)]
+    .filter((c) => c && c.root === root && (c.turns?.length || c.branches?.length) && !seen.has(c.id) && seen.add(c.id))
     .sort((a, b) => b.updated.localeCompare(a.updated))
 }
 

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tabs · design guide</title>
+<!-- shadcn/ui's look in plain HTML (Basecoat), Tailwind for the page, Lucide icons -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+<link rel="stylesheet" href="../theme.css"> <!-- the theme (theme.css): after Basecoat, so they win -->
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400..700&family=Geist+Mono:wght@400..600&display=swap"> <!-- the theme's fonts -->
+<script>document.documentElement.classList.toggle("dark", matchMedia("(prefers-color-scheme: dark)").matches)</script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@1.59.0/dist/umd/lucide.min.js"></script>
+<style type="text/tailwindcss">
+  @custom-variant dark (&:is(.dark *));
+  @theme inline {
+    --color-background: var(--background); --color-foreground: var(--foreground); --color-card: var(--card); --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground); --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground); --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground); --color-destructive: var(--destructive); --color-destructive-foreground: var(--destructive-foreground);
+    --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring);
+    --color-chart-1: var(--chart-1); --color-chart-2: var(--chart-2); --color-chart-3: var(--chart-3); --color-chart-4: var(--chart-4); --color-chart-5: var(--chart-5);
+    --color-sidebar: var(--sidebar); --color-sidebar-foreground: var(--sidebar-foreground); --color-sidebar-primary: var(--sidebar-primary); --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent); --color-sidebar-accent-foreground: var(--sidebar-accent-foreground); --color-sidebar-border: var(--sidebar-border); --color-sidebar-ring: var(--sidebar-ring);
+    --font-sans: var(--font-sans); --font-mono: var(--font-mono); --font-serif: var(--font-serif);
+    --radius-sm: calc(var(--radius) - 4px); --radius-md: calc(var(--radius) - 2px); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) + 4px);
+    --shadow-2xs: var(--shadow-2xs); --shadow-xs: var(--shadow-xs); --shadow-sm: var(--shadow-sm); --shadow: var(--shadow); --shadow-md: var(--shadow-md); --shadow-lg: var(--shadow-lg); --shadow-xl: var(--shadow-xl); --shadow-2xl: var(--shadow-2xl);
+  }
+  @layer base { * { @apply border-border outline-ring/50; } body { @apply bg-background text-foreground; } html { scroll-behavior: smooth; } }
+  @layer components { /* utilities in the markup win over these (a gradient on a .stage) */
+    section { @apply scroll-mt-20 px-5 py-10 sm:px-8 lg:px-10; }
+    section:nth-of-type(even) { @apply bg-muted/40; }
+    .sec-h { @apply mb-6 flex items-start gap-4; }
+    .sec-h h2 { @apply text-xl font-semibold tracking-tight; }
+    .sec-h p { @apply text-muted-foreground; }
+    .tile { @apply grid size-11 shrink-0 place-items-center rounded-xl bg-chart-1/20 text-chart-4 shadow-sm ring-1 ring-inset ring-chart-1/30 dark:text-chart-1 [&_svg]:size-5; }
+    .cards { @apply flex flex-wrap gap-4 [&>*]:min-w-0 [&>*]:flex-[1_1_19rem]; } /* every row filled: the cards in it grow to share it */
+    .cards + .cards { @apply mt-4; }
+    .ex { @apply flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition hover:shadow-md; }
+    .lab { @apply flex items-center gap-1.5 px-4 py-2 text-xs font-semibold [&_svg]:size-4; }
+    .lab.do { @apply bg-chart-1/15 text-chart-4 dark:text-chart-1; }
+    .lab.dont { @apply bg-destructive/10 text-destructive; }
+    .lab.kind { @apply bg-muted text-muted-foreground; }
+    .stage { @apply m-4 mb-3 flex min-h-20 flex-wrap items-center gap-2 rounded-xl border border-dashed bg-[radial-gradient(var(--border)_1px,transparent_1px)] bg-[size:14px_14px] p-5; }
+    .ex > p { @apply px-4 pb-4 text-sm text-muted-foreground; }
+    .ex > p b { @apply font-medium text-foreground; }
+    .mock { @apply w-full rounded-xl border bg-popover p-4 text-sm text-popover-foreground shadow-lg; }
+    .glance { @apply flex items-start gap-3 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur [&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-chart-3; }
+  }
+</style>
+</head>
+<body class="antialiased">
+
+<!-- hero -->
+<header class="relative overflow-hidden border-b bg-gradient-to-br from-muted via-background to-chart-1/10 px-5 pb-10 pt-12 sm:px-8 lg:px-10">
+  <div class="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full bg-chart-1/25 blur-3xl"></div>
+  <div class="relative flex items-center gap-4">
+    <div class="tile size-14 bg-primary text-primary-foreground ring-0 [&_svg]:size-7"><i data-lucide="panels-top-left"></i></div>
+    <div><p class="text-sm font-medium text-chart-3"><a href="../general.html" class="hover:underline">Design guide</a> · Component</p><h1 class="text-4xl font-semibold tracking-tight">Tabs</h1></div>
+  </div>
+  <p class="relative mt-4 text-lg text-muted-foreground">Tabs show <b class="text-foreground">one of a few related panels</b> in the same place. Choices that only change <b class="text-foreground">how the same content is shown</b> are a segmented toggle; broad, unrelated content is <b class="text-foreground">separate pages</b>.</p>
+  <div class="relative mt-8 flex flex-wrap gap-3 [&>*]:flex-[1_1_15rem]">
+    <div class="glance"><i data-lucide="eye"></i><div><b>One section at a time</b><p class="text-sm text-muted-foreground">Comparing or reading in order? One page with headings.</p></div></div>
+    <div class="glance"><i data-lucide="rows-2"></i><div><b>Few, one row, short</b><p class="text-sm text-muted-foreground">1–2 word labels. No second row, no all caps.</p></div></div>
+    <div class="glance"><i data-lucide="arrow-up-01"></i><div><b>Most-used first</b><p class="text-sm text-muted-foreground">And selected when the page opens.</p></div></div>
+    <div class="glance"><i data-lucide="link"></i><div><b>Tabs switch panels, links switch pages</b><p class="text-sm text-muted-foreground">Never both in one row.</p></div></div>
+  </div>
+</header>
+
+<!-- sections menu -->
+<nav class="sticky top-0 z-10 flex items-center gap-1 overflow-x-auto border-b bg-background/85 px-5 py-2 backdrop-blur sm:px-8 lg:px-10 [&_a]:flex [&_a]:shrink-0 [&_a]:items-center [&_a]:gap-1.5 [&_a]:rounded-full [&_a]:px-3 [&_a]:py-1.5 [&_a]:text-sm [&_a]:text-muted-foreground [&_a:hover]:bg-muted [&_a:hover]:text-foreground [&_svg]:size-4">
+  <a href="#which"><i data-lucide="layers"></i>Which one</a><a href="#tabs"><i data-lucide="panels-top-left"></i>Tabs</a><a href="#segmented"><i data-lucide="toggle-left"></i>Segmented toggle</a><a href="#ship"><i data-lucide="list-checks"></i>Before you ship</a>
+  <button class="btn ml-auto shrink-0" data-variant="ghost" data-size="icon-sm" aria-label="Switch dark mode" title="Switch dark mode" onclick="document.documentElement.classList.toggle('dark')"><i data-lucide="sun-moon"></i></button>
+</nav>
+
+<section id="which">
+  <div class="sec-h"><div class="tile"><i data-lucide="layers"></i></div><div><h2>Which one</h2><p>Same panel, new content: tabs. Same content, new view: segmented toggle. New place: a link.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="panels-top-left"></i>Tabs</div><div class="stage"><div class="tabs w-full">
+      <nav role="tablist" aria-label="Project" aria-orientation="horizontal"><button type="button" role="tab" id="t1" aria-controls="p1" aria-selected="true" onclick="tab(this)">Overview</button><button type="button" role="tab" id="t2" aria-controls="p2" aria-selected="false" tabindex="-1" onclick="tab(this)">Activity</button><button type="button" role="tab" id="t3" aria-controls="p3" aria-selected="false" tabindex="-1" onclick="tab(this)">Settings</button></nav>
+      <div role="tabpanel" id="p1" aria-labelledby="t1" class="rounded-lg border bg-card p-4 text-sm">3 open tasks · due Friday</div>
+      <div role="tabpanel" id="p2" aria-labelledby="t2" class="rounded-lg border bg-card p-4 text-sm" hidden>Sam Rivera closed "Fix login"</div>
+      <div role="tabpanel" id="p3" aria-labelledby="t3" class="rounded-lg border bg-card p-4 text-sm" hidden>Name, members, danger zone</div>
+    </div></div><p><b>Related sections,</b> one at a time; most people need the first. Click or use the arrow keys.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="toggle-left"></i>Segmented toggle</div><div class="stage flex-col items-start">
+      <div role="group" aria-label="View" class="grid grid-cols-2"><button class="btn rounded-r-none aria-pressed:bg-accent aria-pressed:text-accent-foreground" data-variant="outline" data-size="sm" aria-pressed="true" onclick="seg(this)"><i data-lucide="list"></i>List</button><button class="btn -ml-px rounded-l-none aria-pressed:bg-accent aria-pressed:text-accent-foreground" data-variant="outline" data-size="sm" aria-pressed="false" onclick="seg(this)"><i data-lucide="layout-grid"></i>Grid</button></div>
+      <p class="text-sm text-muted-foreground">12 files · the same files, shown another way</p>
+    </div><p><b>2–5 close choices</b> that change the view, filter or state of the same content.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="link"></i>Separate pages</div><div class="stage"><nav aria-label="Workspace" class="flex gap-1 border-b text-sm [&_a]:-mb-px [&_a]:border-b-2 [&_a]:border-transparent [&_a]:px-3 [&_a]:py-2 [&_a]:text-muted-foreground [&_a:hover]:text-foreground"><a href="#which" aria-current="page" class="!border-foreground font-medium !text-foreground">Projects</a><a href="#which">Billing</a><a href="#which">Team</a></nav></div><p><b>Broad, unrelated content:</b> <code>&lt;a href&gt;</code> links that change the URL, so Back returns to it.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="heading"></i>One page with headings</div><div class="stage"><div class="grid w-full gap-2 text-sm"><b>1. Create a key</b><p class="text-muted-foreground">Settings → API keys → New key.</p><b>2. Add it to the app</b><p class="text-muted-foreground">Paste it into <code>.env</code>.</p></div></div><p><b>Compared or read in order:</b> don't hide it behind tabs.</p></div>
+  </div>
+</section>
+
+<section id="tabs">
+  <div class="sec-h"><div class="tile"><i data-lucide="panels-top-left"></i></div><div><h2>Tabs</h2><p>Short plain labels in one row, above the panel; the selected one clearly marked.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab do"><i data-lucide="circle-check"></i>Do</div><div class="stage"><div class="tabs"><nav role="tablist" aria-label="Order" aria-orientation="horizontal"><button type="button" role="tab" aria-selected="true">Details</button><button type="button" role="tab" aria-selected="false" tabindex="-1">Shipping</button><button type="button" role="tab" aria-selected="false" tabindex="-1">Invoices</button></nav></div></div><p><b>One row, 1–2 words,</b> plain and predictable.</p></div>
+    <div class="ex"><div class="lab dont"><i data-lucide="circle-x"></i>Don't</div><div class="stage"><div class="flex max-w-80 flex-wrap gap-1 rounded-lg bg-muted p-1 text-xs font-medium uppercase text-muted-foreground [&>span]:rounded-md [&>span]:px-2 [&>span]:py-1"><span class="bg-background text-foreground shadow-sm">Order details</span><span>Shipping information</span><span>Invoices and receipts</span><span>Returns</span><span>Notes</span></div></div><p><b>Two rows of long, all-caps labels:</b> the link between tab and panel is lost.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="underline"></i>Line variant</div><div class="stage"><div class="tabs"><nav role="tablist" aria-label="Repository" aria-orientation="horizontal" data-variant="line"><button type="button" role="tab" aria-selected="true"><i data-lucide="code"></i>Code</button><button type="button" role="tab" aria-selected="false" tabindex="-1"><i data-lucide="circle-dot"></i>Issues</button><button type="button" role="tab" aria-selected="false" tabindex="-1"><i data-lucide="git-pull-request"></i>Pulls</button></nav></div></div><p><b>An underline</b> instead of a fill (<code>data-variant="line"</code>); the others stay visible.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="inbox"></i>Instead of disabled</div><div class="stage"><div class="tabs w-full"><nav role="tablist" aria-label="Billing" aria-orientation="horizontal"><button type="button" role="tab" aria-selected="false" tabindex="-1">Plan</button><button type="button" role="tab" aria-selected="true">Invoices</button></nav><div role="tabpanel" class="rounded-lg border bg-card p-4 text-sm text-muted-foreground">No invoices yet. The first comes on 1 December.</div></div></div><p><b>Never disable a tab:</b> remove it, or say why it's empty.</p></div>
+  </div>
+</section>
+
+<section id="segmented">
+  <div class="sec-h"><div class="tile"><i data-lucide="toggle-left"></i></div><div><h2>Segmented toggle</h2><p>One on at a time; nouns, all text or all icons; equal widths, about five at most.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="type"></i>Text</div><div class="stage"><div role="group" aria-label="Range" class="grid grid-cols-3"><button class="btn rounded-r-none aria-pressed:bg-accent aria-pressed:text-accent-foreground" data-variant="outline" data-size="sm" aria-pressed="false" onclick="seg(this)">Day</button><button class="btn -ml-px rounded-none aria-pressed:bg-accent aria-pressed:text-accent-foreground" data-variant="outline" data-size="sm" aria-pressed="true" onclick="seg(this)">Week</button><button class="btn -ml-px rounded-l-none aria-pressed:bg-accent aria-pressed:text-accent-foreground" data-variant="outline" data-size="sm" aria-pressed="false" onclick="seg(this)">Month</button></div></div><p><b>Equal widths,</b> noun labels. Click one.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="shapes"></i>Icons</div><div class="stage"><div role="group" aria-label="Align" class="grid grid-cols-3"><button class="btn rounded-r-none aria-pressed:bg-accent aria-pressed:text-accent-foreground" data-variant="outline" data-size="icon-sm" aria-label="Align left" title="Align left" aria-pressed="true" onclick="seg(this)"><i data-lucide="align-left"></i></button><button class="btn -ml-px rounded-none aria-pressed:bg-accent aria-pressed:text-accent-foreground" data-variant="outline" data-size="icon-sm" aria-label="Align center" title="Align center" aria-pressed="false" onclick="seg(this)"><i data-lucide="align-center"></i></button><button class="btn -ml-px rounded-l-none aria-pressed:bg-accent aria-pressed:text-accent-foreground" data-variant="outline" data-size="icon-sm" aria-label="Align right" title="Align right" aria-pressed="false" onclick="seg(this)"><i data-lucide="align-right"></i></button></div></div><p><b>All icons:</b> each with an <code>aria-label</code> and a tooltip.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="code"></i>In code</div><div class="stage text-sm"><code>&lt;button aria-pressed="true"&gt;Week&lt;/button&gt;</code></div><p><b>Toggle buttons in a <code>role="group"</code>;</b> the label stays the same when pressed.</p></div>
+  </div>
+</section>
+
+<section id="ship">
+  <div class="sec-h"><div class="tile bg-primary text-primary-foreground ring-0"><i data-lucide="list-checks"></i></div><div><h2>Before you ship</h2><p>In code: <code>role="tablist"</code> with an <code>aria-label</code>, <code>role="tab"</code> buttons with <code>aria-selected</code> and <code>aria-controls</code>, <code>role="tabpanel"</code>; arrow keys between tabs, Tab into the panel. Basecoat: <code>.tabs</code> and its <code>tabs.min.js</code>. Other pages: <code>&lt;a href&gt;</code> with <code>aria-current="page"</code>.</p></div></div>
+  <div class="cards [&_li]:flex [&_li]:items-start [&_li]:gap-2 [&_svg]:mt-0.5 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-chart-3">
+    <ul class="ex gap-3 p-5 text-sm"><li><i data-lucide="check"></i>Tabs only for sections people need one at a time</li><li><i data-lucide="check"></i>One row of 1–2 word labels; the most-used tab first and selected</li><li><i data-lucide="check"></i>Selected tab clearly marked; no disabled tabs</li></ul>
+    <ul class="ex gap-3 p-5 text-sm"><li><i data-lucide="check"></i>Arrow keys move between tabs; panels and tabs linked with ARIA</li><li><i data-lucide="check"></i>Links to other pages are <code>&lt;a href&gt;</code>, not tabs</li></ul>
+  </div>
+  <p class="mt-8 text-sm text-muted-foreground">Sources: shadcn/ui Tabs and Toggle Group · Nielsen Norman Group, "Tabs, Used Right" · GOV.UK Design System, Tabs · Apple HIG, Segmented controls · WAI-ARIA APG, Tabs and Button patterns · MDN, aria-current · Basecoat, Tabs. The rules in words: <code>tabs.md</code>; for every screen: <a href="../general.html" class="underline underline-offset-2">general rules</a>.</p>
+</section>
+
+<script>
+function tab(b){b.parentElement.querySelectorAll('[role=tab]').forEach(t=>{const on=t===b;t.setAttribute('aria-selected',on);t.tabIndex=on?0:-1;const p=document.getElementById(t.getAttribute('aria-controls'));if(p)p.hidden=!on})}
+function seg(b){b.parentElement.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b))}
+document.addEventListener('keydown',e=>{const t=e.target.closest&&e.target.closest('[role=tab]');if(!t||!['ArrowLeft','ArrowRight'].includes(e.key))return;const a=[...t.parentElement.children],n=a[(a.indexOf(t)+(e.key==='ArrowRight'?1:a.length-1))%a.length];n.focus();if(n.onclick)tab(n)})
+lucide.createIcons()
+</script>
+</body>
+</html>

@@ -1178,7 +1178,7 @@ function saveTabs(tabs) {
 // last session here.
 async function continueTabs(app, saved) {
   const { ui, tabs } = app
-  let open = (saved?.tabs ?? []).map((t, i) => ({ ...t, i, chat: loadChat(t.chat) })).filter((t) => t.chat?.turns?.length && (!t.worktree || fs.existsSync(t.chat.root)))
+  let open = (saved?.tabs ?? []).map((t, i) => ({ ...t, i, chat: loadChat(t.chat, app.root) })).filter((t) => t.chat?.turns?.length && (!t.worktree || fs.existsSync(t.chat.root)))
   if (!saved) open = listChats(app.root).filter((c) => c.turns?.length).slice(0, 1).map((chat) => ({ chat, worktree: null }))
   if (!open.length) return
   const many = open.length > 1
@@ -1913,7 +1913,7 @@ async function repl(app, f = {}) {
     if (last) await app.resume(last)
     else ui.print(c.dim('No earlier session in this folder to continue.'))
   }
-  if (f['resume-id']) await app.resume(loadChat(f['resume-id']))
+  if (f['resume-id']) await app.resume(loadChat(f['resume-id'], app.root))
   else if (f.resume) await app.resume()
   if (f.model) useModel(app, f.model) // a continued tab's own model
   // models this folder picked earlier (/select_model): said, with the way back to your whole list
@@ -2132,7 +2132,7 @@ async function main() {
   }
   // The full screen: in tabs (the first one is this folder; /tab and Alt+T open more).
   if (!headless && !sub && !positionals.length && process.stdin.isTTY && process.stdout.isTTY) {
-    if (f['resume-id'] && !loadChat(f['resume-id'])) throw new Error(`no session ${f['resume-id']}`)
+    if (f['resume-id'] && !loadChat(f['resume-id'], root)) throw new Error(`no session ${f['resume-id']}`)
     const saved = readJson(TABS_FILE, {})[root] // before this run's first tab replaces it
     const asked = f.continue || f.resume || f['resume-id'] || f['session-id'] // a session was chosen already
     const tabs = new Tabs((tab, o) => {
@@ -2142,7 +2142,7 @@ async function main() {
       Object.assign(app, { tabs, tab, worktree: o.wt ?? null })
       if (o.first) {
         if (f['no-memory']) app.memory = null
-        if (f['session-id']) app.setChat(loadChat(f['session-id']) ?? { ...newChat(app.root), id: f['session-id'] })
+        if (f['session-id']) app.setChat(loadChat(f['session-id'], app.root) ?? { ...newChat(app.root), id: f['session-id'] })
       }
       return (async () => {
         await repl(app, o.first ? { ...f, onStart: !asked && ((a) => continueTabs(a, saved)) } : o.chat ? { 'resume-id': o.chat.id, model: o.model } : {})
@@ -2170,7 +2170,7 @@ async function main() {
   if (sub === 'providers') return app.listProviders(), ui.close()
   if (sub === 'models') return await app.listModels(positionals[1] ?? '', { all: f.all, json: f.json }), ui.close()
   if (f['no-memory']) app.memory = null
-  const chat = f['resume-id'] ? loadChat(f['resume-id']) : f.continue && headless ? listChats(app.root)[0] : f['session-id'] ? (loadChat(f['session-id']) ?? { ...newChat(app.root), id: f['session-id'] }) : null
+  const chat = f['resume-id'] ? loadChat(f['resume-id'], app.root) : f.continue && headless ? listChats(app.root)[0] : f['session-id'] ? (loadChat(f['session-id'], app.root) ?? { ...newChat(app.root), id: f['session-id'] }) : null
   if (f['resume-id'] && !chat) throw new Error(`no session ${f['resume-id']}`)
   if (chat && (headless || !f['resume-id'])) app.setChat(chat) // interactive: resumed below, with its transcript
   if (headless || positionals.length) watchSettings(() => [app], cfg) // an app's run takes the settings page's changes too

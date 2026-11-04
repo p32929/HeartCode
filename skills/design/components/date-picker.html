@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Date picker · design guide</title>
+<!-- shadcn/ui's look in plain HTML (Basecoat), Tailwind for the page, Lucide icons -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+<link rel="stylesheet" href="../theme.css"> <!-- the theme (theme.css): after Basecoat, so they win -->
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400..700&family=Geist+Mono:wght@400..600&display=swap"> <!-- the theme's fonts -->
+<script>document.documentElement.classList.toggle("dark", matchMedia("(prefers-color-scheme: dark)").matches)</script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@1.59.0/dist/umd/lucide.min.js"></script>
+<style type="text/tailwindcss">
+  @custom-variant dark (&:is(.dark *));
+  @theme inline {
+    --color-background: var(--background); --color-foreground: var(--foreground); --color-card: var(--card); --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground); --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground); --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground); --color-destructive: var(--destructive); --color-destructive-foreground: var(--destructive-foreground);
+    --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring);
+    --color-chart-1: var(--chart-1); --color-chart-2: var(--chart-2); --color-chart-3: var(--chart-3); --color-chart-4: var(--chart-4); --color-chart-5: var(--chart-5);
+    --color-sidebar: var(--sidebar); --color-sidebar-foreground: var(--sidebar-foreground); --color-sidebar-primary: var(--sidebar-primary); --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent); --color-sidebar-accent-foreground: var(--sidebar-accent-foreground); --color-sidebar-border: var(--sidebar-border); --color-sidebar-ring: var(--sidebar-ring);
+    --font-sans: var(--font-sans); --font-mono: var(--font-mono); --font-serif: var(--font-serif);
+    --radius-sm: calc(var(--radius) - 4px); --radius-md: calc(var(--radius) - 2px); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) + 4px);
+    --shadow-2xs: var(--shadow-2xs); --shadow-xs: var(--shadow-xs); --shadow-sm: var(--shadow-sm); --shadow: var(--shadow); --shadow-md: var(--shadow-md); --shadow-lg: var(--shadow-lg); --shadow-xl: var(--shadow-xl); --shadow-2xl: var(--shadow-2xl);
+  }
+  @layer base { * { @apply border-border outline-ring/50; } body { @apply bg-background text-foreground; } html { scroll-behavior: smooth; } }
+  @layer components { /* utilities in the markup win over these (a gradient on a .stage) */
+    section { @apply scroll-mt-20 px-5 py-10 sm:px-8 lg:px-10; }
+    section:nth-of-type(even) { @apply bg-muted/40; }
+    .sec-h { @apply mb-6 flex items-start gap-4; }
+    .sec-h h2 { @apply text-xl font-semibold tracking-tight; }
+    .sec-h p { @apply text-muted-foreground; }
+    .tile { @apply grid size-11 shrink-0 place-items-center rounded-xl bg-chart-1/20 text-chart-4 shadow-sm ring-1 ring-inset ring-chart-1/30 dark:text-chart-1 [&_svg]:size-5; }
+    .cards { @apply flex flex-wrap gap-4 [&>*]:min-w-0 [&>*]:flex-[1_1_19rem]; } /* every row filled: the cards in it grow to share it */
+    .cards + .cards { @apply mt-4; }
+    .ex { @apply flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition hover:shadow-md; }
+    .lab { @apply flex items-center gap-1.5 px-4 py-2 text-xs font-semibold [&_svg]:size-4; }
+    .lab.do { @apply bg-chart-1/15 text-chart-4 dark:text-chart-1; }
+    .lab.dont { @apply bg-destructive/10 text-destructive; }
+    .lab.kind { @apply bg-muted text-muted-foreground; }
+    .stage { @apply m-4 mb-3 flex min-h-20 flex-wrap items-center gap-2 rounded-xl border border-dashed bg-[radial-gradient(var(--border)_1px,transparent_1px)] bg-[size:14px_14px] p-5; }
+    .ex > p { @apply px-4 pb-4 text-sm text-muted-foreground; }
+    .ex > p b { @apply font-medium text-foreground; }
+    .mock { @apply w-full rounded-xl border bg-popover p-4 text-sm text-popover-foreground shadow-lg; }
+    .glance { @apply flex items-start gap-3 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur [&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-chart-3; }
+  }
+</style>
+</head>
+<body class="antialiased">
+
+<!-- hero -->
+<header class="relative overflow-hidden border-b bg-gradient-to-br from-muted via-background to-chart-1/10 px-5 pb-10 pt-12 sm:px-8 lg:px-10">
+  <div class="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full bg-chart-1/25 blur-3xl"></div>
+  <div class="relative flex items-center gap-4">
+    <div class="tile size-14 bg-primary text-primary-foreground ring-0 [&_svg]:size-7"><i data-lucide="calendar-days"></i></div>
+    <div><p class="text-sm font-medium text-chart-3"><a href="../general.html" class="hover:underline">Design guide</a> · Component</p><h1 class="text-4xl font-semibold tracking-tight">Date picker</h1></div>
+  </div>
+  <p class="relative mt-4 text-lg text-muted-foreground"><b class="text-foreground">Typed fields</b> for a date people know; a <b class="text-foreground">calendar in a popover</b> when seeing the month helps (a booking, a range); the browser's <b class="text-foreground"><code>&lt;input type="date"&gt;</code></b> for a plain single date, on phones too.</p>
+  <div class="relative mt-8 flex flex-wrap gap-3 [&>*]:flex-[1_1_15rem]">
+    <div class="glance"><i data-lucide="keyboard"></i><div><b>Known dates are typed</b><p class="text-sm text-muted-foreground">Day / Month / Year. Never page back through years.</p></div></div>
+    <div class="glance"><i data-lucide="calendar"></i><div><b>Calendar for near dates</b><p class="text-sm text-muted-foreground">Within about a year, and ranges. Typing still works.</p></div></div>
+    <div class="glance"><i data-lucide="ban"></i><div><b>Impossible dates disabled</b><p class="text-sm text-muted-foreground">Past when it makes no sense; an end before its start.</p></div></div>
+    <div class="glance"><i data-lucide="list-x"></i><div><b>No three dropdowns</b><p class="text-sm text-muted-foreground">For day, month and year.</p></div></div>
+  </div>
+</header>
+
+<!-- sections menu -->
+<nav class="sticky top-0 z-10 flex items-center gap-1 overflow-x-auto border-b bg-background/85 px-5 py-2 backdrop-blur sm:px-8 lg:px-10 [&_a]:flex [&_a]:shrink-0 [&_a]:items-center [&_a]:gap-1.5 [&_a]:rounded-full [&_a]:px-3 [&_a]:py-1.5 [&_a]:text-sm [&_a]:text-muted-foreground [&_a:hover]:bg-muted [&_a:hover]:text-foreground [&_svg]:size-4">
+  <a href="#which"><i data-lucide="layers"></i>Which one</a><a href="#typed"><i data-lucide="keyboard"></i>Typed fields</a><a href="#calendar"><i data-lucide="calendar"></i>Calendar in a popover</a><a href="#range"><i data-lucide="calendar-range"></i>Ranges</a><a href="#ship"><i data-lucide="list-checks"></i>Before you ship</a>
+  <button class="btn ml-auto shrink-0" data-variant="ghost" data-size="icon-sm" aria-label="Switch dark mode" title="Switch dark mode" onclick="document.documentElement.classList.toggle('dark')"><i data-lucide="sun-moon"></i></button>
+</nav>
+
+<section id="which">
+  <div class="sec-h"><div class="tile"><i data-lucide="layers"></i></div><div><h2>Which one</h2><p>Does the person know the date, or do they need to see the month to choose it?</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="keyboard"></i>Typed fields</div><div class="stage"><fieldset class="grid gap-2 text-sm"><legend class="mb-1 font-medium">What is your date of birth?</legend><p class="text-muted-foreground">For example, 27 3 2007</p><div class="flex gap-3 [&_label]:grid [&_label]:gap-1"><label>Day<input class="input w-14" inputmode="numeric" autocomplete="bday-day"></label><label>Month<input class="input w-14" inputmode="numeric" autocomplete="bday-month"></label><label>Year<input class="input w-20" inputmode="numeric" autocomplete="bday-year"></label></div></fieldset></div><p><b>A date people know</b> or can look up: birthday, passport issued.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="calendar-check"></i>&lt;input type="date"&gt;</div><div class="stage"><div class="grid gap-2 text-sm"><label class="label" for="due">Due date</label><input id="due" type="date" class="input w-48" value="2026-11-18" min="2026-11-04"></div></div><p><b>A plain single date,</b> on phones too: the browser's own picker, in the person's locale.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="calendar"></i>Calendar in a popover</div><div class="stage"><button class="btn w-60 justify-start font-normal" data-variant="outline" onclick="calPop.hidden=!calPop.hidden"><i data-lucide="calendar"></i><span id="calTxt">November 18th, 2026</span></button></div><p><b>A date near today</b> where the weekday matters: delivery, a meeting. Shown open below.</p></div>
+  </div>
+  <div class="cards">
+    <div class="ex"><div class="lab do"><i data-lucide="circle-check"></i>Do · a birthday</div><div class="stage"><div class="flex gap-3 text-sm [&_label]:grid [&_label]:gap-1"><label>Day<input class="input w-14" inputmode="numeric" value="27"></label><label>Month<input class="input w-14" inputmode="numeric" value="3"></label><label>Year<input class="input w-20" inputmode="numeric" value="1988"></label></div></div><p><b>Typed in seconds,</b> with the numeric keyboard on phones.</p></div>
+    <div class="ex"><div class="lab dont"><i data-lucide="circle-x"></i>Don't · a birthday</div><div class="stage"><div class="flex flex-wrap gap-2"><select class="select" aria-label="Day"><option>Day</option></select><select class="select" aria-label="Month"><option>Month</option></select><select class="select" aria-label="Year"><option>Year</option></select><button class="btn" data-variant="outline"><i data-lucide="calendar"></i>Pick a date</button></div></div><p><b>Three dropdowns, or a calendar paged back 38 years:</b> clicks and scrolling for a date people already know.</p></div>
+  </div>
+</section>
+
+<section id="typed">
+  <div class="sec-h"><div class="tile"><i data-lucide="keyboard"></i></div><div><h2>Typed fields</h2><p>A fieldset asking the question, an example hint, Day / Month / Year labeled; numeric keyboard, <code>bday-*</code> autocomplete; never auto-jump between fields.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="circle-alert"></i>An error</div><div class="stage"><fieldset class="grid gap-2 text-sm"><legend class="mb-1 font-medium">When was your passport issued?</legend><p class="text-muted-foreground">For example, 12 11 2019</p><p class="font-medium text-destructive">Date issued must be a real date</p><div class="flex gap-3 [&_label]:grid [&_label]:gap-1"><label>Day<input class="input w-14" inputmode="numeric" value="12"></label><label>Month<input class="input w-14" inputmode="numeric" value="13" aria-invalid="true"></label><label>Year<input class="input w-20" inputmode="numeric" value="2019"></label></div></fieldset></div><p><b>Only the wrong field</b> is marked; the whole date when it's empty or out of range.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="type"></i>Messages</div><div class="stage"><ul class="grid gap-2 text-sm [&_li]:flex [&_li]:items-center [&_li]:gap-2 [&_svg]:size-4 [&_svg]:text-destructive"><li><i data-lucide="circle-alert"></i>Enter your date of birth</li><li><i data-lucide="circle-alert"></i>Date of birth must be a real date</li></ul></div><p><b>Say what to do,</b> naming the date. Month accepts "3", "mar" or "march".</p></div>
+  </div>
+</section>
+
+<section id="calendar">
+  <div class="sec-h"><div class="tile"><i data-lucide="calendar"></i></div><div><h2>Calendar in a popover</h2><p>An outline trigger with the date or "Pick a date"; month names spelled out, today marked, impossible dates disabled; picking closes it.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="calendar"></i>Single date</div><div class="stage flex-col items-start"><button class="btn w-60 justify-start font-normal" data-variant="outline" onclick="calPop.hidden=!calPop.hidden"><i data-lucide="calendar"></i><span id="calTxt2">November 18th, 2026</span></button><div id="calPop" class="w-fit rounded-lg border bg-popover p-3 text-popover-foreground shadow-lg"><div id="cal1"></div></div></div><p><b>Today (the 4th) is tinted,</b> earlier days disabled. Pick a day: it fills the button and closes.</p></div>
+    <div class="ex"><div class="lab do"><i data-lucide="circle-check"></i>Do · typing still works</div><div class="stage"><div class="grid w-full gap-2 text-sm"><label class="label" for="mt">Meeting date</label><div class="flex max-w-72 gap-2"><input id="mt" class="input" value="November 18, 2026"><button class="btn shrink-0" data-variant="outline" data-size="icon" aria-label="Choose date" title="Choose date"><i data-lucide="calendar"></i></button></div></div></div><p><b>A text field plus a "Choose date" button:</b> people who know the date just type it.</p></div>
+  </div>
+</section>
+
+<section id="range">
+  <div class="sec-h"><div class="tile"><i data-lucide="calendar-range"></i></div><div><h2>Ranges</h2><p>Two months side by side; start and end marked, the days between highlighted; an end before the start can't be picked.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="calendar-range"></i>Range</div><div class="stage flex-col items-start"><button class="btn justify-start font-normal" data-variant="outline"><i data-lucide="calendar"></i><span id="rngTxt"></span></button><div class="flex w-fit flex-wrap gap-6 rounded-lg border bg-popover p-3 text-popover-foreground shadow-lg"><div id="r1"></div><div id="r2"></div></div></div><p><b>Click a start, then an end.</b> While choosing the end, earlier days are disabled; the months don't move.</p></div>
+  </div>
+</section>
+
+<section id="ship">
+  <div class="sec-h"><div class="tile bg-primary text-primary-foreground ring-0"><i data-lucide="list-checks"></i></div><div><h2>Before you ship</h2><p>In code: native <code>&lt;input type="date" min max&gt;</code> (Baseline; value always <code>yyyy-mm-dd</code>, one date, not a range). Calendar: the WAI-ARIA date picker dialog (input + "Choose date" button; arrows by day and week, Page Up/Down by month, Enter picks, Esc closes and returns focus; <code>aria-selected</code> on the chosen day). shadcn: <code>Popover</code> + <code>Calendar</code>, <code>mode="single|range"</code>, <code>numberOfMonths={2}</code>, <code>timeZone</code>.</p></div></div>
+  <div class="cards [&_li]:flex [&_li]:items-start [&_li]:gap-2 [&_svg]:mt-0.5 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-chart-3">
+    <ul class="ex gap-3 p-5 text-sm"><li><i data-lucide="check"></i>Known dates typed in Day / Month / Year, with the right <code>autocomplete</code></li><li><i data-lucide="check"></i>Calendars only for dates near today or ranges; typing still works</li><li><i data-lucide="check"></i>Today marked; impossible dates disabled</li></ul>
+    <ul class="ex gap-3 p-5 text-sm"><li><i data-lucide="check"></i>Ranges: two months, start and end clear, the end can't precede the start</li><li><i data-lucide="check"></i>Keyboard: arrows in the grid, Esc closes and returns focus</li></ul>
+  </div>
+  <p class="mt-8 text-sm text-muted-foreground">Sources: GOV.UK Design System, Date input · Nielsen Norman Group, "Date-Input Form Fields: UX Design Guidelines" · MDN, &lt;input type="date"&gt; · WAI-ARIA APG, Date Picker Dialog example · shadcn/ui Date Picker and Calendar. The rules in words: <code>date-picker.md</code>; for every screen: <a href="../general.html" class="underline underline-offset-2">general rules</a>.</p>
+</section>
+
+<script>
+// tiny calendar mock: today is fixed at 4 Nov 2026 for the demo
+const TODAY=+new Date(2026,10,4), fmt=d=>new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
+function cal(el,y,m,st){const f=new Date(y,m,1),n=new Date(y,m+1,0).getDate();let h=`<p class="mb-2 text-center text-sm font-medium">${f.toLocaleString('en-US',{month:'long',year:'numeric'})}</p><div class="grid grid-cols-7 gap-y-1 text-center text-sm"><span class="text-xs text-muted-foreground">Mo</span><span class="text-xs text-muted-foreground">Tu</span><span class="text-xs text-muted-foreground">We</span><span class="text-xs text-muted-foreground">Th</span><span class="text-xs text-muted-foreground">Fr</span><span class="text-xs text-muted-foreground">Sa</span><span class="text-xs text-muted-foreground">Su</span>`+'<span></span>'.repeat((f.getDay()+6)%7)
+  for(let d=1;d<=n;d++){const t=+new Date(y,m,d),a=st.a,b=st.b,ends=t===a||t===b,mid=a&&b&&t>a&&t<b,off=t<TODAY||(st.range&&a&&!b&&t<a)
+    h+=`<button type="button" data-t="${t}" ${off?'disabled':''} ${ends?'aria-selected="true"':''} class="mx-auto size-8 rounded-md ${ends?'bg-primary text-primary-foreground':mid?'w-full rounded-none bg-accent text-accent-foreground':t===TODAY?'bg-accent font-medium text-accent-foreground':'hover:bg-accent'} ${off?'text-muted-foreground opacity-50':''}">${d}</button>`}
+  el.innerHTML=h+'</div>'}
+const one={a:+new Date(2026,10,18)}, rng={range:true,a:+new Date(2026,10,20),b:+new Date(2026,11,4)}
+function draw(){cal(cal1,2026,10,one);cal(r1,2026,10,rng);cal(r2,2026,11,rng);rngTxt.textContent=rng.a?fmt(rng.a)+(rng.b?' – '+fmt(rng.b):' – pick an end'):'Pick a date'}
+cal1.onclick=e=>{const t=+e.target.dataset.t;if(!t)return;one.a=t;const D=new Date(t),d=D.getDate(),s=D.toLocaleString('en-US',{month:'long'})+' '+d+((d>3&&d<21)?'th':['th','st','nd','rd'][d%10]||'th')+', '+D.getFullYear();calTxt.textContent=calTxt2.textContent=s;draw();calPop.hidden=true}
+r1.parentElement.onclick=e=>{const t=+e.target.dataset.t;if(!t)return;if(rng.a&&!rng.b&&t>=rng.a)rng.b=t;else{rng.a=t;rng.b=0}draw()}
+draw();lucide.createIcons()
+</script>
+</body>
+</html>

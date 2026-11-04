@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Table · design guide</title>
+<!-- shadcn/ui's look in plain HTML (Basecoat), Tailwind for the page, Lucide icons -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+<link rel="stylesheet" href="../theme.css"> <!-- the theme (theme.css): after Basecoat, so they win -->
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400..700&family=Geist+Mono:wght@400..600&display=swap"> <!-- the theme's fonts -->
+<script>document.documentElement.classList.toggle("dark", matchMedia("(prefers-color-scheme: dark)").matches)</script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@1.59.0/dist/umd/lucide.min.js"></script>
+<style type="text/tailwindcss">
+  @custom-variant dark (&:is(.dark *));
+  @theme inline {
+    --color-background: var(--background); --color-foreground: var(--foreground); --color-card: var(--card); --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground); --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground); --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground); --color-destructive: var(--destructive); --color-destructive-foreground: var(--destructive-foreground);
+    --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring);
+    --color-chart-1: var(--chart-1); --color-chart-2: var(--chart-2); --color-chart-3: var(--chart-3); --color-chart-4: var(--chart-4); --color-chart-5: var(--chart-5);
+    --color-sidebar: var(--sidebar); --color-sidebar-foreground: var(--sidebar-foreground); --color-sidebar-primary: var(--sidebar-primary); --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent); --color-sidebar-accent-foreground: var(--sidebar-accent-foreground); --color-sidebar-border: var(--sidebar-border); --color-sidebar-ring: var(--sidebar-ring);
+    --font-sans: var(--font-sans); --font-mono: var(--font-mono); --font-serif: var(--font-serif);
+    --radius-sm: calc(var(--radius) - 4px); --radius-md: calc(var(--radius) - 2px); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) + 4px);
+    --shadow-2xs: var(--shadow-2xs); --shadow-xs: var(--shadow-xs); --shadow-sm: var(--shadow-sm); --shadow: var(--shadow); --shadow-md: var(--shadow-md); --shadow-lg: var(--shadow-lg); --shadow-xl: var(--shadow-xl); --shadow-2xl: var(--shadow-2xl);
+  }
+  @layer base { * { @apply border-border outline-ring/50; } body { @apply bg-background text-foreground; } html { scroll-behavior: smooth; } }
+  @layer components { /* utilities in the markup win over these (a gradient on a .stage) */
+    section { @apply scroll-mt-20 px-5 py-10 sm:px-8 lg:px-10; }
+    section:nth-of-type(even) { @apply bg-muted/40; }
+    .sec-h { @apply mb-6 flex items-start gap-4; }
+    .sec-h h2 { @apply text-xl font-semibold tracking-tight; }
+    .sec-h p { @apply text-muted-foreground; }
+    .tile { @apply grid size-11 shrink-0 place-items-center rounded-xl bg-chart-1/20 text-chart-4 shadow-sm ring-1 ring-inset ring-chart-1/30 dark:text-chart-1 [&_svg]:size-5; }
+    .cards { @apply flex flex-wrap gap-4 [&>*]:min-w-0 [&>*]:flex-[1_1_19rem]; } /* every row filled: the cards in it grow to share it */
+    .cards + .cards { @apply mt-4; }
+    .ex { @apply flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition hover:shadow-md; }
+    .lab { @apply flex items-center gap-1.5 px-4 py-2 text-xs font-semibold [&_svg]:size-4; }
+    .lab.do { @apply bg-chart-1/15 text-chart-4 dark:text-chart-1; }
+    .lab.dont { @apply bg-destructive/10 text-destructive; }
+    .lab.kind { @apply bg-muted text-muted-foreground; }
+    .stage { @apply m-4 mb-3 flex min-h-20 flex-wrap items-center gap-2 rounded-xl border border-dashed bg-[radial-gradient(var(--border)_1px,transparent_1px)] bg-[size:14px_14px] p-5; }
+    .ex > p { @apply px-4 pb-4 text-sm text-muted-foreground; }
+    .ex > p b { @apply font-medium text-foreground; }
+    .mock { @apply w-full rounded-xl border bg-popover p-4 text-sm text-popover-foreground shadow-lg; }
+    .glance { @apply flex items-start gap-3 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur [&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-chart-3; }
+  }
+</style>
+</head>
+<body class="antialiased">
+
+<!-- hero -->
+<header class="relative overflow-hidden border-b bg-gradient-to-br from-muted via-background to-chart-1/10 px-5 pb-10 pt-12 sm:px-8 lg:px-10">
+  <div class="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full bg-chart-1/25 blur-3xl"></div>
+  <div class="relative flex items-center gap-4">
+    <div class="tile size-14 bg-primary text-primary-foreground ring-0 [&_svg]:size-7"><i data-lucide="table"></i></div>
+    <div><p class="text-sm font-medium text-chart-3"><a href="../general.html" class="hover:underline">Design guide</a> · Component</p><h1 class="text-4xl font-semibold tracking-tight">Table</h1></div>
+  </div>
+  <p class="relative mt-4 text-lg text-muted-foreground">A table lets people <b class="text-foreground">compare records</b> across rows and columns. A plain <b class="text-foreground">Table</b> for a short list; a <b class="text-foreground">Data Table</b> when people sort, filter, page or act on many rows. Never for page layout.</p>
+  <div class="relative mt-8 flex flex-wrap gap-3 [&>*]:flex-[1_1_15rem]">
+    <div class="glance"><i data-lucide="id-card"></i><div><b>First column names the row</b><p class="text-sm text-muted-foreground">A readable name, not an auto-generated ID.</p></div></div>
+    <div class="glance"><i data-lucide="align-right"></i><div><b>Numbers right-aligned</b><p class="text-sm text-muted-foreground">Header and cells alike; text left.</p></div></div>
+    <div class="glance"><i data-lucide="ellipsis"></i><div><b>Row actions</b><p class="text-sm text-muted-foreground">One or two inline, more in a ⋯ menu; many rows by checkbox.</p></div></div>
+    <div class="glance"><i data-lucide="smartphone"></i><div><b>Empty state, and phones</b><p class="text-sm text-muted-foreground">"No results." and still readable at 390 px.</p></div></div>
+  </div>
+</header>
+
+<!-- sections menu -->
+<nav class="sticky top-0 z-10 flex items-center gap-1 overflow-x-auto border-b bg-background/85 px-5 py-2 backdrop-blur sm:px-8 lg:px-10 [&_a]:flex [&_a]:shrink-0 [&_a]:items-center [&_a]:gap-1.5 [&_a]:rounded-full [&_a]:px-3 [&_a]:py-1.5 [&_a]:text-sm [&_a]:text-muted-foreground [&_a:hover]:bg-muted [&_a:hover]:text-foreground [&_svg]:size-4">
+  <a href="#columns"><i data-lucide="columns-3"></i>Columns</a><a href="#data"><i data-lucide="sheet"></i>Data Table</a><a href="#states"><i data-lucide="activity"></i>States</a><a href="#phones"><i data-lucide="smartphone"></i>On phones</a><a href="#ship"><i data-lucide="list-checks"></i>Before you ship</a>
+  <button class="btn ml-auto shrink-0" data-variant="ghost" data-size="icon-sm" aria-label="Switch dark mode" title="Switch dark mode" onclick="document.documentElement.classList.toggle('dark')"><i data-lucide="sun-moon"></i></button>
+</nav>
+
+<section id="columns">
+  <div class="sec-h"><div class="tile"><i data-lucide="columns-3"></i></div><div><h2>Columns</h2><p>In order of importance, related ones together; a caption names the table; a total goes in the footer.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab do"><i data-lucide="circle-check"></i>Do</div><div class="stage"><div class="table-container"><table class="table">
+      <caption>Recent invoices</caption>
+      <thead><tr><th scope="col">Customer</th><th scope="col">Status</th><th scope="col" class="text-right">Amount</th></tr></thead>
+      <tbody class="tabular-nums"><tr><th scope="row" class="font-medium">Sam Rivera</th><td><span class="badge" data-variant="secondary">Paid</span></td><td class="text-right">$1,250.00</td></tr><tr><th scope="row" class="font-medium">Ada Brooks</th><td><span class="badge" data-variant="outline">Pending</span></td><td class="text-right">$84.50</td></tr><tr><th scope="row" class="font-medium">Leo Park</th><td><span class="badge" data-variant="secondary">Paid</span></td><td class="text-right">$310.00</td></tr></tbody>
+      <tfoot><tr><td colspan="2">Total</td><td class="text-right tabular-nums">$1,644.50</td></tr></tfoot>
+    </table></div></div><p><b>Names first, amounts right-aligned</b> and formatted; the total in a footer row.</p></div>
+    <div class="ex"><div class="lab dont"><i data-lucide="circle-x"></i>Don't</div><div class="stage"><div class="table-container"><table class="table">
+      <thead><tr><th>ID</th><th>Amount</th><th>Customer</th></tr></thead>
+      <tbody><tr><td class="font-mono text-xs">a8f3e1c2</td><td>1250</td><td>Sam Rivera</td></tr><tr><td class="font-mono text-xs">9b2d47fe</td><td>84.5</td><td>Ada Brooks</td></tr><tr><td class="font-mono text-xs">c71e0a93</td><td>310</td><td>Leo Park</td></tr></tbody>
+    </table></div></div><p><b>An ID first and numbers left-aligned,</b> unformatted: nothing lines up to compare.</p></div>
+  </div>
+</section>
+
+<section id="data">
+  <div class="sec-h"><div class="tile"><i data-lucide="sheet"></i></div><div><h2>Data Table</h2><p>Filter and columns above, a checkbox per row, sortable headers, a ⋯ menu per row, paging below. Try the filter and the Amount header.</p></div></div>
+  <div class="cards">
+    <div class="ex flex-[3_1_36rem]!"><div class="lab kind"><i data-lucide="sheet"></i>Data Table</div><div class="stage block">
+      <div class="flex flex-wrap items-center gap-2"><input class="input max-w-60" placeholder="Filter emails…" aria-label="Filter emails" oninput="filt(this.value)"><button class="btn ml-auto" data-variant="outline"><i data-lucide="columns-3"></i>Columns<i data-lucide="chevron-down"></i></button></div>
+      <div class="table-container mt-3 rounded-lg border bg-card"><table class="table" id="dt">
+        <thead><tr><th class="w-8 pl-3"><input type="checkbox" class="input not-checked:border-muted-foreground" aria-label="Select all"></th><th scope="col">Status</th><th scope="col">Email</th><th scope="col" class="text-right" aria-sort="descending"><button class="btn -mr-3" data-variant="ghost" data-size="sm" onclick="srt(this)">Amount<i data-lucide="arrow-up-down"></i></button></th><th class="w-10"><span class="sr-only">Actions</span></th></tr></thead>
+        <tbody class="tabular-nums">
+          <tr data-state="selected"><td class="pl-3"><input type="checkbox" class="input not-checked:border-muted-foreground" aria-label="Select row" checked></td><td>Success</td><td>sam@example.com</td><td class="text-right font-medium" data-v="874">$874.00</td><td><button class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Open menu"><i data-lucide="ellipsis"></i></button></td></tr>
+          <tr><td class="pl-3"><input type="checkbox" class="input not-checked:border-muted-foreground" aria-label="Select row"></td><td>Processing</td><td>ada@example.com</td><td class="text-right font-medium" data-v="721">$721.00</td><td><button class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Open menu"><i data-lucide="ellipsis"></i></button></td></tr>
+          <tr data-state="selected"><td class="pl-3"><input type="checkbox" class="input not-checked:border-muted-foreground" aria-label="Select row" checked></td><td>Success</td><td>leo@example.com</td><td class="text-right font-medium" data-v="316">$316.00</td><td><button class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Open menu"><i data-lucide="ellipsis"></i></button></td></tr>
+          <tr><td class="pl-3"><input type="checkbox" class="input not-checked:border-muted-foreground" aria-label="Select row"></td><td>Failed</td><td>mia@example.com</td><td class="text-right font-medium" data-v="242">$242.00</td><td><button class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Open menu"><i data-lucide="ellipsis"></i></button></td></tr>
+          <tr id="none" hidden><td colspan="5" class="h-20 text-center text-muted-foreground">No results.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><span>2 of 48 row(s) selected.</span><div class="ml-auto flex gap-2"><button class="btn" data-variant="outline" data-size="sm">Previous</button><button class="btn" data-variant="outline" data-size="sm">Next</button></div></div>
+    </div><p><b>Sorting</b> a ghost button in the header, one column at a time; <b>paging</b> below; <b>selection</b> counted under the table.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="ellipsis"></i>Row actions</div><div class="stage"><div class="mock max-w-56 p-1 [&_button]:flex [&_button]:w-full [&_button]:items-center [&_button]:gap-2 [&_button]:rounded-sm [&_button]:px-2 [&_button]:py-1.5 [&_button]:text-left [&_button:hover]:bg-accent [&_svg]:size-4 [&_svg]:text-muted-foreground"><p class="px-2 py-1.5 text-xs font-medium text-muted-foreground">Actions</p><button><i data-lucide="copy"></i>Copy payment ID</button><button><i data-lucide="user"></i>View customer</button><hr class="my-1"><button class="text-destructive"><i data-lucide="trash-2"></i>Delete payment</button></div></div><p><b>A ⋯ menu</b> in the last column when a row has more than one or two actions.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="list-checks"></i>Batch actions</div><div class="stage"><div class="flex w-full flex-wrap items-center gap-2 rounded-lg border bg-card p-2 text-sm"><span class="px-2 font-medium">2 selected</span><button class="btn ml-auto" data-variant="outline" data-size="sm"><i data-lucide="download"></i>Export</button><button class="btn" data-variant="outline" data-size="sm"><i data-lucide="trash-2"></i>Delete</button></div></div><p><b>Above the table,</b> acting on the checked rows.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="pin"></i>Sticky header</div><div class="stage"><div class="max-h-44 w-full overflow-auto rounded-lg border bg-card"><table class="table [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-card [&_thead_th]:shadow-[0_1px_0_var(--border)]"><thead><tr><th>Month</th><th class="text-right">Revenue</th></tr></thead><tbody class="tabular-nums"><tr><td>Jan</td><td class="text-right">$4,210</td></tr><tr><td>Feb</td><td class="text-right">$3,980</td></tr><tr><td>Mar</td><td class="text-right">$5,120</td></tr><tr><td>Apr</td><td class="text-right">$4,760</td></tr><tr><td>May</td><td class="text-right">$5,430</td></tr><tr><td>Jun</td><td class="text-right">$6,010</td></tr><tr><td>Jul</td><td class="text-right">$5,890</td></tr><tr><td>Aug</td><td class="text-right">$6,340</td></tr></tbody></table></div></div><p><b>The header stays in view</b> while the rows scroll (scroll it): <code>sticky top-0</code> with a background.</p></div>
+  </div>
+</section>
+
+<section id="states">
+  <div class="sec-h"><div class="tile"><i data-lucide="activity"></i></div><div><h2>States</h2><p>Empty and loading keep the table's frame; a selected row gets a muted background.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="inbox"></i>Empty</div><div class="stage"><div class="table-container rounded-lg border bg-card"><table class="table"><thead><tr><th>Name</th><th>Email</th><th class="text-right">Spent</th></tr></thead><tbody><tr><td colspan="3" class="h-28 text-center"><p class="text-muted-foreground">No customers yet.</p><button class="btn mt-2" data-size="sm"><i data-lucide="plus"></i>Add customer</button></td></tr></tbody></table></div></div><p><b>One cell across every column:</b> what goes here and how to add the first. A filter that matched nothing says "No results."</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="loader"></i>Loading</div><div class="stage"><div class="table-container rounded-lg border bg-card"><table class="table"><thead><tr><th>Name</th><th>Email</th><th class="text-right">Spent</th></tr></thead><tbody class="[&_td]:py-3"><tr><td><div class="skeleton h-4 w-24"></div></td><td><div class="skeleton h-4 w-32"></div></td><td><div class="skeleton ml-auto h-4 w-14"></div></td></tr><tr><td><div class="skeleton h-4 w-20"></div></td><td><div class="skeleton h-4 w-28"></div></td><td><div class="skeleton ml-auto h-4 w-12"></div></td></tr><tr><td><div class="skeleton h-4 w-24"></div></td><td><div class="skeleton h-4 w-36"></div></td><td><div class="skeleton ml-auto h-4 w-14"></div></td></tr></tbody></table></div></div><p><b>Skeleton rows</b> in the columns' shape.</p></div>
+  </div>
+</section>
+
+<section id="phones">
+  <div class="sec-h"><div class="tile"><i data-lucide="smartphone"></i></div><div><h2>On phones</h2><p>Fewer columns first; still too wide, the table scrolls inside its box, never the page.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="columns-2"></i>Fewer columns · container query</div><div class="stage justify-center"><div class="@container w-64 max-w-full resize-x overflow-hidden rounded-2xl border bg-background p-3 shadow-sm"><table class="table [&_.opt]:hidden @md:[&_.opt]:table-cell"><thead><tr><th>Customer</th><th class="opt">Status</th><th class="text-right">Amount</th></tr></thead><tbody class="tabular-nums"><tr><td>Sam Rivera</td><td class="opt">Paid</td><td class="text-right">$1,250.00</td></tr><tr><td>Ada Brooks</td><td class="opt">Pending</td><td class="text-right">$84.50</td></tr><tr><td>Leo Park</td><td class="opt">Paid</td><td class="text-right">$310.00</td></tr></tbody></table></div></div><p><b>The box decides,</b> not the screen: Status shows from <code>@md</code> (28rem) up. Drag the box's corner wider.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="move-horizontal"></i>Sideways scroll, first column fixed</div><div class="stage justify-center"><div class="w-64 rounded-2xl border bg-background p-3 shadow-sm"><div class="table-container"><table class="table [&_tr>:first-child]:sticky [&_tr>:first-child]:left-0 [&_tr>:first-child]:bg-background [&_tr>:first-child]:shadow-[1px_0_0_var(--border)]"><thead><tr><th>Customer</th><th>Status</th><th>Plan</th><th class="text-right">Amount</th></tr></thead><tbody class="tabular-nums"><tr><th scope="row" class="font-normal">Sam Rivera</th><td>Paid</td><td>Team</td><td class="text-right">$1,250.00</td></tr><tr><th scope="row" class="font-normal">Ada Brooks</th><td>Pending</td><td>Solo</td><td class="text-right">$84.50</td></tr><tr><th scope="row" class="font-normal">Leo Park</th><td>Paid</td><td>Team</td><td class="text-right">$310.00</td></tr></tbody></table></div></div></div><p><b>A cut-off column</b> shows there's more; the names stay put (scroll it).</p></div>
+  </div>
+</section>
+
+<section id="ship">
+  <div class="sec-h"><div class="tile bg-primary text-primary-foreground ring-0"><i data-lucide="list-checks"></i></div><div><h2>Before you ship</h2><p>In code: a real <code>&lt;table&gt;</code> with <code>&lt;caption&gt;</code>, <code>&lt;th scope="col"&gt;</code> (and <code>scope="row"</code>); a sortable header is a <code>&lt;button&gt;</code> in the <code>&lt;th&gt;</code>, <code>aria-sort</code> on the sorted one only. Basecoat: <code>.table-container</code> around <code>table.table</code>, <code>data-state="selected"</code> on a row.</p></div></div>
+  <div class="cards [&_li]:flex [&_li]:items-start [&_li]:gap-2 [&_svg]:mt-0.5 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-chart-3">
+    <ul class="ex gap-3 p-5 text-sm"><li><i data-lucide="check"></i>First column names the row; columns in order of importance</li><li><i data-lucide="check"></i>Numbers right-aligned and formatted, header too</li><li><i data-lucide="check"></i>Row actions: inline for one or two, else a ⋯ menu with an <code>aria-label</code></li></ul>
+    <ul class="ex gap-3 p-5 text-sm"><li><i data-lucide="check"></i>Header stays in view on long tables; empty and loading states in place</li><li><i data-lucide="check"></i>Checked at 390 px: fewer columns, or sideways scroll inside the table only</li></ul>
+  </div>
+  <p class="mt-8 text-sm text-muted-foreground">Sources: shadcn/ui Table and Data Table · Nielsen Norman Group, "Data Tables: Four Major User Tasks" and "Mobile Tables" · GOV.UK Design System, Table · WAI-ARIA APG, Sortable Table example · MDN, position: sticky and @container · Basecoat, Table. The rules in words: <code>table.md</code>; for every screen: <a href="../general.html" class="underline underline-offset-2">general rules</a>.</p>
+</section>
+
+<script>
+function filt(q){const rows=[...document.querySelectorAll('#dt tbody tr:not(#none)')];let n=0;rows.forEach(r=>{const on=r.cells[2].textContent.includes(q.trim().toLowerCase());r.hidden=!on;n+=on});document.getElementById('none').hidden=n>0}
+function srt(b){const th=b.parentElement,asc=th.getAttribute('aria-sort')!=='ascending',tb=document.querySelector('#dt tbody'),none=document.getElementById('none');th.setAttribute('aria-sort',asc?'ascending':'descending');[...tb.querySelectorAll('tr:not(#none)')].sort((x,y)=>(x.cells[3].dataset.v-y.cells[3].dataset.v)*(asc?1:-1)).forEach(r=>tb.insertBefore(r,none))}
+lucide.createIcons()
+</script>
+</body>
+</html>

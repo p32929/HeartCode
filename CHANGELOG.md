@@ -2,6 +2,25 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.52 (2026-11-04)
+
+- **Sessions live with the project**: a new conversation is saved in the folder you opened, in
+  `.heartcode/sessions/` (which ignores itself in git: conversations can hold secrets), not in
+  `~/.heart/sessions`. A worktree's go to its main project, so removing the worktree keeps them.
+  Older sessions in `~/.heart/sessions` still show in /resume and move into their project when next
+  saved. `--resume <id>` and an editor's session/load still find one from any folder (an index in
+  `~/.heart/sessions.json`); a folder that can't be written falls back to `~/.heart/sessions`.
+  Resetting everything (`~/.heart`) no longer deletes your projects' sessions.
+- **Design guides, rewritten** (`skills/design/`): the old one-file design skill is gone, replaced by
+  short, sourced guides (shadcn/ui, GOV.UK, Nielsen Norman Group, WAI-ARIA, WCAG, MDN Baseline): one
+  set of general rules (full width, spacing, type, the theme's tokens, states, accessibility, modern
+  practice: native `<dialog>`, `popover`, container queries, `dvh`, safe areas, `:user-invalid`, undo
+  over "are you sure?", each tagged by how widely it works) and 17 component guides (button,
+  typography, field, select, choice, card, badge, alert, toast, dialog, sheet and bottom sheet,
+  dropdown menu, tooltip, tabs, table, sidebar, date picker). Each is a Markdown file for the model and
+  an HTML page showing the same rules, in one theme (`theme.css`: DM Sans, Geist Mono, a 1rem radius,
+  light and dark). Not loaded by models yet: the skill's entry point comes next.
+
 ## 0.1.51 (2026-11-04)
 
 - **Models that think now show it**: many (gemma4, Qwen on Groq, Gemini) think only when asked, and

@@ -21,7 +21,7 @@ export const RESETS = [
   {
     level: 'everything',
     label: 'Everything',
-    desc: `the above, and your sessions, global memory, skills, instructions (HEARTCODE.md), history, logs: all of ${HOME}`,
+    desc: `the above, and global memory, skills, instructions (HEARTCODE.md), history, logs: all of ${HOME} (a project's sessions stay in its .heartcode/sessions)`,
     files: null, // the whole folder
   },
 ]

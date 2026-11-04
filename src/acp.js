@@ -102,7 +102,7 @@ export async function runAcp({ makeApp, version, permission = 'ask', input = pro
       return { sessionId: ui.sessionId, modes: modes(ui.permission) }
     },
     'session/load': async ({ sessionId, cwd, mcpServers }) => {
-      const chat = loadChat(sessionId)
+      const chat = loadChat(sessionId, cwd)
       if (!chat) throw Object.assign(new Error(`no session ${sessionId}`), { code: -32002 })
       const { ui } = await open(cwd ?? chat.root, mcpServers, chat)
       for (const h of chat.history) {

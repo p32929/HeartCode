@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Select · design guide</title>
+<!-- shadcn/ui's look in plain HTML (Basecoat), Tailwind for the page, Lucide icons -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+<link rel="stylesheet" href="../theme.css"> <!-- the theme (theme.css): after Basecoat, so they win -->
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400..700&family=Geist+Mono:wght@400..600&display=swap"> <!-- the theme's fonts -->
+<script>document.documentElement.classList.toggle("dark", matchMedia("(prefers-color-scheme: dark)").matches)</script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@1.59.0/dist/umd/lucide.min.js"></script>
+<style type="text/tailwindcss">
+  @custom-variant dark (&:is(.dark *));
+  @theme inline {
+    --color-background: var(--background); --color-foreground: var(--foreground); --color-card: var(--card); --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground); --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground); --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground); --color-destructive: var(--destructive); --color-destructive-foreground: var(--destructive-foreground);
+    --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring);
+    --color-chart-1: var(--chart-1); --color-chart-2: var(--chart-2); --color-chart-3: var(--chart-3); --color-chart-4: var(--chart-4); --color-chart-5: var(--chart-5);
+    --color-sidebar: var(--sidebar); --color-sidebar-foreground: var(--sidebar-foreground); --color-sidebar-primary: var(--sidebar-primary); --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent); --color-sidebar-accent-foreground: var(--sidebar-accent-foreground); --color-sidebar-border: var(--sidebar-border); --color-sidebar-ring: var(--sidebar-ring);
+    --font-sans: var(--font-sans); --font-mono: var(--font-mono); --font-serif: var(--font-serif);
+    --radius-sm: calc(var(--radius) - 4px); --radius-md: calc(var(--radius) - 2px); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) + 4px);
+    --shadow-2xs: var(--shadow-2xs); --shadow-xs: var(--shadow-xs); --shadow-sm: var(--shadow-sm); --shadow: var(--shadow); --shadow-md: var(--shadow-md); --shadow-lg: var(--shadow-lg); --shadow-xl: var(--shadow-xl); --shadow-2xl: var(--shadow-2xl);
+  }
+  @layer base { * { @apply border-border outline-ring/50; } body { @apply bg-background text-foreground; } html { scroll-behavior: smooth; } }
+  @layer components { /* utilities in the markup win over these (a gradient on a .stage) */
+    section { @apply scroll-mt-20 px-5 py-10 sm:px-8 lg:px-10; }
+    section:nth-of-type(even) { @apply bg-muted/40; }
+    .sec-h { @apply mb-6 flex items-start gap-4; }
+    .sec-h h2 { @apply text-xl font-semibold tracking-tight; }
+    .sec-h p { @apply text-muted-foreground; }
+    .tile { @apply grid size-11 shrink-0 place-items-center rounded-xl bg-chart-1/20 text-chart-4 shadow-sm ring-1 ring-inset ring-chart-1/30 dark:text-chart-1 [&_svg]:size-5; }
+    .cards { @apply flex flex-wrap gap-4 [&>*]:min-w-0 [&>*]:flex-[1_1_19rem]; } /* every row filled: the cards in it grow to share it */
+    .cards + .cards { @apply mt-4; }
+    .ex { @apply flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition hover:shadow-md; }
+    .lab { @apply flex items-center gap-1.5 px-4 py-2 text-xs font-semibold [&_svg]:size-4; }
+    .lab.do { @apply bg-chart-1/15 text-chart-4 dark:text-chart-1; }
+    .lab.dont { @apply bg-destructive/10 text-destructive; }
+    .lab.kind { @apply bg-muted text-muted-foreground; }
+    .stage { @apply m-4 mb-3 flex min-h-20 flex-wrap items-center gap-2 rounded-xl border border-dashed bg-[radial-gradient(var(--border)_1px,transparent_1px)] bg-[size:14px_14px] p-5; }
+    .ex > p { @apply px-4 pb-4 text-sm text-muted-foreground; }
+    .ex > p b { @apply font-medium text-foreground; }
+    .mock { @apply w-full rounded-xl border bg-popover p-4 text-sm text-popover-foreground shadow-lg; }
+    .glance { @apply flex items-start gap-3 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur [&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-chart-3; }
+  }
+</style>
+</head>
+<body class="antialiased">
+
+<!-- hero -->
+<header class="relative overflow-hidden border-b bg-gradient-to-br from-muted via-background to-chart-1/10 px-5 pb-10 pt-12 sm:px-8 lg:px-10">
+  <div class="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full bg-chart-1/25 blur-3xl"></div>
+  <div class="relative flex items-center gap-4">
+    <div class="tile size-14 bg-primary text-primary-foreground ring-0 [&_svg]:size-7"><i data-lucide="chevrons-up-down"></i></div>
+    <div><p class="text-sm font-medium text-chart-3"><a href="../general.html" class="hover:underline">Design guide</a> · Component</p><h1 class="text-4xl font-semibold tracking-tight">Select</h1></div>
+  </div>
+  <p class="relative mt-4 text-lg text-muted-foreground">Picking <b class="text-foreground">one option from a list</b> that opens from a button. Few options? Show them all as a <b class="text-foreground">Radio Group</b>. Many, or people know what they want? A <b class="text-foreground">Combobox</b>. The browser's own control? A <b class="text-foreground">Native Select</b>.</p>
+  <div class="relative mt-8 flex flex-wrap gap-3 [&>*]:flex-[1_1_15rem]">
+    <div class="glance"><i data-lucide="circle-dot"></i><div><b>5 or fewer: radios</b><p class="text-sm text-muted-foreground">Everyone sees every option.</p></div></div>
+    <div class="glance"><i data-lucide="app-window"></i><div><b>Native Select first</b><p class="text-sm text-muted-foreground">Custom only for styling it can't do; a long list is a Combobox.</p></div></div>
+    <div class="glance"><i data-lucide="arrow-down-a-z"></i><div><b>A logical order</b><p class="text-sm text-muted-foreground">Most common first, A–Z, or in sequence.</p></div></div>
+    <div class="glance"><i data-lucide="circle-help"></i><div><b>No default for a question</b><p class="text-sm text-muted-foreground">A sensible default for a setting.</p></div></div>
+  </div>
+</header>
+
+<!-- sections menu -->
+<nav class="sticky top-0 z-10 flex items-center gap-1 overflow-x-auto border-b bg-background/85 px-5 py-2 backdrop-blur sm:px-8 lg:px-10 [&_a]:flex [&_a]:shrink-0 [&_a]:items-center [&_a]:gap-1.5 [&_a]:rounded-full [&_a]:px-3 [&_a]:py-1.5 [&_a]:text-sm [&_a]:text-muted-foreground [&_a:hover]:bg-muted [&_a:hover]:text-foreground [&_svg]:size-4">
+  <a href="#which"><i data-lucide="layers"></i>Which one</a><a href="#list"><i data-lucide="list"></i>The list</a><a href="#value"><i data-lucide="tag"></i>Value and label</a><a href="#ship"><i data-lucide="list-checks"></i>Before you ship</a>
+  <button class="btn ml-auto shrink-0" data-variant="ghost" data-size="icon-sm" aria-label="Switch dark mode" title="Switch dark mode" onclick="document.documentElement.classList.toggle('dark')"><i data-lucide="sun-moon"></i></button>
+</nav>
+
+<section id="which">
+  <div class="sec-h"><div class="tile"><i data-lucide="layers"></i></div><div><h2>Which one</h2><p>By how many options there are and whether people already know the answer. A select never takes more than one value. <b class="text-foreground">Native Select first;</b> the custom Select only for custom styling or richer options. The customizable <code>&lt;select&gt;</code> (<code>appearance: base-select</code>) is only an extra: not in every browser yet, it falls back to a classic select.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="circle-dot"></i>Radio Group</div><div class="stage"><fieldset class="fieldset"><legend class="text-sm font-medium">Plan</legend><div role="radiogroup" class="grid gap-3"><label class="label"><input type="radio" class="input not-checked:border-muted-foreground" name="w-plan">Free</label><label class="label"><input type="radio" class="input not-checked:border-muted-foreground" name="w-plan" checked>Pro</label><label class="label"><input type="radio" class="input not-checked:border-muted-foreground" name="w-plan">Team</label></div></fieldset></div><p><b>5 or fewer options:</b> all visible, one click. Rules in <code>choice.md</code>.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="app-window"></i>Native Select</div><div class="stage"><div role="group" class="field"><label for="w-sort">Sort by</label><select id="w-sort" class="select w-full"><option selected>Newest first</option><option>Oldest first</option><option>Name A–Z</option><option>Most viewed</option><option>Recently updated</option><option>Largest first</option></select></div></div><p><b>First choice for one of about 5–15:</b> the browser's own behavior, better on phones, faster. Try it.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="chevrons-up-down"></i>Select</div><div class="stage items-start"><div class="grid w-full gap-1"><div role="group" class="field"><label for="w-status">Status</label><div class="select"><button type="button" id="w-status" class="w-full" aria-haspopup="listbox" aria-expanded="true"><span class="flex items-center gap-2"><i data-lucide="circle-dot" class="size-4 text-chart-3"></i>In progress</span><i data-lucide="chevron-down" class="text-muted-foreground opacity-50"></i></button></div></div><div class="rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md [&>div]:flex [&>div]:items-center [&>div]:gap-2 [&>div]:rounded-sm [&>div]:px-2 [&>div]:py-1.5 [&_svg]:size-4"><div><i data-lucide="circle-dashed" class="text-muted-foreground"></i>To do</div><div class="bg-accent text-accent-foreground"><i data-lucide="circle-dot" class="text-chart-3"></i>In progress<i data-lucide="check" class="ml-auto"></i></div><div><i data-lucide="circle-check" class="text-muted-foreground"></i>Done</div></div></div></div><p><b>The same job when options need custom styling</b> or richer content, like an icon per status.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="search"></i>Combobox</div><div class="stage items-start"><div class="grid w-full gap-1"><div role="group" class="field"><label for="w-tz">Time zone</label><div class="combobox"><input id="w-tz" type="text" role="combobox" value="europe/" aria-autocomplete="list" aria-expanded="true" autocomplete="off"><i data-lucide="chevron-down" class="combobox-trigger-icon"></i></div></div><div class="rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md [&>div]:flex [&>div]:items-center [&>div]:justify-between [&>div]:rounded-sm [&>div]:px-2 [&>div]:py-1.5"><div>Europe/Berlin</div><div class="bg-accent text-accent-foreground">Europe/London</div><div>Europe/Madrid</div></div></div></div><p><b>Many options, or they know the value:</b> type to filter.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="list-checks"></i>More than one</div><div class="stage"><div role="group" class="field"><label for="w-labels">Labels</label><div class="combobox w-full"><div class="combobox-chips"><span class="combobox-chip">Bug</span><span class="combobox-chip">Billing</span><input id="w-labels" type="text" role="combobox" placeholder="Add a label" aria-autocomplete="list" aria-expanded="false" autocomplete="off"></div></div></div></div><p><b>Combobox with <code>multiple</code></b> (chips), or a list of checkboxes.</p></div>
+  </div>
+  <div class="cards">
+    <div class="ex"><div class="lab do"><i data-lucide="circle-check"></i>Do</div><div class="stage"><div role="radiogroup" aria-label="Delivery" class="flex flex-wrap gap-4"><label class="label"><input type="radio" class="input not-checked:border-muted-foreground" name="d-del" checked>Standard</label><label class="label"><input type="radio" class="input not-checked:border-muted-foreground" name="d-del">Express</label><label class="label"><input type="radio" class="input not-checked:border-muted-foreground" name="d-del">Pick up</label></div></div><p><b>Three options, all in view.</b></p></div>
+    <div class="ex"><div class="lab dont"><i data-lucide="circle-x"></i>Don't</div><div class="stage"><select class="select w-full" aria-label="Delivery"><option>Standard</option><option>Express</option><option>Pick up</option></select></div><p><b>Three options hidden in a select:</b> a click to find out there were only three.</p></div>
+  </div>
+</section>
+
+<section id="list">
+  <div class="sec-h"><div class="tile"><i data-lucide="list"></i></div><div><h2>The list</h2><p>A logical order; groups for long lists; unavailable options disabled, not removed.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="arrow-down-1-0"></i>Order</div><div class="stage"><div class="w-full rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md [&>div]:rounded-sm [&>div]:px-2 [&>div]:py-1.5"><div class="bg-accent text-accent-foreground">Last 7 days</div><div>Last 30 days</div><div>Last 90 days</div><div>Last 12 months</div></div></div><p><b>Most picked first,</b> or A–Z; numbers and dates in sequence.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="group"></i>Groups · disabled</div><div class="stage"><div class="w-full rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md [&>div]:rounded-sm [&>div]:px-2 [&>div]:py-1.5"><p class="px-2 py-1.5 text-xs text-muted-foreground">Monthly</p><div>Starter</div><div class="bg-accent text-accent-foreground">Pro</div><hr class="-mx-1 my-1"><p class="px-2 py-1.5 text-xs text-muted-foreground">Yearly</p><div>Starter</div><div class="flex items-center justify-between opacity-50" aria-disabled="true">Pro<span class="text-xs">Full this month</span></div></div></div><p><b><code>SelectGroup</code> + <code>SelectLabel</code>, a <code>SelectSeparator</code>;</b> the unavailable one stays, greyed.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="search-x"></i>Combobox: no match</div><div class="stage items-start"><div class="grid w-full gap-1"><div class="combobox w-full"><input type="text" role="combobox" value="zara" aria-label="Assignee" aria-autocomplete="list" aria-expanded="true" autocomplete="off"><i data-lucide="chevron-down" class="combobox-trigger-icon"></i></div><div class="rounded-md border bg-popover py-6 text-center text-sm text-muted-foreground shadow-md">No people found.</div></div></div><p><b>Say that nothing matches,</b> never an empty box (<code>data-empty</code>).</p></div>
+  </div>
+</section>
+
+<section id="value">
+  <div class="sec-h"><div class="tile"><i data-lucide="tag"></i></div><div><h2>Value and label</h2><p>A visible label in a Field. Errors as in <code>field.md</code>: <code>data-invalid</code> on the Field, <code>aria-invalid</code> on the trigger.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="settings"></i>A setting: the usual value</div><div class="stage"><div role="group" class="field"><label for="v-theme">Theme</label><select id="v-theme" class="select w-full"><option selected>System</option><option>Light</option><option>Dark</option><option>High contrast</option><option>Sepia</option></select></div></div><p><b>Pre-selected,</b> so most people never touch it.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="circle-help"></i>A question: no default</div><div class="stage"><div role="group" class="field"><label for="v-team">Which team will use it?</label><select id="v-team" class="select w-full"><option value="" selected disabled>Select a team</option><option>Design</option><option>Engineering</option><option>Finance</option><option>Marketing</option><option>Sales</option><option>Support</option></select></div></div><p><b>Starts empty</b> with a placeholder, so it doesn't sway the answer.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="circle-alert"></i>Error</div><div class="stage"><div role="group" class="field" data-invalid><label for="v-err">Which team will use it?</label><select id="v-err" class="select w-full" aria-invalid="true" aria-describedby="v-err-msg"><option value="" selected disabled>Select a team</option><option>Design</option><option>Engineering</option></select><p id="v-err-msg" role="alert" class="text-destructive">Select the team that will use it</p></div></div><p><b>Under the trigger,</b> saying what to do.</p></div>
+  </div>
+</section>
+
+<section id="ship">
+  <div class="sec-h"><div class="tile bg-primary text-primary-foreground ring-0"><i data-lucide="list-checks"></i></div><div><h2>Before you ship</h2><p>In code: Native Select is <code>&lt;select class="select"&gt;</code> with <code>&lt;optgroup label&gt;</code> (<code>data-size="sm"</code> for 32 px). Select is Basecoat's <code>&lt;div class="select"&gt;</code>: a <code>&lt;button aria-haspopup="listbox"&gt;</code>, a <code>[data-popover]</code> with <code>role="listbox"</code> of <code>role="option" data-value</code>, a hidden input (needs <code>select.min.js</code>). Combobox is <code>&lt;div class="combobox"&gt;</code> with <code>&lt;input role="combobox"&gt;</code> and a listbox with <code>data-empty</code> (needs <code>combobox.min.js</code>; APG Combobox pattern).</p></div></div>
+  <div class="cards [&_li]:flex [&_li]:items-start [&_li]:gap-2 [&_svg]:mt-0.5 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-chart-3">
+    <ul class="ex gap-3 p-5 text-sm"><li><i data-lucide="check"></i><span>5 or fewer options are radios; a long list is a Combobox; otherwise a Native Select unless custom styling is needed</span></li><li><i data-lucide="check"></i><span>Options in a logical order, long lists grouped</span></li><li><i data-lucide="check"></i><span>Questions start with no value; settings with the usual one</span></li></ul>
+    <ul class="ex gap-3 p-5 text-sm"><li><i data-lucide="check"></i><span>A visible label; errors set <code>aria-invalid</code></span></li><li><i data-lucide="check"></i><span>Unavailable options disabled, not hidden</span></li></ul>
+  </div>
+  <p class="mt-8 text-sm text-muted-foreground">Sources: shadcn/ui Select, Native Select, Combobox · MDN, Customizable select elements · Basecoat Select, Native Select, Combobox · Nielsen Norman Group, "Listboxes vs. Dropdown Lists" and "Drop-Down Menus: Use Sparingly" · GOV.UK Design System, Select · WAI-ARIA APG, Combobox pattern. The rules in words: <code>select.md</code>; for every screen: <a href="../general.html" class="underline underline-offset-2">general rules</a>.</p>
+</section>
+
+<script>lucide.createIcons()</script>
+</body>
+</html>

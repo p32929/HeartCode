@@ -138,7 +138,7 @@ goes to stderr. Logs never go to stdout.
 
 ## Continue the same conversation
 
-Every run is saved as a session in `~/.heart/sessions/` (and logged, for the kinds of logs the user
+Every run is saved as a session in the project's `.heartcode/sessions/` (and logged, for the kinds of logs the user
 switched on), as when the user works in HeartCode; `--temp` keeps nothing. Pass the `session_id`
 from the last result:
 

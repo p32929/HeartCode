@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dialog · design guide</title>
+<!-- shadcn/ui's look in plain HTML (Basecoat), Tailwind for the page, Lucide icons -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+<link rel="stylesheet" href="../theme.css"> <!-- the theme (theme.css): after Basecoat, so they win -->
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400..700&family=Geist+Mono:wght@400..600&display=swap"> <!-- the theme's fonts -->
+<script>document.documentElement.classList.toggle("dark", matchMedia("(prefers-color-scheme: dark)").matches)</script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@1.59.0/dist/umd/lucide.min.js"></script>
+<style type="text/tailwindcss">
+  @custom-variant dark (&:is(.dark *));
+  @theme inline {
+    --color-background: var(--background); --color-foreground: var(--foreground); --color-card: var(--card); --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground); --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground); --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground); --color-destructive: var(--destructive); --color-destructive-foreground: var(--destructive-foreground);
+    --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring);
+    --color-chart-1: var(--chart-1); --color-chart-2: var(--chart-2); --color-chart-3: var(--chart-3); --color-chart-4: var(--chart-4); --color-chart-5: var(--chart-5);
+    --color-sidebar: var(--sidebar); --color-sidebar-foreground: var(--sidebar-foreground); --color-sidebar-primary: var(--sidebar-primary); --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent); --color-sidebar-accent-foreground: var(--sidebar-accent-foreground); --color-sidebar-border: var(--sidebar-border); --color-sidebar-ring: var(--sidebar-ring);
+    --font-sans: var(--font-sans); --font-mono: var(--font-mono); --font-serif: var(--font-serif);
+    --radius-sm: calc(var(--radius) - 4px); --radius-md: calc(var(--radius) - 2px); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) + 4px);
+    --shadow-2xs: var(--shadow-2xs); --shadow-xs: var(--shadow-xs); --shadow-sm: var(--shadow-sm); --shadow: var(--shadow); --shadow-md: var(--shadow-md); --shadow-lg: var(--shadow-lg); --shadow-xl: var(--shadow-xl); --shadow-2xl: var(--shadow-2xl);
+  }
+  @layer base { * { @apply border-border outline-ring/50; } body { @apply bg-background text-foreground; } html { scroll-behavior: smooth; } }
+  @layer components { /* utilities in the markup win over these (a gradient on a .stage) */
+    section { @apply scroll-mt-20 px-5 py-10 sm:px-8 lg:px-10; }
+    section:nth-of-type(even) { @apply bg-muted/40; }
+    .sec-h { @apply mb-6 flex items-start gap-4; }
+    .sec-h h2 { @apply text-xl font-semibold tracking-tight; }
+    .sec-h p { @apply text-muted-foreground; }
+    .tile { @apply grid size-11 shrink-0 place-items-center rounded-xl bg-chart-1/20 text-chart-4 shadow-sm ring-1 ring-inset ring-chart-1/30 dark:text-chart-1 [&_svg]:size-5; }
+    .cards { @apply flex flex-wrap gap-4 [&>*]:min-w-0 [&>*]:flex-[1_1_19rem]; } /* every row filled: the cards in it grow to share it */
+    .cards + .cards { @apply mt-4; }
+    .ex { @apply flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition hover:shadow-md; }
+    .lab { @apply flex items-center gap-1.5 px-4 py-2 text-xs font-semibold [&_svg]:size-4; }
+    .lab.do { @apply bg-chart-1/15 text-chart-4 dark:text-chart-1; }
+    .lab.dont { @apply bg-destructive/10 text-destructive; }
+    .lab.kind { @apply bg-muted text-muted-foreground; }
+    .stage { @apply m-4 mb-3 flex min-h-20 flex-wrap items-center gap-2 rounded-xl border border-dashed bg-[radial-gradient(var(--border)_1px,transparent_1px)] bg-[size:14px_14px] p-5; }
+    .ex > p { @apply px-4 pb-4 text-sm text-muted-foreground; }
+    .ex > p b { @apply font-medium text-foreground; }
+    .mock { @apply w-full rounded-xl border bg-popover p-4 text-sm text-popover-foreground shadow-lg; }
+    .glance { @apply flex items-start gap-3 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur [&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-chart-3; }
+  }
+</style>
+</head>
+<body class="antialiased">
+
+<!-- hero -->
+<header class="relative overflow-hidden border-b bg-gradient-to-br from-muted via-background to-chart-1/10 px-5 pb-10 pt-12 sm:px-8 lg:px-10">
+  <div class="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full bg-chart-1/25 blur-3xl"></div>
+  <div class="relative flex items-center gap-4">
+    <div class="tile size-14 bg-primary text-primary-foreground ring-0 [&_svg]:size-7"><i data-lucide="app-window"></i></div>
+    <div><p class="text-sm font-medium text-chart-3"><a href="../general.html" class="hover:underline">Design guide</a> · Component</p><h1 class="text-4xl font-semibold tracking-tight">Dialog</h1></div>
+  </div>
+  <p class="relative mt-4 text-lg text-muted-foreground">A <b class="text-foreground">dialog</b> sits over the page and blocks it: for a short task that must be done now. An <b class="text-foreground">alert dialog</b> asks for a decision and closes only by answering. Anything longer, optional or not urgent goes in a sheet, a page or inline.</p>
+  <div class="relative mt-8 flex flex-wrap gap-3 [&>*]:flex-[1_1_15rem]">
+    <div class="glance"><i data-lucide="hand"></i><div><b>Worth the interruption</b><p class="text-sm text-muted-foreground">A short task or a critical decision. Never promos.</p></div></div>
+    <div class="glance"><i data-lucide="heading"></i><div><b>Always a title</b><p class="text-sm text-muted-foreground">The main button repeats its verb.</p></div></div>
+    <div class="glance"><i data-lucide="undo-2"></i><div><b>Confirm only what's serious</b><p class="text-sm text-muted-foreground">Hard to undo. Routine actions get Undo.</p></div></div>
+    <div class="glance"><i data-lucide="message-square-warning"></i><div><b>Name the thing and the result</b><p class="text-sm text-muted-foreground">"Delete file" / Cancel, not Yes / No.</p></div></div>
+  </div>
+</header>
+
+<!-- sections menu -->
+<nav class="sticky top-0 z-10 flex items-center gap-1 overflow-x-auto border-b bg-background/85 px-5 py-2 backdrop-blur sm:px-8 lg:px-10 [&_a]:flex [&_a]:shrink-0 [&_a]:items-center [&_a]:gap-1.5 [&_a]:rounded-full [&_a]:px-3 [&_a]:py-1.5 [&_a]:text-sm [&_a]:text-muted-foreground [&_a:hover]:bg-muted [&_a:hover]:text-foreground [&_svg]:size-4">
+  <a href="#which"><i data-lucide="layers"></i>Which one</a><a href="#layout"><i data-lucide="layout-template"></i>Layout</a><a href="#confirm"><i data-lucide="shield-alert"></i>Confirmations</a><a href="#ship"><i data-lucide="list-checks"></i>Before you ship</a>
+  <button class="btn ml-auto shrink-0" data-variant="ghost" data-size="icon-sm" aria-label="Switch dark mode" title="Switch dark mode" onclick="document.documentElement.classList.toggle('dark')"><i data-lucide="sun-moon"></i></button>
+</nav>
+
+<section id="which">
+  <div class="sec-h"><div class="tile"><i data-lucide="layers"></i></div><div><h2>Which one</h2><p>Block the page only when the task can't wait. Never a dialog from a dialog.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="app-window"></i>Dialog</div><div class="stage"><button class="btn" data-variant="outline" onclick="document.getElementById('demo-d').showModal()">Rename file</button></div><p><b>A short task the flow needs now.</b> Closes by ✕, Esc or a click outside (try it: a real <code>&lt;dialog&gt;</code>, fading in with <code>@starting-style</code>).</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="shield-alert"></i>Alert Dialog</div><div class="stage"><button class="btn" data-variant="destructive" onclick="document.getElementById('demo-a').showModal()">Delete project</button></div><p><b>A decision that must be answered.</b> No ✕, no click outside: only its buttons close it.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="panel-right"></i>Sheet</div><div class="stage"><div class="flex h-24 w-full overflow-hidden rounded-lg border bg-background"><div class="flex-1 space-y-2 p-3"><div class="h-2 w-2/3 rounded-full bg-muted"></div><div class="h-2 w-1/2 rounded-full bg-muted"></div></div><div class="w-2/5 space-y-2 border-l bg-popover p-3 shadow-lg"><div class="h-2 w-3/4 rounded-full bg-foreground/60"></div><div class="h-5 rounded-md border"></div><div class="h-5 rounded-md border"></div></div></div></div><p><b>A longer form or details</b> read next to the page. See <code>sheet.md</code>.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="file-text"></i>Page</div><div class="stage"><div class="flex items-center gap-2 text-sm"><span class="badge">1 Upload</span><i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i><span class="badge" data-variant="outline">2 Map columns</span><i data-lucide="chevron-right" class="size-4 text-muted-foreground"></i><span class="badge" data-variant="outline">3 Review</span></div></div><p><b>Many steps, complex interactions, large tables.</b></p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="message-square"></i>Inline · Popover</div><div class="stage"><div class="flex w-full items-start gap-3 rounded-lg border bg-card p-3 text-sm"><i data-lucide="info" class="mt-0.5 size-4 shrink-0"></i><div><b class="font-medium">Your trial ends in 3 days</b><p class="text-muted-foreground">Add a card to keep your projects.</p></div></div></div><p><b>Information or a few controls</b> that shouldn't block anything.</p></div>
+  </div>
+  <div class="cards">
+    <div class="ex"><div class="lab dont"><i data-lucide="circle-x"></i>Don't</div><div class="stage"><div class="mock text-center"><i data-lucide="mail" class="mx-auto size-8 text-muted-foreground"></i><b class="mt-2 block">Join our newsletter!</b><p class="mt-1 text-muted-foreground">Get tips every week.</p><div class="mt-4 flex justify-center gap-2"><button class="btn" data-variant="ghost">No thanks</button><button class="btn">Subscribe</button></div></div></div><p><b>Nonessential content in a dialog:</b> it blocks the task and gives nothing back. Put it inline.</p></div>
+  </div>
+</section>
+
+<section id="layout">
+  <div class="sec-h"><div class="tile"><i data-lucide="layout-template"></i></div><div><h2>Layout</h2><p>Title, short body, actions bottom right. Up to 512 px wide, 16 px from a phone's edges.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="app-window"></i>Dialog</div><div class="stage"><div class="mock relative grid gap-4 p-6"><button class="btn absolute right-3 top-3" data-variant="ghost" data-size="icon-sm" aria-label="Close"><i data-lucide="x"></i></button><div><b class="text-lg">Rename file</b><p class="text-muted-foreground">Pick a name your team will recognize.</p></div><input class="input" value="report-final.pdf" aria-label="File name"><div class="flex justify-end gap-2"><button class="btn" data-variant="outline">Cancel</button><button class="btn">Rename</button></div></div></div><p><b>A title, and the primary repeats its verb.</b> Cancel, then the primary, bottom right.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="smartphone"></i>On a phone</div><div class="stage justify-center"><div class="mock grid max-w-72 gap-4 p-6 text-center"><div><b class="text-lg">Leave this page?</b><p class="text-muted-foreground">Your draft is saved.</p></div><div class="grid gap-2"><button class="btn">Leave page</button><button class="btn" data-variant="outline">Stay</button></div></div></div><p><b>Actions stack full width,</b> the primary on top.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="scroll-text"></i>Long body</div><div class="stage"><div class="mock grid gap-0 p-0"><b class="border-b p-4">Terms of service</b><div class="h-20 space-y-2 overflow-hidden p-4 text-muted-foreground"><p>1. Using the service. You may use it for your own projects…</p><p>2. Your content stays yours…</p></div><div class="flex justify-end gap-2 border-t p-4"><button class="btn" data-variant="outline">Decline</button><button class="btn">Accept</button></div></div></div><p><b>Only the body scrolls;</b> the title and the actions stay in view.</p></div>
+  </div>
+</section>
+
+<section id="confirm">
+  <div class="sec-h"><div class="tile"><i data-lucide="shield-alert"></i></div><div><h2>Confirmations</h2><p>Only for what destroys work or costs money and can't be undone. Asking every time teaches people to click through.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab do"><i data-lucide="circle-check"></i>Do</div><div class="stage"><div class="mock grid gap-4 p-6"><div><b class="text-lg">Delete "Q3 report"?</b><p class="text-muted-foreground">Its 14 comments go too. This can't be undone.</p></div><div class="flex justify-end gap-2"><button class="btn ring-[3px] ring-ring/50" data-variant="outline">Cancel</button><button class="btn" data-variant="destructive">Delete file</button></div></div></div><p><b>Names the thing and the result;</b> outcome buttons; focus starts on Cancel.</p></div>
+    <div class="ex"><div class="lab dont"><i data-lucide="circle-x"></i>Don't</div><div class="stage"><div class="mock grid gap-4 p-6"><div><b class="text-lg">Are you sure?</b><p class="text-muted-foreground">Do you want to continue?</p></div><div class="flex justify-end gap-2"><button class="btn" data-variant="outline">No</button><button class="btn">Yes</button></div></div></div><p><b>Says nothing</b> about what goes; people just click Yes.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="undo-2"></i>Everyday: Undo instead</div><div class="stage"><div class="mock flex items-center justify-between gap-3 py-3"><span>Message archived</span><button class="btn" data-variant="outline" data-size="sm">Undo</button></div></div><p><b>Everyday actions</b> (archive, move, delete something that can come back): do it, then offer Undo in a toast.</p></div>
+  </div>
+</section>
+
+<section id="ship">
+  <div class="sec-h"><div class="tile bg-primary text-primary-foreground ring-0"><i data-lucide="list-checks"></i></div><div><h2>Before you ship</h2><p>In code: a native <code>&lt;dialog&gt;</code> opened with <code>showModal()</code>, not a <code>div</code> and a script (on top of everything, the page behind inert, focus moves in and stays inside, Esc closes, focus returns to the trigger); <code>::backdrop</code> dims the page; <code>autofocus</code> on the element to use first (Cancel in a confirmation); open and close animated with <code>@starting-style</code> + <code>allow-discrete</code> (Tailwind <code>starting:</code>, Basecoat already does it), an extra (Baseline 2024) it must work without; <code>aria-labelledby</code> → the title, <code>aria-describedby</code> → the description; a confirmation gets <code>role="alertdialog"</code>. Basecoat: <code>&lt;dialog class="dialog"&gt;</code> or <code>class="alert-dialog"</code> › <code>&lt;div&gt;</code> › <code>header</code> (<code>h2</code>, <code>p</code>), <code>section</code>, <code>footer</code>; a Dialog adds a ghost ✕ button and a backdrop-click close, an Alert Dialog neither.</p></div></div>
+  <div class="cards [&_li]:flex [&_li]:items-start [&_li]:gap-2 [&_svg]:mt-0.5 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-chart-3">
+    <ul class="ex gap-3 p-5 text-sm"><li><i data-lucide="check"></i>A dialog is really needed (not a sheet, page or inline message), and none opens another</li><li><i data-lucide="check"></i>A title, and the primary button repeats its verb</li></ul>
+    <ul class="ex gap-3 p-5 text-sm"><li><i data-lucide="check"></i>Confirmations only for hard-to-undo actions, naming the thing; outcome buttons, focus on Cancel</li><li><i data-lucide="check"></i><span>A native <code>&lt;dialog&gt;</code> with <code>showModal()</code>: Esc closes it, focus returns to the trigger; fits a 390 px screen</span></li></ul>
+  </div>
+  <p class="mt-8 text-sm text-muted-foreground">Sources: shadcn/ui Dialog and Alert Dialog (pages and source) · Basecoat Dialog and Alert Dialog · Nielsen Norman Group, "Modal &amp; Nonmodal Dialogs" and "Confirmation Dialogs Can Prevent User Errors" · Atlassian Design System, Modal dialog · MDN <code>&lt;dialog&gt;</code> and <code>@starting-style</code> · Tailwind CSS <code>starting:</code> · WAI-ARIA APG, Dialog (Modal) and Alert Dialog. The rules in words: <code>dialog.md</code>; for every screen: <a href="../general.html" class="underline underline-offset-2">general rules</a>.</p>
+</section>
+
+<!-- live examples -->
+<dialog id="demo-d" class="dialog" aria-labelledby="demo-d-t" aria-describedby="demo-d-p" onpointerdown="this.dataset.backdropPress = event.target === this" onclick="if (event.target === this && this.dataset.backdropPress === 'true') this.close()">
+  <div class="sm:max-w-md"><header><h2 id="demo-d-t">Rename file</h2><p id="demo-d-p">Pick a name your team will recognize.</p></header>
+  <div><input class="input" value="report-final.pdf" aria-label="File name"></div>
+  <footer><button class="btn" data-variant="outline" onclick="this.closest('dialog').close()">Cancel</button><button class="btn" onclick="this.closest('dialog').close()">Rename</button></footer>
+  <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Close" onclick="this.closest('dialog').close()"><i data-lucide="x"></i></button></div>
+</dialog>
+<dialog id="demo-a" class="alert-dialog" role="alertdialog" aria-labelledby="demo-a-t" aria-describedby="demo-a-p">
+  <div><header><h2 id="demo-a-t">Delete "Website redesign"?</h2><p id="demo-a-p">Its 32 tasks and files go too. This can't be undone.</p></header>
+  <footer><button class="btn" data-variant="outline" autofocus onclick="this.closest('dialog').close()">Cancel</button><button class="btn" data-variant="destructive" onclick="this.closest('dialog').close()">Delete project</button></footer></div>
+</dialog>
+
+<script>lucide.createIcons()</script>
+</body>
+</html>

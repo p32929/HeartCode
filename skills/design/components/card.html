@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Card · design guide</title>
+<!-- shadcn/ui's look in plain HTML (Basecoat), Tailwind for the page, Lucide icons -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+<link rel="stylesheet" href="../theme.css"> <!-- the theme (theme.css): after Basecoat, so they win -->
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400..700&family=Geist+Mono:wght@400..600&display=swap"> <!-- the theme's fonts -->
+<script>document.documentElement.classList.toggle("dark", matchMedia("(prefers-color-scheme: dark)").matches)</script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@1.59.0/dist/umd/lucide.min.js"></script>
+<style type="text/tailwindcss">
+  @custom-variant dark (&:is(.dark *));
+  @theme inline {
+    --color-background: var(--background); --color-foreground: var(--foreground); --color-card: var(--card); --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground); --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground); --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground); --color-destructive: var(--destructive); --color-destructive-foreground: var(--destructive-foreground);
+    --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring);
+    --color-chart-1: var(--chart-1); --color-chart-2: var(--chart-2); --color-chart-3: var(--chart-3); --color-chart-4: var(--chart-4); --color-chart-5: var(--chart-5);
+    --color-sidebar: var(--sidebar); --color-sidebar-foreground: var(--sidebar-foreground); --color-sidebar-primary: var(--sidebar-primary); --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent); --color-sidebar-accent-foreground: var(--sidebar-accent-foreground); --color-sidebar-border: var(--sidebar-border); --color-sidebar-ring: var(--sidebar-ring);
+    --font-sans: var(--font-sans); --font-mono: var(--font-mono); --font-serif: var(--font-serif);
+    --radius-sm: calc(var(--radius) - 4px); --radius-md: calc(var(--radius) - 2px); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) + 4px);
+    --shadow-2xs: var(--shadow-2xs); --shadow-xs: var(--shadow-xs); --shadow-sm: var(--shadow-sm); --shadow: var(--shadow); --shadow-md: var(--shadow-md); --shadow-lg: var(--shadow-lg); --shadow-xl: var(--shadow-xl); --shadow-2xl: var(--shadow-2xl);
+  }
+  @layer base { * { @apply border-border outline-ring/50; } body { @apply bg-background text-foreground; } html { scroll-behavior: smooth; } }
+  @layer components { /* utilities in the markup win over these (a gradient on a .stage) */
+    section { @apply scroll-mt-20 px-5 py-10 sm:px-8 lg:px-10; }
+    section:nth-of-type(even) { @apply bg-muted/40; }
+    .sec-h { @apply mb-6 flex items-start gap-4; }
+    .sec-h h2 { @apply text-xl font-semibold tracking-tight; }
+    .sec-h p { @apply text-muted-foreground; }
+    .tile { @apply grid size-11 shrink-0 place-items-center rounded-xl bg-chart-1/20 text-chart-4 shadow-sm ring-1 ring-inset ring-chart-1/30 dark:text-chart-1 [&_svg]:size-5; }
+    .cards { @apply flex flex-wrap gap-4 [&>*]:min-w-0 [&>*]:flex-[1_1_19rem]; } /* every row filled: the cards in it grow to share it */
+    .cards + .cards { @apply mt-4; }
+    .ex { @apply flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition hover:shadow-md; }
+    .lab { @apply flex items-center gap-1.5 px-4 py-2 text-xs font-semibold [&_svg]:size-4; }
+    .lab.do { @apply bg-chart-1/15 text-chart-4 dark:text-chart-1; }
+    .lab.dont { @apply bg-destructive/10 text-destructive; }
+    .lab.kind { @apply bg-muted text-muted-foreground; }
+    .stage { @apply m-4 mb-3 flex min-h-20 flex-wrap items-center gap-2 rounded-xl border border-dashed bg-[radial-gradient(var(--border)_1px,transparent_1px)] bg-[size:14px_14px] p-5; }
+    .ex > p { @apply px-4 pb-4 text-sm text-muted-foreground; }
+    .ex > p b { @apply font-medium text-foreground; }
+    .mock { @apply w-full rounded-xl border bg-popover p-4 text-sm text-popover-foreground shadow-lg; }
+    .glance { @apply flex items-start gap-3 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur [&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-chart-3; }
+  }
+</style>
+</head>
+<body class="antialiased">
+
+<!-- hero -->
+<header class="relative overflow-hidden border-b bg-gradient-to-br from-muted via-background to-chart-1/10 px-5 pb-10 pt-12 sm:px-8 lg:px-10">
+  <div class="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full bg-chart-1/25 blur-3xl"></div>
+  <div class="relative flex items-center gap-4">
+    <div class="tile size-14 bg-primary text-primary-foreground ring-0 [&_svg]:size-7"><i data-lucide="layout-grid"></i></div>
+    <div><p class="text-sm font-medium text-chart-3"><a href="../general.html" class="hover:underline">Design guide</a> · Component</p><h1 class="text-4xl font-semibold tracking-tight">Card</h1></div>
+  </div>
+  <p class="relative mt-4 text-lg text-muted-foreground">A card holds a few short facts about <b class="text-foreground">one thing</b> and usually leads to its details. Good for a <b class="text-foreground">mix</b> of items, like a dashboard; items of one kind go in a list or a table.</p>
+  <div class="relative mt-8 flex flex-wrap gap-3 [&>*]:flex-[1_1_15rem]">
+    <div class="glance"><i data-lucide="box"></i><div><b>One thing per card</b><p class="text-sm text-muted-foreground">A few short facts; details on its page.</p></div></div>
+    <div class="glance"><i data-lucide="table"></i><div><b>Comparing? A table</b><p class="text-sm text-muted-foreground">Similar items go in a table or list.</p></div></div>
+    <div class="glance"><i data-lucide="panel-top"></i><div><b>Header, content, footer</b><p class="text-sm text-muted-foreground">Title first, actions at the bottom.</p></div></div>
+    <div class="glance"><i data-lucide="mouse-pointer-click"></i><div><b>One link per card</b><p class="text-sm text-muted-foreground">In its title, covering the card.</p></div></div>
+  </div>
+</header>
+
+<!-- sections menu -->
+<nav class="sticky top-0 z-10 flex items-center gap-1 overflow-x-auto border-b bg-background/85 px-5 py-2 backdrop-blur sm:px-8 lg:px-10 [&_a]:flex [&_a]:shrink-0 [&_a]:items-center [&_a]:gap-1.5 [&_a]:rounded-full [&_a]:px-3 [&_a]:py-1.5 [&_a]:text-sm [&_a]:text-muted-foreground [&_a:hover]:bg-muted [&_a:hover]:text-foreground [&_svg]:size-4">
+  <a href="#when"><i data-lucide="layers"></i>Card or something else</a><a href="#parts"><i data-lucide="panel-top"></i>Parts</a><a href="#click"><i data-lucide="mouse-pointer-click"></i>Clickable card</a><a href="#ship"><i data-lucide="list-checks"></i>Before you ship</a>
+  <button class="btn ml-auto shrink-0" data-variant="ghost" data-size="icon-sm" aria-label="Switch dark mode" title="Switch dark mode" onclick="document.documentElement.classList.toggle('dark')"><i data-lucide="sun-moon"></i></button>
+</nav>
+
+<section id="when">
+  <div class="sec-h"><div class="tile"><i data-lucide="layers"></i></div><div><h2>Card or something else</h2><p>Cards for browsing a mix; a list to scan one kind; a table to compare. Same facts in the same place on every card.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="layout-grid"></i>Cards · a mix</div><div class="stage"><div class="grid w-full gap-3 sm:grid-cols-2">
+      <div class="card" data-size="sm"><header><h3>Revenue</h3><p>This month</p></header><div class="px-4 text-2xl font-semibold tabular-nums">$12,480</div></div>
+      <div class="card" data-size="sm"><header><h3>Ember &amp; Oak site</h3><p>Due Friday</p></header><div class="px-4 text-muted-foreground">3 of 5 tasks done</div></div>
+    </div></div><p><b>Different things side by side:</b> a dashboard.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="list"></i>List · one kind</div><div class="stage"><ul class="w-full divide-y rounded-lg border bg-card text-sm [&_li]:flex [&_li]:items-center [&_li]:gap-2 [&_li]:px-3 [&_li]:py-2 [&_svg]:size-4 [&_svg]:text-muted-foreground">
+      <li><i data-lucide="file-text"></i>brief.pdf<span class="ml-auto text-muted-foreground">2 MB</span></li><li><i data-lucide="file-text"></i>invoice-0412.pdf<span class="ml-auto text-muted-foreground">84 KB</span></li><li><i data-lucide="file-text"></i>notes.md<span class="ml-auto text-muted-foreground">6 KB</span></li>
+    </ul></div><p><b>Files, messages, results:</b> quicker to scan in rows.</p></div>
+  </div>
+  <div class="cards">
+    <div class="ex"><div class="lab do"><i data-lucide="circle-check"></i>Do · comparing</div><div class="stage"><table class="table w-full text-sm"><thead><tr><th>Plan</th><th>Seats</th><th>Storage</th><th class="text-right">Price</th></tr></thead><tbody><tr><td>Starter</td><td>3</td><td>10 GB</td><td class="text-right tabular-nums">$9</td></tr><tr><td>Team</td><td>10</td><td>100 GB</td><td class="text-right tabular-nums">$29</td></tr><tr><td>Business</td><td>50</td><td>1 TB</td><td class="text-right tabular-nums">$99</td></tr></tbody></table></div><p><b>A table:</b> each fact lines up with the same fact.</p></div>
+    <div class="ex"><div class="lab dont"><i data-lucide="circle-x"></i>Don't</div><div class="stage"><div class="grid w-full gap-2 sm:grid-cols-3">
+      <div class="card" data-size="sm"><header><h3>Starter</h3><p>$9 · 3 seats</p></header><div class="px-4 text-muted-foreground">10 GB storage</div></div>
+      <div class="card" data-size="sm"><header><h3>Team</h3><p>100 GB, 10 seats</p></header><div class="px-4 text-muted-foreground">$29 a month</div></div>
+      <div class="card" data-size="sm"><header><h3>Business</h3><p>50 seats</p></header><div class="px-4 text-muted-foreground">1 TB · $99</div></div>
+    </div></div><p><b>Cards to compare,</b> facts in a different place on each: hard to compare.</p></div>
+  </div>
+</section>
+
+<section id="parts">
+  <div class="sec-h"><div class="tile"><i data-lucide="panel-top"></i></div><div><h2>Parts</h2><p>Header (title, description, an optional action top right), content, footer with the actions. Laid out by its own width.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="panel-top"></i>Header · content · footer</div><div class="stage"><div class="card w-full">
+      <header><h3>Team members</h3><p>Invite people to work on this project.</p><button class="btn card-action" data-variant="ghost" data-size="icon-sm" aria-label="More actions"><i data-lucide="ellipsis"></i></button></header>
+      <div class="flex items-center gap-3 px-6"><span class="grid size-8 place-items-center rounded-full bg-chart-1/20 text-xs font-medium">SR</span><div><b class="font-medium">Sam Rivera</b><p class="text-muted-foreground">sam@example.com</p></div><span class="badge ml-auto" data-variant="secondary">Owner</span></div>
+      <footer class="gap-2"><button class="btn" data-size="sm"><i data-lucide="user-plus"></i>Invite member</button></footer>
+    </div></div><p><b>Default size:</b> most cards.</p></div>
+    <div class="ex"><div class="lab kind"><i data-lucide="minimize-2"></i>sm · dense grids</div><div class="stage"><div class="grid w-full gap-2 sm:grid-cols-2">
+      <div class="card" data-size="sm"><header><h3>Open issues</h3><p>Last 7 days</p></header><div class="px-4 text-2xl font-semibold tabular-nums">24</div></div>
+      <div class="card" data-size="sm"><header><h3>Deploys</h3><p>Last 7 days</p></header><div class="px-4 text-2xl font-semibold tabular-nums">61</div></div>
+    </div></div><p><b>Smaller spacing</b> when many cards share a screen.</p></div>
+  </div>
+  <div class="cards">
+    <div class="ex"><div class="lab kind"><i data-lucide="scaling"></i>By its own width · <code>@container</code></div><div class="stage items-start"><ul class="flex w-full flex-wrap items-start gap-3"><li class="w-56 shrink-0 list-none"><div class="card @container" data-size="sm"><div class="flex flex-col items-start gap-3 px-4 @md:flex-row @md:items-center"><span class="grid size-9 shrink-0 place-items-center rounded-full bg-chart-1/20 text-xs font-medium">SR</span><div><b class="font-medium">Sam Rivera</b><p class="text-muted-foreground">Design lead</p></div><button class="btn @md:ml-auto" data-variant="outline" data-size="sm"><i data-lucide="message-circle"></i>Message</button></div></div></li><li class="min-w-0 flex-1 list-none"><div class="card @container" data-size="sm"><div class="flex flex-col items-start gap-3 px-4 @md:flex-row @md:items-center"><span class="grid size-9 shrink-0 place-items-center rounded-full bg-chart-1/20 text-xs font-medium">SR</span><div><b class="font-medium">Sam Rivera</b><p class="text-muted-foreground">Design lead</p></div><button class="btn @md:ml-auto" data-variant="outline" data-size="sm"><i data-lucide="message-circle"></i>Message</button></div></div></li></ul></div><p><b>The same card</b> in a narrow slot stacks; in a wide one it's a row. It follows its own width (<code>@md:</code>), not the screen's.</p></div>
+  </div>
+</section>
+
+<section id="click">
+  <div class="sec-h"><div class="tile"><i data-lucide="mouse-pointer-click"></i></div><div><h2>Clickable card</h2><p>One link, in the title, stretched over the card. Hover and focus show on the whole card.</p></div></div>
+  <div class="cards">
+    <div class="ex"><div class="lab do"><i data-lucide="circle-check"></i>Do · hover or Tab to it</div><div class="stage"><ul class="grid w-full gap-3 sm:grid-cols-2">
+      <li class="card relative transition hover:ring-ring/60 focus-within:ring-2 focus-within:ring-ring/60"><header><h3><a href="#click" class="outline-none after:absolute after:inset-0">Card design pitfalls</a></h3><p>Ten mistakes to avoid when building cards.</p></header><div class="px-6 text-muted-foreground">6 min read</div></li>
+      <li class="card relative transition hover:ring-ring/60 focus-within:ring-2 focus-within:ring-ring/60"><header><h3><a href="#click" class="outline-none after:absolute after:inset-0">Writing button labels</a></h3><p>A verb and its object, every time.</p></header><div class="px-6 text-muted-foreground">4 min read</div></li>
+    </ul></div><p><b>The title is the link;</b> its <code>::after</code> covers the card. Cards in a <code>&lt;ul&gt;</code>.</p></div>
+    <div class="ex"><div class="lab dont"><i data-lucide="circle-x"></i>Don't</div><div class="stage"><pre class="w-full overflow-x-auto rounded-lg border bg-muted p-3 font-mono text-xs leading-relaxed">&lt;a href="/post"&gt;
+  &lt;div class="card"&gt;
+    &lt;h3&gt;Card design pitfalls&lt;/h3&gt;
+    &lt;p&gt;Ten mistakes to avoid…&lt;/p&gt;
+    &lt;button&gt;Share&lt;/button&gt;
+    &lt;a href="/post"&gt;Read more&lt;/a&gt;
+  &lt;/div&gt;
+&lt;/a&gt;</pre></div><p><b>The whole card in a link:</b> everything becomes its label, and the button and "Read more" inside are easy to miss.</p></div>
+  </div>
+</section>
+
+<section id="ship">
+  <div class="sec-h"><div class="tile bg-primary text-primary-foreground ring-0"><i data-lucide="list-checks"></i></div><div><h2>Before you ship</h2><p>In code: a set of cards is a <code>&lt;ul&gt;</code>, one <code>&lt;li&gt;</code> per card. Basecoat: <code>&lt;div class="card"&gt;</code> (<code>data-size="sm"</code>) with <code>&lt;header&gt;</code> (title, <code>&lt;p&gt;</code>, <code>.card-action</code>), <code>&lt;section&gt;</code> and <code>&lt;footer&gt;</code>.</p></div></div>
+  <div class="cards [&_li]:flex [&_li]:items-start [&_li]:gap-2 [&_svg]:mt-0.5 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-chart-3">
+    <ul class="ex gap-3 p-5 text-sm"><li><i data-lucide="check"></i>Each card is about one thing; comparable items are a table or list</li><li><i data-lucide="check"></i>The same facts sit in the same place on every card</li><li><i data-lucide="check"></i>A clickable card has one link, in its title, covering the card; hover and focus show on the whole card</li></ul>
+    <ul class="ex gap-3 p-5 text-sm"><li><i data-lucide="check"></i><span>Narrow and wide, the card lays itself out by its own width (<code>@container</code>)</span></li><li><i data-lucide="check"></i><span>Cards in a set are a <code>&lt;ul&gt;</code> list with the same heading level</span></li></ul>
+  </div>
+  <p class="mt-8 text-sm text-muted-foreground">Sources: shadcn/ui Card · Basecoat 1.0.2 card CSS · Nielsen Norman Group, "Cards: UI-Component Definition" · Heydon Pickering, Inclusive Components, "Cards" · MDN, <code>@container</code> (Baseline widely available) · Tailwind CSS, container queries. The rules in words: <code>card.md</code>; for every screen: <a href="../general.html" class="underline underline-offset-2">general rules</a>.</p>
+</section>
+
+<script>lucide.createIcons()</script>
+</body>
+</html>

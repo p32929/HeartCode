@@ -78,10 +78,6 @@ tried did what I needed:
   another model: a function run against hidden tests, a small web app used in a real browser, a
   picture with known shapes to find and count, and a bug to fix with HeartCode's tools. The scores
   and each model's record of real jobs are columns of their own (Skills, Jobs).
-- **Knows how to design**: a built-in `design` skill (from Impeccable, AI Web Design and User Flow
-  Specs) that a model loads before building an interface or a game: decide the direction first,
-  the five states of every screen, a small system of type, colour and space, the defaults to
-  refuse, and looking at the rendered result before calling it done.
 - **Works with discipline by default**: its rules (from Karpathy's guidelines, Grill Me,
   Superpowers, Ponytail and Caveman) have it ask before building, find a bug's root cause first,
   write the least code that works, change only what the task needs, prove it before saying done,
