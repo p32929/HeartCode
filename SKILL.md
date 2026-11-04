@@ -80,7 +80,7 @@ image, one that can't call tools gets the tool calls as text.
 
 `--provider <name>` and `-u <url>` (a server for this run) also mean one model, alone.
 
-**Orchestrator** (the user's setting "Pick: an orchestrator hands it out", on Your models in
+**Orchestrator** (the user's choice of **Orchestrator** over **Your order**, at the top of Your models in
 `heart settings`; `--model-choice fit` for one run): with `auto`, each message starts on one of the
 models the user chose as orchestrators, in their order (none chosen: their first that calls tools). It answers
 at once, streaming, when it can (a greeting, a question), and otherwise hands the work to the
@@ -209,7 +209,7 @@ HEART_API_KEY=… heart -u https://api.groq.com/openai/v1 -m openai/gpt-oss-120b
 A model server on this machine (Ollama on :11434, LM Studio on :1234, llama.cpp on :8080) is
 found on its own. The user can also set everything up in a browser: `heart settings` (its link has
 the machine's network address, so it opens from another device too, for HeartCode on a server), where
-**Test** (or **Test all**) under *Your models* sends a model a short message to show it really
+**Test all** (or, with an orchestrator, **Test**) under *Your models* sends a model a short message to show it really
 answers. A run that fails with a wrong key or an unknown model: ask the user to test it there.
 
 ## More context for the task

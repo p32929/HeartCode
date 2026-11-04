@@ -12,7 +12,7 @@ import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, extraTools, runToo
 import { serversNote } from './lsp.js'
 import { newlyEnded, jobLine } from './background.js'
 import { loadHooks, runHooks } from './hooks.js'
-import { takeConfigErrors } from './config.js'
+import { takeConfigErrors, HOME } from './config.js'
 import { runCheck, PAGE_COMMAND } from './check.js'
 import { record, recordLine, similar, loadStats, summary } from './stats.js'
 import { c, duration, Block, Markdown, color, diffLines, renderDiff } from './ui.js'
@@ -218,6 +218,8 @@ export class Session {
       this.orchestrating = lead.length > 0 // (then team() leaves the orchestrators out)
       if (this.orchestrating && !this.team?.().length) this.orchestrating = false // no one to hand to: it does the work itself
       if (this.orchestrating) rankings().catch(() => {}) // their places, for its list of models: fetched behind (once a week), never waited for
+      // never tested together (the settings page's Test): it picks by names and ranks alone, so say how to do better, once
+      if (this.orchestrating && !Session.tipped && !fs.existsSync(path.join(HOME, 'full-test.json'))) (Session.tipped = true), this.ui.warn(prompt('agent/orchestrator-untested'))
       log('rotate', `this message starts on ${this.client.provider ?? ''} · ${this.client.model}${this.client.rotation ? ` (#${this.client.rotation.at + 1} of ${this.client.rotation.list.length}${this.orchestrating ? ', orchestrating' : ', your order'})` : ''}`)
     }
     log('task', `${text} (${this.strat.actions} mode, ${images.length} image(s))`)

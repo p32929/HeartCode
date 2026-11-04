@@ -59,13 +59,14 @@ tried did what I needed:
 - **Tells you when a newer version is out** (a check with npm each time it starts, in the status bar):
   `/update` shows what changed and installs it the way you installed HeartCode. Switch it off in
   `/settings` → General.
-- **An orchestrator that hands work out**: with "Pick" set to "an orchestrator hands it out",
+- **An orchestrator that hands work out**: with **Orchestrator** chosen at the top of Your models (in place of **Your order**),
   each message starts on a model you choose for that (a quick, cheap one is enough). It answers
   at once when it can ("hi" needs no other model), and otherwise hands the work to whichever of
   your models it thinks suits it. It picks by what each model has shown: how quick it is, its
-  **Test skills** scores, and its record on the jobs it was handed before (the most similar ones
-  shown to it), then LMArena's public rankings. **Test orchestrators** tries each of yours on a few
-  short scenes, shows live what each one does, and puts the best first.
+  skill scores, and its record on the jobs it was handed before (the most similar ones shown to it),
+  then LMArena's public rankings. One **Test** checks the whole team at once, live in one dialog: does
+  each model answer, the skills of the ones that do the work, then each orchestrator handing them
+  work in a few short scenes (the best go first). Until it's run, HeartCode says so once.
 - **Work is checked, not taken on trust**: every job an orchestrator hands out comes with a check
   that HeartCode runs itself when the model is done: a command (the tests, the program) that must
   pass, or `page <file>`, which opens a web page in a real browser (Chrome, Chromium or Edge, found
@@ -73,7 +74,7 @@ tried did what I needed:
   breaks it. A failed check goes back to the orchestrator with the output, to hand the fix on. Each
   result goes into the model's record, so it picks better over time. `heartcode page index.html`
   runs the same check from your shell and saves desktop and phone screenshots.
-- **Test skills** (Your models): four small real jobs per model, each scored by HeartCode, not by
+- **Skills** (part of Test, with an orchestrator): four small real jobs per model, each scored by HeartCode, not by
   another model: a function run against hidden tests, a small web app used in a real browser, a
   picture with known shapes to find and count, and a bug to fix with HeartCode's tools. The scores
   and each model's record of real jobs are columns of their own (Skills, Jobs).
@@ -161,8 +162,8 @@ On **Models → Your list**:
    drop it). Click **Save order** to keep it.
 2. **Rearrange a bit more.** Drag a row to move it. #1 is the one HeartCode uses; the others are
    its fallbacks, tried in order.
-3. **Test them** (optional): **Test all** sends each a short message and shows which really answer.
-   Each test waits up to 10 seconds; **Tests wait**, above the list, changes that.
+3. **Test them** (optional): **Test all** sends each a short message and shows which really answer (with an
+   orchestrator, **Test** checks the whole team). Each test waits up to 10 seconds; **Tests wait** changes that.
 4. **Filter them** (optional): by name, provider, test result (works, doesn't, not tested, or one
    error like 402), context, tools, thinking, images or free. **Test N** then tests only the ones
    shown, and **Use only these N** makes them the models HeartCode uses, in the order you see (the others

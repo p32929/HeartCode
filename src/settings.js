@@ -254,6 +254,103 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   const skillLive = () => ({ rows: skillRun.rows, wait: skillRun.wait })
   // each model's record of handed-out jobs (stats.js), "provider/model" → { jobs, passed, failed, unchecked, lost, ms }
   const jobsNow = () => Object.fromEntries(Object.entries(loadStats()).map(([k, list]) => [k.replace(' ', '/'), summary(list)]))
+  const FULL_FILE = path.join(HOME, 'full-test.json') // the last Test with an orchestrator: { at, orchestrators } (HeartCode suggests one until there is)
+  const canOf = (t) => ({ tools: t.tested ? t.tested.mode === 'tools' : t.known?.tools !== false, images: Boolean(t.tested ? t.tested.vision : t.known?.images) })
+  // Skills: small jobs scored by HeartCode itself (src/skilltest.js). Every provider at once, its
+  // models one at a time (a free tier isn't flooded). Each answer may take Tests wait × 6: real jobs.
+  async function skillsRun(list, stop) {
+    skillRun = { stop, rows: list.map((t) => ({ provider: t.provider, model: t.model, can: canOf(t), cells: {}, now: null })), wait: skillWait() }
+    const show = (over) => emit('skilltest', { ...skillLive(), over })
+    show()
+    const byProvider = new Map()
+    for (const r of skillRun.rows) byProvider.set(r.provider, [...(byProvider.get(r.provider) ?? []), r])
+    await Promise.all([...byProvider.values()].map(async (rows) => {
+      for (const r of rows) {
+        if (stop.signal.aborted) break
+        const c = clientFor(r)
+        c.purpose = 'test'
+        const out = await testSkills(c, r.can, skillRun.wait, stop.signal, (st) => {
+          if (st.now) r.now = { skill: st.skill, since: Date.now() }
+          else (r.now = null), (r.cells[st.skill] = st)
+          show()
+        })
+        const key = `${r.provider}/${r.model}`
+        if (Object.keys(out).length) (tests[key] = { ...tests[key], skills: { ...tests[key]?.skills, ...out, at: Date.now() } }), saveTests()
+      }
+    }))
+    const rows = skillRun.rows
+    skillRun = null
+    emit('skilltest', { rows, wait: skillWait(), over: true })
+    log('fit', `Skills: ${rows.map((r) => `${r.provider} ${r.model}: ${Object.entries(r.cells).map(([k, v]) => `${k} ${v.score != null ? Math.round(v.score * 100) + '%' : v.slow ? 'no answer in time' : v.skipped ? '-' : 'failed'}`).join(', ')}`).join('\n')}`)
+    return rows
+  }
+  // Orchestrators: each gets the same few scenes (src/orchtest.js), all at once, handing work to the
+  // others (with what it would see for real: their speed, scores, record). All of them tested: put in
+  // order, the fewest mistakes first, then the fewest timeouts, then the quickest.
+  async function orchRun(lead, stop) {
+    const isLead = (t) => (cfg.orchestrators ?? []).some((o) => o.provider === t.provider && o.model === t.model)
+    const team = state().order.filter((t) => !isLead(t)).map((t) => ((r) => ({ provider: t.provider, model: t.model, ...canOf(t), thinking: Boolean(t.tested ? t.tested.thinking : t.known?.thinking), toolsOk: r?.toolsOk, replyMs: r?.ok ? r.ms : undefined, skills: r?.skills }))(tests[`${t.provider}/${t.model}`]))
+    if (!team.length) throw new Error("no models left to hand work to: an orchestrator needs some of your models that aren't orchestrators")
+    const live = lead.map((t) => ({ provider: t.provider, model: t.model, steps: [], now: null }))
+    const show = (over) => emit('orchtest', { list: live, team: team.length, over })
+    show()
+    const results = await Promise.all(lead.map(async (t, k) => ({ provider: t.provider, model: t.model, ...(await testOrchestrator(clientFor(t), root, team, testWait(), stop.signal, (st) => {
+      if (st.asking) live[k].now = { i: st.i, of: st.of, scene: st.scene }
+      else (live[k].now = null), live[k].steps.push(st)
+      show()
+    }).catch(() => ({ passed: 0, of: 0, fails: [], slow: 0, ms: 0, steps: live[k].steps }))) })))
+    show(true)
+    results.sort((a, b) => a.fails.length - b.fails.length || a.slow - b.slow || a.ms - b.ms)
+    if (!stop.signal.aborted && results.length === (cfg.orchestrators ?? []).length) {
+      cfg.orchestrators = results.map(({ provider, model }) => ({ provider, model }))
+      save('setting:orchestrators')
+    }
+    log('fit', results.map((r) => `${r.provider} ${r.model}: ${r.passed}/${r.of} in ${r.ms}ms${r.fails.length ? ` (${r.fails.map((f) => `${f.scene}: ${f.why}`).join('; ')})` : ''}`).join('\n'))
+    return results
+  }
+  // Test (with an orchestrator): does each answer, then the skills of the ones that do the work
+  // (scored in the last week: kept), then the orchestrators with them. One run, step by step, here on
+  // the server (closing the page doesn't stop it). only: the models selected.
+  let full = null
+  const FRESH = 7 * 86_400_000
+  const fullNews = (extra = {}) => emit('fulltest', { phase: full?.phase ?? null, skipped: full?.skipped ?? 0, done: full?.done ?? {}, ...extra })
+  const few = (list) => list.slice(0, 3).map((t) => t.model).join(', ') + (list.length > 3 ? ` and ${list.length - 3} more` : '')
+  async function fullRun(only) {
+    const order = state().order
+    const list = Array.isArray(only) ? order.filter((t) => only.some((o) => o?.provider === t.provider && o?.model === t.model)) : order
+    if (!list.length) throw new Error('no model to test')
+    const isLead = (t) => (cfg.orchestrators ?? []).some((o) => o.provider === t.provider && o.model === t.model)
+    full = { phase: 'answers', stop: new AbortController(), skipped: 0, started: Date.now(), done: {} } // done: what each finished step came to, in a line
+    let results = null
+    let done = full.done
+    try {
+      fullNews()
+      await startRun(list.map(({ provider, model }) => ({ provider, model })), Array.isArray(only))
+      if (full.stop.signal.aborted) return
+      const answered = list.filter((t) => tests[`${t.provider}/${t.model}`]?.ok)
+      const silent = list.filter((t) => !tests[`${t.provider}/${t.model}`]?.ok)
+      done.answers = `${answered.length} of ${list.length} answer${silent.length ? ` (not ${few(silent)}: left out of the rest)` : ''}`
+      const fresh = (t) => Date.now() - (tests[`${t.provider}/${t.model}`]?.skills?.at ?? 0) < FRESH
+      const workers = answered.filter((t) => !isLead(t))
+      full.skipped = workers.filter(fresh).length
+      full.phase = 'skills'
+      fullNews()
+      const due = workers.filter((t) => !fresh(t))
+      if (due.length) await skillsRun(due, full.stop)
+      if (full.stop.signal.aborted) return
+      done.skills = [due.length && `${due.length} tested`, full.skipped && `${full.skipped} scored this week: kept`].filter(Boolean).join(' · ') || 'no model here does the work'
+      const lead = answered.filter(isLead)
+      full.phase = 'orchestrators'
+      fullNews()
+      if (lead.length) results = await orchRun(lead, full.stop)
+      done.orchestrators = lead.length ? results.map((r) => `${r.model} ${r.steps.filter((x) => x.ok).length}/${r.of}`).join(' · ') : 'none among these'
+      if (!full.stop.signal.aborted) writeJson(FULL_FILE, { at: Date.now(), orchestrators: results, done })
+    } finally {
+      const stopped = full.stop.signal.aborted
+      full = null
+      fullNews({ over: true, stopped, results, done })
+    }
+  }
   // Never throws: { ok, ms, reply } or { ok: false, ms, status, error }; { stopped } when stop
   // (a run's Stop) cancels it.
   async function tryOne({ provider, model }, stop) {
@@ -598,30 +695,6 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       save('setting:orchestrators')
       return state()
     },
-    // Test orchestrators: each marked one gets the same few scenes (src/orchtest.js), all at once;
-    // the list is then put in order: the fewest mistakes first, then the fewest timeouts, then the quickest
-    'POST /api/orchestrators/test': async () => {
-      const lead = (cfg.orchestrators ?? []).filter((t) => cfg.providers[t.provider])
-      if (!lead.length) throw new Error('mark models as orchestrators first')
-      const isLead = (t) => lead.some((o) => o.provider === t.provider && o.model === t.model)
-      const team = state().order.filter((t) => !isLead(t)).map((t) => ({ provider: t.provider, model: t.model, tools: t.tested ? t.tested.mode === 'tools' : t.known?.tools !== false, images: Boolean(t.tested ? t.tested.vision : t.known?.images), thinking: Boolean(t.tested ? t.tested.thinking : t.known?.thinking), toolsOk: tests[`${t.provider}/${t.model}`]?.toolsOk, replyMs: tests[`${t.provider}/${t.model}`]?.ok ? tests[`${t.provider}/${t.model}`].ms : undefined, skills: tests[`${t.provider}/${t.model}`]?.skills }))
-      if (!team.length) throw new Error('no models left to hand work to: an orchestrator needs some of your models that aren\'t orchestrators')
-      // the page sees it as it goes: each orchestrator's scene now and what it did in the ones done
-      const live = lead.map((t) => ({ provider: t.provider, model: t.model, steps: [], now: null }))
-      const show = (over) => emit('orchtest', { list: live, team: team.length, over })
-      show()
-      const results = await Promise.all(lead.map(async (t, k) => ({ provider: t.provider, model: t.model, ...(await testOrchestrator(clientFor(t), root, team, testWait(), null, (st) => {
-        if (st.asking) live[k].now = { i: st.i, of: st.of, scene: st.scene }
-        else (live[k].now = null), live[k].steps.push(st)
-        show()
-      })) })))
-      show(true)
-      results.sort((a, b) => a.fails.length - b.fails.length || a.slow - b.slow || a.ms - b.ms) // fewest mistakes, then fewest without an answer in time, then the quickest
-      cfg.orchestrators = results.map(({ provider, model }) => ({ provider, model }))
-      save('setting:orchestrators')
-      log('fit', results.map((r) => `${r.provider} ${r.model}: ${r.passed}/${r.of} in ${r.ms}ms${r.fails.length ? ` (${r.fails.map((f) => `${f.scene}: ${f.why}`).join('; ')})` : ''}`).join('\n'))
-      return { ...state(), results }
-    },
     // models.dev again (one model, or all of yours): its list fetched anew, and each model's profile
     // takes what it says now (one it didn't know before becomes "from models.dev"; your own settings
     // for it stay above). A running HeartCode takes it at once.
@@ -651,44 +724,17 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
         return { sent, received: { error: e.name === 'TimeoutError' ? noAnswer() : `couldn't send it: ${e.cause?.code || e.cause?.message || e.message}`, ms: Date.now() - t0 } }
       }
     },
-    'POST /api/tests': () => ({ results: tests, run: run && { ...runState(), pending: [...run.pending] }, jobs: jobsNow(), skills: skillRun && skillLive() }),
-    // Test skills: small jobs scored by HeartCode itself (src/skilltest.js): the models given, else
-    // your models that answered their last test (else all). Every provider at once, its models one at
-    // a time (a free tier isn't flooded). Each answer may take Tests wait × 6: these are real jobs.
-    'POST /api/skills/test': async ({ only } = {}) => {
-      if (skillRun) throw new Error('Test skills is running: wait for it, or stop it')
-      const order = state().order
-      const pick = Array.isArray(only) ? order.filter((t) => only.some((o) => o?.provider === t.provider && o?.model === t.model)) : order.filter((t) => tests[`${t.provider}/${t.model}`]?.ok)
-      const list = pick.length || Array.isArray(only) ? pick : order
-      if (!list.length) throw new Error('no model to test')
-      const can = (t) => ({ tools: t.tested ? t.tested.mode === 'tools' : t.known?.tools !== false, images: Boolean(t.tested ? t.tested.vision : t.known?.images) })
-      skillRun = { stop: new AbortController(), rows: list.map((t) => ({ provider: t.provider, model: t.model, can: can(t), cells: {}, now: null })), wait: skillWait() }
-      const show = (over) => emit('skilltest', { ...skillLive(), over })
-      show()
-      const byProvider = new Map()
-      for (const r of skillRun.rows) byProvider.set(r.provider, [...(byProvider.get(r.provider) ?? []), r])
-      await Promise.all([...byProvider.values()].map(async (rows) => {
-        for (const r of rows) {
-          if (skillRun.stop.signal.aborted) break
-          const c = clientFor(r)
-          c.purpose = 'test'
-          const out = await testSkills(c, r.can, skillRun.wait, skillRun.stop.signal, (st) => {
-            if (st.now) r.now = { skill: st.skill, since: Date.now() }
-            else (r.now = null), (r.cells[st.skill] = st)
-            show()
-          })
-          const key = `${r.provider}/${r.model}`
-          if (Object.keys(out).length) (tests[key] = { ...tests[key], skills: { ...tests[key]?.skills, ...out, at: Date.now() } }), saveTests()
-        }
-      }))
-      const rows = skillRun.rows
-      const stopped = skillRun.stop.signal.aborted
-      skillRun = null
-      emit('skilltest', { rows, wait: skillWait(), over: true, stopped })
-      log('fit', `Test skills: ${rows.map((r) => `${r.provider} ${r.model}: ${Object.entries(r.cells).map(([k, v]) => `${k} ${v.score != null ? Math.round(v.score * 100) + '%' : v.slow ? 'no answer in time' : v.skipped ? '-' : 'failed'}`).join(', ')}`).join('\n')}`)
-      return { rows, results: tests }
+    'POST /api/tests': () => ({ results: tests, run: run && { ...runState(), pending: [...run.pending] }, jobs: jobsNow(), skills: skillRun && skillLive(), full: full && { phase: full.phase, skipped: full.skipped, done: full.done }, last: readJson(FULL_FILE, null) }),
+    // Test with an orchestrator: everything, step by step (fullRun); its progress comes as events
+    'POST /api/fulltest': ({ only } = {}) => {
+      if (full || run) throw new Error('a test is running: wait for it, or stop it')
+      fullRun(only).catch((e) => fullNews({ over: true, error: e.message }))
+      return {}
     },
-    'POST /api/skills/stop': () => (skillRun?.stop.abort(), {}),
+    'POST /api/fulltest/stop': () => {
+      if (full) full.stop.abort(), run && !run.stopping && ((run.stopping = true), run.cancel.abort(), emit('testrun', runState()))
+      return {}
+    },
     // a model's record of handed-out jobs, cleared (its provider now serves something else under that name)
     'POST /api/jobs/forget': ({ provider, model }) => (forgetJobs(`${provider} ${model}`), { jobs: jobsNow() }),
     // a run: all your models, or the ones given (only); one at a time if one is going already

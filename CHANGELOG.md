@@ -2,6 +2,21 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.49 (2026-11-04)
+
+- **Your models, simpler**: how a model is picked is a switch at the top, **Your order** or
+  **Orchestrator**, with one line on what it means, and only the settings for that one under it
+  ("New message to" only with your order; "If an orchestrator fails" with one).
+- **One Test with an orchestrator**: one click checks the whole team, step by step, live in one
+  dialog: does each model answer, the skills of the ones that do the work (scored this week: kept),
+  then each orchestrator handing them work in a few short scenes (put in order, the best first).
+  It runs on the server (close the page, it goes on), and each step says what it came to. With
+  your order, Test all (does each answer) is all there is. The selection bar's Test does the same
+  for the models selected.
+- **HeartCode says when the team was never tested**: with an orchestrator, the first message of a
+  session says to run Test in /settings (or use your order) until it's been run once.
+- The sidebar names your first two orchestrators and how many more.
+
 ## 0.1.48 (2026-11-04)
 
 - **Work is checked, not taken on trust**: each job the orchestrator hands out carries a check that

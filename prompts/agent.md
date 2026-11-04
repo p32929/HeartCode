@@ -378,6 +378,11 @@ Not changed yet: plan first. Write your plan with the todo tool — the end resu
 <!-- Sent when the final answer names files as made that aren't in the project. {{files}}: the paths. -->
 (Your answer names {{files}}, but they aren't in the project. Make them, or correct your answer to say what really exists.)
 
+## orchestrator-untested
+
+<!-- Shown to the user (not the model), once, when a message goes to an orchestrator and the models were never tested together. -->
+Tip: the orchestrator picks models best after a test: /settings → Your models → Test (it checks your orchestrators and models work together). Or choose "Your order" there to use your models in your own order.
+
 ## orchestrator-did-work
 
 <!-- Sent when an orchestrator's reply carries the work itself (a lot of code) and nothing was handed out. -->
