@@ -84,9 +84,15 @@ image, one that can't call tools gets the tool calls as text.
 `heart settings`; `--model-choice fit` for one run): with `auto`, each message starts on one of the
 models the user chose as orchestrators, in their order (none chosen: their first that calls tools). It answers
 at once, streaming, when it can (a greeting, a question), and otherwise hands the work to the
-user's other models through its `agent` tool, one handoff at a time. It picks which one (the smallest
-that will do the job well), knowing what each can do and its places in the public LMArena rankings;
-a model that fails or is out of quota is reported back, and it picks another. It has no other tool:
+user's other models through its `agent` tool, one handoff at a time. It picks which one (the quickest
+that has done such jobs well), knowing what each can do, how quick it is, its Test skills scores, its
+record on earlier jobs (`~/.heart/model-stats.json`) and its places in the public LMArena rankings;
+a model that fails or is out of quota is reported back, and it picks another. Each handoff can carry
+a `check` that HeartCode runs when the model is done: a command that must exit 0, or `page <file>`
+(the page opened in a headless browser: errors, a blank page, a click that breaks it fail it). A
+failed check goes back to the orchestrator with its output; every result goes into that model's record.
+`heartcode page <file|url>` runs the page check from a shell (exit 0 when it passes) and saves
+screenshots to `.heartcode/page-shots/`. It has no other tool:
 the models it picks do the work. If no
 orchestrator answers, the list goes on to the next model. With "in your order" (the default), the list
 is the user's order, as is.

@@ -2,6 +2,34 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.48 (2026-11-04)
+
+- **Work is checked, not taken on trust**: each job the orchestrator hands out carries a check that
+  HeartCode runs itself when the model is done: a command that must pass (the tests, the program),
+  or `page <file>`: the page opened in a real headless browser (Chrome, Chromium or Edge, found on
+  your computer; without one, a static check that its files are there and its scripts parse). It
+  fails on errors, a blank page, or a click or key that breaks it. A failed check goes back to the
+  orchestrator with the output; the work stays, and the fix goes to the next model.
+- **`heartcode page <file|url>`**: the same check from your shell (exit 0 when it passes), with
+  desktop and phone screenshots in `.heartcode/page-shots/`. Workers run it on their own page before
+  they report.
+- **The orchestrator learns from what happened**: every handoff goes into the model's record
+  (`~/.heart/model-stats.json`: check passed or failed, no answer, how long), and the orchestrator
+  sees each model's recent record and the past jobs most like the one in hand. Models with something
+  to show for themselves are listed first. A model much slower than your others is marked SLOW. Out
+  of quota doesn't count against a model.
+- **Test skills** (Your models, and for selected rows): four small real jobs per model, each scored
+  by HeartCode, never by another model: a function against hidden tests, a small web app used in a
+  real browser on a desktop and a phone, a picture with known shapes to find and count, and a bug to
+  fix with HeartCode's own tools. Live in a dialog; each answer may take Tests wait × 6.
+- **Skills and Jobs columns** on Your models: the Test skills scores as coloured chips, and the record
+  of real jobs (click to clear it), both sortable.
+- **Test orchestrators** wants a check on the jobs that make something.
+- **A built-in `design` skill**, loaded by the model before building an interface or a game: settle
+  the direction first, the five states of every screen, a small system of type, colour and space,
+  the defaults to refuse, games and 3D, and looking at the rendered page before calling it done.
+  From ideas in Impeccable (Apache-2.0), AI Web Design and User Flow Specs (MIT), written anew.
+
 ## 0.1.47 (2026-11-04)
 
 - **Add to orchestrators / Remove from orchestrators** in place of Mark as orchestrators: add the

@@ -62,10 +62,25 @@ tried did what I needed:
 - **An orchestrator that hands work out**: with "Pick" set to "an orchestrator hands it out",
   each message starts on a model you choose for that (a quick, cheap one is enough). It answers
   at once when it can ("hi" needs no other model), and otherwise hands the work to whichever of
-  your models it thinks suits it. It knows what each one can do and where it stands in LMArena's
-  public rankings, and gives small jobs to small models. Your models shows each model's Coding, Web
-  apps and Vision scores. **Test orchestrators** tries each of yours on a few short scenes, shows
-  live what each one does, and puts the best first.
+  your models it thinks suits it. It picks by what each model has shown: how quick it is, its
+  **Test skills** scores, and its record on the jobs it was handed before (the most similar ones
+  shown to it), then LMArena's public rankings. **Test orchestrators** tries each of yours on a few
+  short scenes, shows live what each one does, and puts the best first.
+- **Work is checked, not taken on trust**: every job an orchestrator hands out comes with a check
+  that HeartCode runs itself when the model is done: a command (the tests, the program) that must
+  pass, or `page <file>`, which opens a web page in a real browser (Chrome, Chromium or Edge, found
+  on your computer; without one, a static check) and fails on errors, a blank page, or a click that
+  breaks it. A failed check goes back to the orchestrator with the output, to hand the fix on. Each
+  result goes into the model's record, so it picks better over time. `heartcode page index.html`
+  runs the same check from your shell and saves desktop and phone screenshots.
+- **Test skills** (Your models): four small real jobs per model, each scored by HeartCode, not by
+  another model: a function run against hidden tests, a small web app used in a real browser, a
+  picture with known shapes to find and count, and a bug to fix with HeartCode's tools. The scores
+  and each model's record of real jobs are columns of their own (Skills, Jobs).
+- **Knows how to design**: a built-in `design` skill (from Impeccable, AI Web Design and User Flow
+  Specs) that a model loads before building an interface or a game: decide the direction first,
+  the five states of every screen, a small system of type, colour and space, the defaults to
+  refuse, and looking at the rendered result before calling it done.
 - **Works with discipline by default**: its rules (from Karpathy's guidelines, Grill Me,
   Superpowers, Ponytail and Caveman) have it ask before building, find a bug's root cause first,
   write the least code that works, change only what the task needs, prove it before saying done,

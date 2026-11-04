@@ -830,9 +830,10 @@ class App {
     // orchestrates: minus the orchestrators too (they only hand work out)
     const now = this.s?.client.rotation?.list[this.s.client.rotation.at] ?? this.sessionModels()[0]
     const lead = this.s?.orchestrating ? this.orchestrators() : []
+    const tested = readJson(path.join(HOME, 'model-tests.json'), {}) // Test all's and Test skills' results: how quick, which did a job with a tool, the skill scores (ponytail: read each time, it's small)
     return this.sessionModels()
       .filter((t) => ![now, ...lead].some((o) => t.provider === o?.provider && t.model === o?.model))
-      .map((t) => ({ ...t, ...this.abilities(t) }))
+      .map((t) => ((r) => ({ ...t, ...this.abilities(t), toolsOk: r?.toolsOk, replyMs: r?.ok ? r.ms : undefined, skills: r?.skills }))(tested[`${t.provider}/${t.model}`]))
   }
 
   // The models that orchestrate (Pick: "an orchestrator hands it out"): those picked on Your models
@@ -1903,6 +1904,7 @@ async function repl(app, f = {}) {
 }
 
 async function main() {
+  if (process.argv[2] === 'page') return (process.exitCode = await (await import('../src/check.js')).pageCommand(process.argv[3])) // a web page checked in a browser (src/check.js)
   // "--resume <id>" (as in Claude Code) vs a bare "--resume" (pick one): an id follows it
   const argv = process.argv.slice(2)
   const print = argv.includes('-p') || argv.includes('--print') // headless: an id after --resume is always an id

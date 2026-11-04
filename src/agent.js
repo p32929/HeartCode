@@ -13,6 +13,8 @@ import { serversNote } from './lsp.js'
 import { newlyEnded, jobLine } from './background.js'
 import { loadHooks, runHooks } from './hooks.js'
 import { takeConfigErrors } from './config.js'
+import { runCheck, PAGE_COMMAND } from './check.js'
+import { record, recordLine, similar, loadStats, summary } from './stats.js'
 import { c, duration, Block, Markdown, color, diffLines, renderDiff } from './ui.js'
 
 // Images for a helper (the agent tool's "images"), as data: URLs: image URLs (fetched), data: URLs,
@@ -236,6 +238,10 @@ export class Session {
   async subagent(args, signal, id) {
     const task = String(args.prompt ?? args.task ?? '').trim()
     if (!task) return this.orchestrating ? 'error: "prompt" is missing: put the whole task for the model in "prompt", and which model does it in "model"' : 'error: give the helper its job in "prompt"'
+    // an orchestrator's handoff: with what the user asked, in their words (a summary loses what they cared about)
+    this.handed = true
+    const check = this.orchestrating ? String(args.check ?? '').trim() : '' // how HeartCode proves it worked, run when the model is done
+    const job = this.orchestrating ? `${task}\n\n${prompt('agent/hand-request', { request: requestsOf(this.chat, 1500), choices: (this.chat?.choices ?? []).join('; '), check, run: /^page\s/i.test(check) ? check.replace(/^page/i, PAGE_COMMAND) : check })}` : task
     let images
     try {
       images = await loadImages(args.images, this, signal)
@@ -261,16 +267,33 @@ export class Session {
     const order = (this.orchestrating ? [first] : [first, ...all.filter((t) => t !== first).sort((a, b) => b.tools - a.tools || fails(a) - fails(b))]).filter(able).sort((a, b) => rests(a) - rests(b))
     if (!order.length) return this.orchestrating ? `error: ${name(first)} can't see images; hand it to one that can` : 'error: none of your models can see images'
     const failed = []
+    // what each did, for the record (stats.js): what the orchestrator learns models by
+    const about = { job: clip(String(args.description ?? '').trim() || task.split('\n')[0], 80), about: clip(`${task} ${requestsOf(this.chat, 300)}`, 300) }
     for (const [i, t] of order.entries()) {
       let answer = ''
+      const t0 = Date.now()
       try {
-        answer = (await this.#helper(t, task, images, args.description, id, signal, args.ownFiles))?.trim()
+        answer = (await this.#helper(t, job, images, args.description, id, signal, args.ownFiles))?.trim()
       } catch (e) {
         if (e.name === 'AbortError' || signal?.aborted) throw e
         failed.push(`${t.model}: ${clip(e.message, 150)}`)
+        if (e.status !== 429) record(name(t), { ...about, ms: Date.now() - t0, ok: false, why: clip(e.message, 120) }) // out of quota says nothing of the model (this.resting has it)
       }
-      if (answer) return t === first ? answer : `(Answered by ${name(t)}, not ${name(first)}${failed.length ? `: ${failed.join('; ')}` : ''})\n\n${answer}`
+      if (answer) {
+        const ms = Date.now() - t0
+        let checked = null
+        if (check) {
+          this.ui.step('check', clip(check, 80))
+          checked = await runCheck(this.root, check, signal)
+          log('agent', `check of ${name(t)}'s work: ${checked.report}`)
+          this.ui.step('check', `${checked.ok ? 'passed' : 'failed'}: ${clip(checked.report.split('\n')[0], 100)}`)
+        }
+        record(name(t), { ...about, ms, ok: true, ...(checked && { check: checked.ok ? 'pass' : 'fail', why: checked.ok ? undefined : clip(checked.report, 120) }) })
+        const said = t === first ? answer : `(Answered by ${name(t)}, not ${name(first)}${failed.length ? `: ${failed.join('; ')}` : ''})\n\n${answer}`
+        return checked ? `${said}\n\n${prompt(checked.ok ? 'agent/check-passed' : 'agent/check-failed', { model: name(t), report: checked.report })}` : said
+      }
       if (failed.length < i + 1) {
+        record(name(t), { ...about, ms: Date.now() - t0, ok: false, why: 'no reply' })
         failed.push(`${t.model}: no reply`)
         if (this.failures) this.failures[name(t)] = fails(t) + 1 // (a failed request is counted where it fails: engine's onFail)
       }
@@ -292,6 +315,7 @@ export class Session {
     }
     const label = clip(`${client.model}: ${String(description ?? '').trim() || task.split('\n')[0]}`, 60)
     const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
+    helper.worker = Boolean(this.orchestrating) // it does the work an orchestrator handed out: held to proving it like the main conversation (notDone; the review is the orchestrator's)
     if (ownFiles?.length) helper.ownFiles = ownFiles.map((f) => path.resolve(this.root, f)) // a part of the plan: changes only its own files
     Object.assign(helper, { isSub: true, research: this.research, ran: this.ran, noResearch: this.noResearch, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
     helper.track = (rel, before) => this.track(rel, before)
@@ -593,11 +617,26 @@ const teamOf = (s, team = s.team?.() ?? []) => {
   const line = (t) => {
     const failed = s.failures?.[`${t.provider} ${t.model}`]
     const rest = Math.ceil(((s.resting?.[`${t.provider} ${t.model}`] ?? 0) - Date.now()) / 60_000)
-    const facts = [t.tools === false && 'no tool calls', t.images && 'images', t.thinking && 'thinking', ranks(t) && `ranked ${ranks(t)}`, failed && `failed ${failed}× this session`, rest > 0 && `out of quota for ${rest < 120 ? `${rest} min` : `${Math.round(rest / 60)} h`}`].filter(Boolean)
-    return `- ${t.provider} ${t.model}${facts.length ? `: ${facts.join(', ')}` : ''}`
+    // what it has shown first (its record, its tests, its speed), then what it can do, then ranks
+    const slow = t.replyMs != null && typical && t.replyMs > Math.max(5000, typical * 3)
+    const facts = [rest > 0 && `out of quota for ${rest < 120 ? `${rest} min` : `${Math.round(rest / 60)} h`}`, failed && `failed ${failed}× this session`, recordLine(stats[`${t.provider} ${t.model}`]), skillsLine(t.skills), t.replyMs != null && `${slow ? 'SLOW: ' : ''}a one-word reply takes it ${(t.replyMs / 1000).toFixed(1)} s`, t.tools === false && 'no tool calls', t.toolsOk === false && "failed a test of doing a job with a tool", t.images && 'images', t.thinking && 'thinking', ranks(t) && `ranked ${ranks(t)}`].filter(Boolean)
+    return `- ${t.provider} ${t.model}${facts.length ? `: ${facts.join('; ')}` : ''}`
   }
+  const stats = loadStats()
+  const times = team.map((t) => t.replyMs).filter((x) => x != null).sort((a, b) => a - b)
+  const typical = times[Math.floor(times.length / 2)] // the median: "slow" is slow next to your others
+  // the models with something to show for themselves first (best first), then the rest in your order
+  const proof = (t) => { const xs = [...Object.values(t.skills ?? {}).filter((r) => r?.score != null).map((r) => r.score), ...((j) => (j.jobs ? [j.passed + j.failed ? j.passed / (j.passed + j.failed) : (j.jobs - j.lost) / j.jobs] : []))(summary(stats[`${t.provider} ${t.model}`]))]; return xs.length ? xs.reduce((a, b) => a + b) / xs.length : null }
+  team = team.map((t) => [t, proof(t)]).sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1)).map(([t]) => t)
   const you = [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking', ranks(s.client) && `ranked ${ranks(s.client)}`].filter(Boolean).join(', ')
-  return { models: team.map(line).join('\n'), you, ranked: Boolean(data) }
+  return { models: team.map(line).join('\n'), you, ranked: Boolean(data), past: s.orchestrating ? similar(s.chat?.turns?.at(-1)?.task, team.map((t) => `${t.provider} ${t.model}`), 6, stats) : '' }
+}
+
+// Test skills' scores (settings page, skilltest.js), in words: "tests: code 90%, web page 75%, …"
+const SKILL_WORDS = { code: 'code', page: 'web page', vision: 'finding things in an image', tools: 'a job with tools' }
+const skillsLine = (k) => {
+  const done = Object.entries(SKILL_WORDS).filter(([key]) => k?.[key] && !k[key].skipped).map(([key, w]) => ((r) => `${w} ${r.slow ? 'no answer in time' : r.error ? 'failed to answer' : `${Math.round(r.score * 100)}%${r.ms ? ` in ${Math.round(r.ms / 1000)} s` : ''}`}`)(k[key]))
+  return done.length ? `tests: ${done.join(', ')}` : ''
 }
 
 const sizeOf = (m) =>
@@ -865,6 +904,7 @@ async function runNative(s, task, images, signal) {
   s.edits = 0 // successful file edits so far this message (to tell a real fix from a lucky rerun)
   s.userSaid = [] // what the user typed with a "no" to a tool call: sent as their message after the results (declined in tools.js)
   s.acted = false // used a tool this message (so a reply that only promises more is a premature stop)
+  s.handed = s.workNudged = false // an orchestrator: handed work out this message; told it wrote the work itself
   let nudged = 0 // reminders sent this message about open todo items, a premature stop, or a Stop hook
   let sinceNudge = true // a tool call made since the last reminder: one that changed nothing isn't sent again (no count: it goes on while the model gets on)
   s.planAsked = false // asked for a plan before its first change, this message
@@ -1003,7 +1043,10 @@ async function runNative(s, task, images, signal) {
     }
     empty = 0
     if (!res.toolCalls.length) {
-      const more = sinceNudge && !s.isSub && ((await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal)))
+      // an orchestrator that wrote the work (a lot of code) in its reply and handed nothing out: told once
+      const didWork = s.orchestrating && !s.handed && !s.workNudged && codeLines(res.content) > 30 && (s.workNudged = true)
+      if (didWork) log('task', 'the orchestrator wrote the work in its reply; telling it to hand it out')
+      const more = didWork ? prompt('agent/orchestrator-did-work') : sinceNudge && (!s.isSub || s.worker) && ((await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal)))
       if (!more) {
         s.wrapUpLater?.(task, res.content) // after the answer, beside what comes next
         return res.content
@@ -1084,6 +1127,12 @@ async function runNative(s, task, images, signal) {
             if (n === 3) out += `\n\n${prompt('agent/same-spot', { file: String(args.path), line: at })}`
           }
           if (args.path) s.changed.add(String(args.path))
+        } else if (name === 'agent' && s.orchestrating) {
+          // the files a model it handed work to changed: changes of this message, for the review (the
+          // model ran its own checks; the orchestrator can't)
+          const was = s.changed.size
+          for (const rel of Object.keys(s.chat.turns.at(-1)?.files ?? {})) s.changed.add(rel)
+          if (s.changed.size > was) s.lastChangeAt = s.lastCheckAt = s.seq
         } else if (CHECKS.has(name)) {
           s.lastCheckAt = s.seq // ran something: a check of what changed (the model judges its result)
           // checking on and on with nothing changed (sleeps, screenshots, play-throughs): told once per
@@ -1260,7 +1309,7 @@ async function learnFromFixes(s, fixed, signal) {
 // The model said it would do something but stopped without doing it ("let me rewrite…", "I'll fix…"):
 // a next action named, then no tool call. Not matched by explanations ("let me explain", "you can run").
 const PROMISED_MORE =
-  /\b(?:let me|i'?ll|i will|i'?m going to|i am going to|i need to|i'?m about to|next,? i'?ll|now,? i'?ll)\b[^.!?\n]{0,70}\b(?:do|make|create|add|fix|write|update|change|implement|build|run|rewrite|replace|edit|install|set ?up|finish|continue|proceed|start|redo|retry|try)\b/i
+  /\b(?:let me|i['’]?ll|i will|i['’]?m going to|i am going to|i need to|i['’]?m about to|next,? i['’]?ll|now,? i['’]?ll)\b[^.!?\n]{0,70}\b(?:do|make|create|add|fix|write|update|change|implement|build|run|rewrite|replace|edit|install|set ?up|finish|continue|proceed|start|redo|retry|try|hand|pass|send|give)\b/i
 
 // Is the task really done, or did the model stop early? Open todo items, or (after it did real work)
 // a reply that only promises more, get one nudge to keep going. Then any Stop hook. null = truly done.
@@ -1286,9 +1335,13 @@ export async function notDone(s, signal, again, reply = '') {
     log('task', 'reply names a next step but no tool call followed; nudging to finish')
     return prompt('agent/stopped-early')
   }
+  if (s.isSub) return null // a helper: the Stop hooks are the main conversation's
   const hook = await runHooks(s, 'Stop', { stop_hook_active: again }, signal)
   return hook.block ? prompt('agent/hook-stop', { reason: hook.block }) : null
 }
+
+// lines inside the reply's fenced code blocks
+export const codeLines = (text) => [...String(text ?? '').matchAll(/```[^\n]*\n([\s\S]*?)```/g)].reduce((n, m) => n + m[1].split('\n').length, 0)
 
 // Files the final answer says were made, that aren't in the project: a path in backticks, or one
 // with a folder, with a source/config/doc extension, while the answer says it created or wrote

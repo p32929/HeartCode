@@ -385,7 +385,7 @@
   .mt-top .chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); border-radius: 8px; padding: 1px 3px 1px 9px; margin: 2px 4px 2px 0; color: var(--text); font-size: 12.5px; }
   .mt-top .chip button { border: 0; background: none; padding: 0 4px; font-size: 12px; color: var(--muted); }
   .mt-scroll { overflow-x: auto; }
-  .mt { min-width: 1080px; }
+  .mt, .mt-h.mt-hpick { min-width: 1680px; } /* the columns below, their gaps and padding: the header, the selection bar and the rows line up (the rows are drawn a screenful at a time, so this can't come from them) */
   .mt-h input[type=checkbox], .mtable input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(--brand); cursor: pointer; }
   .mtable li.picked { background: var(--brand-soft); }
   .mt-rules { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 24px; padding: 12px 18px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
@@ -407,7 +407,7 @@
   .pill .again:hover:not(:disabled) { color: var(--text); }
   .pill.on { border-color: var(--accent); background: var(--accent-soft); }
   .pill.on .again { border-left-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-  .mt-h, .mtable li { display: grid; grid-template-columns: 14px 18px 44px minmax(240px, 1fr) 110px 62px 52px 70px 58px 88px 88px 88px 116px 84px 132px; /* the last: Test · Request · Edit · ✕, as wide as they are */ align-items: center; column-gap: 6px; padding: 8px 18px; }
+  .mt-h, .mtable li { display: grid; grid-template-columns: 14px 18px 44px minmax(240px, 1fr) 110px 62px 52px 70px 58px 88px 88px 88px 116px 84px 196px 84px 132px; /* the last: Test · Request · Edit · ✕, as wide as they are */ align-items: center; column-gap: 6px; padding: 8px 18px; }
   .mt-h button.mid, .mtable .mid { text-align: center; }
   .mt-h > :nth-child(14), .mtable .try { padding-left: 12px; } /* Works?: a little room after the right-aligned price */
   .mtable li .acts { justify-content: flex-start; }
@@ -515,6 +515,21 @@
   @keyframes orchblink { 50% { opacity: .35; } }
   @media (prefers-reduced-motion: reduce) { .ot-table td.on { animation: none; } }
   .ot-problems { margin-top: 16px; }
+  /* Skills (Test skills' scores) and Jobs (its record on real handoffs): small chips, coloured by how it did */
+  #sk { width: min(900px, 94vw); }
+  .skl { display: flex; gap: 4px; min-width: 0; overflow: hidden; }
+  .chip { display: inline-flex; align-items: baseline; gap: 3px; padding: 1px 6px; border-radius: 5px; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: help; background: var(--hover); color: var(--muted); }
+  .chip i { font-style: normal; font-weight: 500; opacity: .75; }
+  .chip.good, .ot-table td.good { background: var(--ok-soft); color: var(--ok); }
+  .chip.mid, .ot-table td.mid { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+  .chip.bad, .ot-table td.bad2 { background: var(--err-soft); color: var(--err); }
+  .skl.none, .jb.none { color: var(--faint); font-size: 12px; }
+  .mtable li button.jb, .mtable li:hover button.jb { all: unset; font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; white-space: nowrap; }
+  .mtable li button.jb:hover { text-decoration: underline; }
+  .jb.good { color: var(--ok); } .jb.mid { color: var(--warn); } .jb.bad { color: var(--err); }
+  .ot-table td.good, .ot-table td.mid, .ot-table td.bad2 { font-weight: 700; border-radius: 0; }
+  .sk-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0 0; font-size: 12.5px; color: var(--muted); }
+  .sk-legend b { color: var(--text); font-weight: 600; }
   .ot-problems h3 { margin: 0 0 6px; font-size: 13px; }
   .ot-problems ul { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); line-height: 1.6; }
   .mt-sets { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
@@ -1089,6 +1104,12 @@
   <p class="sub" id="ot-said"></p>
   <div id="ot-box"></div>
   <div class="actions"><button id="ot-go" type="button">Start</button><span class="spacer"></span><button class="primary" id="ot-close" type="button">Close</button></div>
+</dialog>
+<dialog id="sk" aria-labelledby="sk-title">
+  <h2 id="sk-title">Test skills</h2>
+  <p class="sub" id="sk-said"></p>
+  <div id="sk-box"></div>
+  <div class="actions"><button id="sk-go" type="button">Start</button><span class="spacer"></span><button class="primary" id="sk-close" type="button">Close</button></div>
 </dialog>
 <dialog id="pr" aria-labelledby="pr-title">
   <form>
@@ -1679,7 +1700,8 @@ function triedCell(t) {
   const secs = (r?.ms != null ? ` · ${(r.ms / 1000).toFixed(1)}s` : '') + (r?.at ? ` · tested ${new Date(r.at).toLocaleString()}` : '')
   const [cls, text, about] = !r ? ['', 'not tested', 'send it a short message to see that it really answers (your key, access to it, its name)']
     : r.going ? ['going', 'testing…', 'sending it a short message']
-    : r.ok ? ['ok', `✓ ${(r.ms / 1000).toFixed(1)}s`, `works: it answered "${r.reply}"${secs}`]
+    : r.ok && r.toolsOk === false ? ['ok', `✓ ${(r.ms / 1000).toFixed(1)}s · ✗ tools`, `it answers ("${r.reply}"), but it couldn't do a small job with a tool, so it's a poor choice for work: ${r.toolsWhy}${secs}`]
+    : r.ok ? ['ok', `✓ ${(r.ms / 1000).toFixed(1)}s`, `works: it answered "${r.reply}"${r.toolsOk ? ', and did a small job with a tool' : ''}${secs}`]
     : ['bad', `✗ ${outcome(r)}`, `doesn't work: ${r.error}${secs}`] // the reason on hover
   return h('div', { className: 'try ' + cls }, h('span', { className: 'msg', textContent: text, title: about }))
 }
@@ -2281,9 +2303,9 @@ const setLeads = (list, done) => act('/api/orchestrators', { list: list.map(({ p
 // Test orchestrators: the last results ({ provider, model, passed, of, ms, fails }), best first; testing: one is going
 let orchTests = null
 let orchTesting = false
-const ORCH_TEST_ABOUT = 'Checks each orchestrator on 5 short scenes, then puts the best first'
+const ORCH_TEST_ABOUT = 'Checks each orchestrator on a few short scenes, then puts the best first'
 // the scenes (src/orchtest.js), as the dialog's columns: [short name, what passing means]
-const ORCH_SCENES = [['Hello', 'answers "hi" itself'], ['Small job', 'hands a small job to one model'], ['Big job', 'hands a big job to one model'], ['After a failure', 'picks another model when its choice failed'], ['Reports back', 'tells you the result instead of handing the work out again']]
+const ORCH_SCENES = [['Hello', 'answers "hi" itself'], ['Question', 'answers a question it knows itself, without handing it out'], ['Small job', 'hands a small job to one model'], ['Big job', 'hands a big job to one model with a prompt it can work from and a check that proves it, without writing the work itself'], ['After a failure', 'picks another model when its choice failed, with a check'], ['Reports back', 'tells you the result instead of handing the work out again']]
 // while it runs: the server's orchtest events; each cell's time counted on the page
 let orchLive = null
 const orchSince = new Map() // "provider model" → [scene number, when the page saw it start]
@@ -2293,7 +2315,7 @@ function fillOrch() {
   const total = (list?.length ?? 0) * ORCH_SCENES.length
   const done = list?.reduce((n, r) => n + r.steps.length, 0) ?? 0
   $('ot-said').textContent = orchTesting ? (list ? `Testing… ${done} of ${total} done. Nothing is actually run.` : 'Starting…')
-    : list ? 'Done. Your orchestrators are now in this order.' : 'Each orchestrator gets 5 short scenes. Nothing is actually run; the best go first.'
+    : list ? 'Done. Your orchestrators are now in this order: fewest mistakes first.' : `Each orchestrator gets ${ORCH_SCENES.length} short scenes, each asked twice (the worse counts). Nothing is actually run; the best go first.`
   $('ot-go').textContent = orchTesting ? 'Testing…' : list ? 'Test again' : 'Start'
   $('ot-go').disabled = orchTesting
   if (!list?.length) return put($('ot-box'))
@@ -2308,7 +2330,7 @@ function fillOrch() {
   }
   // one line per orchestrator, what it did wrong (not answering in time is the ⏱ in its cells)
   const problems = list.map((r) => [r, [...new Set(r.steps.filter((st) => !st.ok && !st.slow).map((st) => st.why))]]).filter(([, w]) => w.length)
-    .map(([r, w]) => h('li', {}, h('b', { textContent: r.model }), `: ${w.join('; ')}`))
+    .map(([r, w]) => h('li', {}, h('b', { textContent: r.model }), h('span', { className: 'muted', textContent: ` ${r.provider}` }), `: ${w.join('; ')}`))
   const slow = list.some((r) => r.steps.some((st) => st.slow))
   put($('ot-box'),
     h('table', { className: 'ot-table' },
@@ -2345,6 +2367,104 @@ function showOrchTest(d) {
   const b = document.querySelector('.orch-go') // the button's count, without drawing the table again
   if (b) b.textContent = `Testing… ${d.list.reduce((n, r) => n + r.steps.length, 0)}/${d.list.length * ORCH_SCENES.length}`
 }
+// --- Skills: what a model has shown. Test skills' scores (src/skilltest.js: each job checked by
+// HeartCode, not by a model) and its record on real jobs the orchestrator handed it (stats.js) ---
+let RECORDS = {} // "provider/model" → { jobs, passed, failed, unchecked, lost, ms }
+const SKILL_COLS = [['code', 'Code', 'code', 'writes a function; HeartCode runs hidden tests on it'], ['page', 'Web page', 'web', 'builds a small app; HeartCode uses it in a real browser, on a desktop and a phone'], ['vision', 'Vision', 'see', 'finds a shape in a picture and counts others (the answer is known)'], ['tools', 'Tools', 'tools', "fixes a bug with HeartCode's own tools"]]
+const grade = (r) => (!r || r.skipped ? 'none' : r.slow ? 'slow' : r.error ? 'bad' : r.score >= 0.8 ? 'good' : r.score >= 0.5 ? 'mid' : 'bad')
+const scoreText = (r) => (!r ? '·' : r.skipped ? '—' : r.slow ? '⏱' : r.error ? '✗' : `${Math.round(r.score * 100)}`)
+const skillAbout = (name, r) => (!r ? `${name}: not tested` : r.skipped ? `${name}: not tested (${r.why})` : r.slow ? `${name}: ${r.why}` : r.error ? `${name}: the request failed: ${r.why}` : `${name}: ${Math.round(r.score * 100)} of 100 · ${r.why} · took ${secs(r.ms)}`)
+const skillAvg = (t) => { const k = TRIES[keyOf(t)]?.skills; const xs = SKILL_COLS.map(([key]) => k?.[key]).filter((r) => r?.score != null).map((r) => r.score); return xs.length ? xs.reduce((a, b) => a + b) / xs.length : null }
+function skillsCell(t) {
+  const k = TRIES[keyOf(t)]?.skills
+  if (!k) return h('span', { className: 'skl none', textContent: '–', title: 'not measured yet: Test skills' })
+  return h('span', { className: 'skl' }, SKILL_COLS.filter(([key]) => k[key] && !k[key].skipped).map(([key, name, short]) => h('span', { className: `chip ${grade(k[key])}`, title: `${skillAbout(name, k[key])}\n(Test skills, ${new Date(k.at).toLocaleString()})` }, h('i', { textContent: short }), scoreText(k[key]))))
+}
+function jobsCell(t) {
+  const j = RECORDS[keyOf(t)]
+  if (!j?.jobs) return h('span', { className: 'jb none', textContent: '–', title: 'no work handed to it yet' })
+  const checked = j.passed + j.failed
+  const rate = checked ? j.passed / checked : (j.jobs - j.lost) / j.jobs
+  return h('button', { type: 'button', className: `jb ${rate >= 0.8 ? 'good' : rate >= 0.5 ? 'mid' : 'bad'}`, title: `Its last ${j.jobs} job${j.jobs === 1 ? '' : 's'} from the orchestrator: ${j.passed} passed HeartCode's check, ${j.failed} failed it, ${j.unchecked} had nothing to check, ${j.lost} got no answer${j.ms ? `; about ${secs(j.ms)} each` : ''}.\nThe orchestrator sees this when it picks a model. Click to clear it.`, onclick: async () => {
+    if (!confirm(`Clear ${t.model}'s record of ${j.jobs} job${j.jobs === 1 ? '' : 's'}? (For when its provider now serves something else under this name.)`)) return
+    const r = await act('/api/jobs/forget', { provider: t.provider, model: t.model }, `${t.model}: record cleared`)
+    if (r) (RECORDS = r.jobs), drawMine(S)
+  } }, checked ? `${j.passed}/${checked} passed` : `${j.jobs - j.lost}/${j.jobs} done`, j.ms ? h('span', { className: 'muted', textContent: ` · ${secs(j.ms)}` }) : '')
+}
+// Test skills: the dialog. skillLive: the run going (the server's skilltest events); skillLast: the last run's rows
+let skillLive = null
+let skillLast = null
+let skillTick = 0
+const skillTesting = () => Boolean(skillLive && !skillLive.over)
+function skillTargets() {
+  const picked = S.order.filter((t) => PICKED.has(keyOf(t)))
+  if (picked.length) return { list: picked, what: `the ${picked.length} selected` }
+  const works = S.order.filter((t) => TRIES[keyOf(t)]?.ok)
+  return works.length ? { list: works, what: `your ${works.length} working model${works.length === 1 ? '' : 's'}` } : { list: S.order, what: `all ${S.order.length} models` }
+}
+function fillSkills() {
+  const live = skillLive?.rows ?? skillLast
+  const going = skillTesting()
+  const wait = Math.round((skillLive?.wait ?? (S.settings.testTimeout ?? 10) * 6000) / 1000)
+  const target = skillTargets()
+  const done = live?.reduce((n, r) => n + Object.keys(r.cells).length, 0) ?? 0
+  const total = live?.reduce((n, r) => n + SKILL_COLS.length, 0) ?? 0
+  $('sk-said').textContent = going ? `Testing… ${done} of ${total}` : live ? `Done. The orchestrator now sees these scores when it picks a model.` : `Four small jobs for ${target.what}. HeartCode checks every result itself, by running it.`
+  $('sk-go').textContent = going ? 'Stop' : live ? `Test again (${target.list.length})` : `Start (${target.list.length})`
+  $('sk-go').classList.toggle('danger', going)
+  const legend = h('div', { className: 'sk-legend' }, SKILL_COLS.map(([, name, , about]) => h('span', {}, h('b', { textContent: name }), ` ${about}`)))
+  if (!live?.length) return put($('sk-box'), legend, h('p', { className: 'ot-note', textContent: `Up to ${wait}s per answer (Tests wait × 6). Select rows first to test only those.` }))
+  const cell = (r, key) => {
+    const c = r.cells[key]
+    if (c) return h('td', { className: c.skipped ? 'wait' : c.slow ? 'slow' : grade(c) === 'bad' ? 'bad2' : grade(c), textContent: scoreText(c), title: skillAbout(SKILL_COLS.find((x) => x[0] === key)[1], c) })
+    if (r.now?.skill === key) return h('td', { className: 'on', textContent: `${Math.round((Date.now() - r.now.since) / 1000)}s`, title: 'waiting for its answer' })
+    return h('td', { className: 'wait', textContent: '·' })
+  }
+  const total2 = (r) => { const xs = Object.values(r.cells).filter((c) => c.score != null); return xs.length ? Math.round((xs.reduce((a, c) => a + (c.score ?? 0), 0) / xs.length) * 100) : null }
+  const rows = [...live].sort((a, b) => (going ? 0 : (total2(b) ?? -1) - (total2(a) ?? -1)))
+  put($('sk-box'),
+    h('table', { className: 'ot-table' },
+      h('thead', {}, h('tr', {}, h('th', { textContent: 'Model' }), SKILL_COLS.map(([, name, , about]) => h('th', { textContent: name, title: about })), h('th', { textContent: 'Overall', title: 'the average of the jobs it answered' }), h('th', { textContent: 'Time', title: 'all its jobs together' }))),
+      h('tbody', {}, rows.map((r) => h('tr', {},
+        h('td', { className: 'name' }, h('b', { textContent: r.model }), h('span', { className: 'muted', textContent: ` ${r.provider}` })),
+        SKILL_COLS.map(([key]) => cell(r, key)),
+        h('td', { className: 'num', textContent: total2(r) ?? '' }),
+        h('td', { className: 'num muted', textContent: secs(Object.values(r.cells).reduce((a, c) => a + (c.ms ?? 0), 0) || null) }))))),
+    h('p', { className: 'ot-note', textContent: `Scores out of 100 · ⏱ no answer within ${wait}s · — it can't do that kind of job · hover a cell for why` }))
+}
+const openSkills = () => (fillSkills(), $('sk').open || $('sk').showModal())
+$('sk-close').onclick = () => $('sk').close()
+$('sk-go').onclick = () => (skillTesting() ? act('/api/skills/stop', {}, 'stopping after the jobs going now') : testSkillsNow())
+async function testSkillsNow(list = skillTargets().list) {
+  skillLive = { rows: list.map((t) => ({ provider: t.provider, model: t.model, cells: {} })) }
+  clearInterval(skillTick)
+  skillTick = setInterval(fillSkills, 1000)
+  openSkills()
+  drawMine(S)
+  skillMine = true
+  const r = await act('/api/skills/test', { only: list.map(({ provider, model }) => ({ provider, model })) })
+  skillMine = false
+  clearInterval(skillTick)
+  if (r?.results) Object.assign(TRIES, r.results), (skillLast = r.rows)
+  skillLive = null
+  drawMine(S)
+  fillSkills()
+}
+let skillMine = false // this page started the run (its request's answer ends it here)
+function showSkillTest(d) {
+  if (d.over) {
+    if (skillMine) return // testSkillsNow ends it
+    skillLive = null
+    skillLast = d.rows
+    clearInterval(skillTick)
+    api('/api/tests', {}).then(({ results }) => (Object.assign(TRIES, results), drawMine(S), $('sk').open && fillSkills()), () => {})
+    return
+  }
+  skillLive = d
+  if ($('sk').open) fillSkills()
+  const b = document.querySelector('.skill-go')
+  if (b) b.textContent = `Testing skills… ${d.rows.reduce((n, r) => n + Object.keys(r.cells).length, 0)}/${d.rows.length * SKILL_COLS.length}`
+}
 const can = (t) => ({ tools: t.tested ? t.tested.mode === 'tools' : t.known?.tools !== false, thinking: Boolean(t.tested ? t.tested.thinking : t.known?.thinking), images: Boolean(t.tested ? t.tested.vision : t.known?.images) })
 // Every column sorts by the value it shows: up (↑) smallest first, down (↓) largest first. first: the
 // direction of the first click (the useful one). get: the value; null when there's none (no price, no
@@ -2366,6 +2486,8 @@ const COLS = {
   // in and out together, per million tokens
   price: { label: 'Price $/M', first: 'up', get: (t) => (t.price?.input == null && t.price?.output == null ? null : (t.price.input ?? 0) + (t.price.output ?? 0)), words: ['cheapest first', 'priciest first'] },
   // its test's time (seconds, as shown); failed or not tested: no time, at the end (not tested before failed)
+  skills: { label: 'Skills', first: 'down', get: skillAvg, words: ['lowest first', 'highest first'] },
+  jobs: { label: 'Jobs', first: 'down', get: (t) => { const j = RECORDS[keyOf(t)]; return j?.jobs ? (j.passed + j.failed ? j.passed / (j.passed + j.failed) : (j.jobs - j.lost) / j.jobs) : null }, words: ['worst first', 'best first'] },
   works: { label: 'Works?', first: 'up', get: (t) => { const r = TRIES[keyOf(t)]; return r?.ok && !r.going ? r.ms ?? 0 : null }, missing: (t) => { const r = TRIES[keyOf(t)]; return !r || r.going ? 0 : 1 }, words: ['fastest first', 'slowest first'] },
 }
 let SORT = []
@@ -2598,7 +2720,7 @@ function drawMine(s) {
     cell('New message to', fit ? 'each message starts on an orchestrator' : 'the model a new message goes to first',
       h('select', { disabled: fit, onchange: (e) => saveOrder(S.order, 'saved', { next: e.target.value }) },
         [['first', '#1'], ['stay', 'the last that worked']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.next === v })))),
-    cell('Tests wait', 'every model test: Test, Test all, Request, and each scene of Test orchestrators',
+    cell('Tests wait', 'every model test: Test, Test all, Request, and each scene of Test orchestrators (Test skills: six times this, for real jobs)',
       h('input', { type: 'number', min: 1, max: 600, step: 1, value: S.settings.testTimeout ?? 10, 'aria-label': 'Test timeout in seconds', onchange: (e) => {
         const v = Math.round(Number(e.target.value))
         if (!(v >= 1 && v <= 600)) return (e.target.value = S.settings.testTimeout ?? 10), toast('a whole number of seconds, 1 to 600', true)
@@ -2610,6 +2732,7 @@ function drawMine(s) {
     h('span', { className: 'count', title: SORT.length ? `sorted by ${SORT.map(({ key, dir }) => `${COLS[key].label} ${COLS[key].words[dir === 'up' ? 0 : 1]}`).join(', then ')}; ties keep your order` : '' }, filtered ? [h('b', { textContent: n(shown.length) }), ` of ${n(order.length)}`] : [h('b', { textContent: n(order.length) }), ` model${order.length === 1 ? '' : 's'}`]),
     busy ? h('span', { className: 'sort-live', textContent: `${testingAll ? 'testing' : 'updating'}: filters and changes wait until it's done (or Stop)` }) : null,
     filtering() || SORT.length ? h('button', { className: 'small ghost', textContent: 'Clear', title: 'every filter and the sort off: your whole list, in your order', onclick: clearView }) : null,
+    h('button', { className: 'small skill-go', textContent: skillTesting() ? 'Testing skills…' : 'Test skills', title: 'four small real jobs per model (code, a web page, vision, tools), each checked by HeartCode: the orchestrator then picks models by what they showed', onclick: openSkills }),
     S.settings.modelChoice === 'fit' && (S.orchestrators ?? []).length ? h('button', { className: 'small orch-go', textContent: orchTesting ? 'Testing…' : 'Test orchestrators', title: ORCH_TEST_ABOUT, onclick: openOrch }) : null,
     h('button', { className: 'small', textContent: filtered ? `Test ${n(shown.length)}` : 'Test all', disabled: testingAll || !shown.length, title: `send ${filtered ? 'the models shown' : 'each model'} a short message to see which really answer`, onclick: () => tryAll(filtered ? shown : order) }),
     h('button', { className: 'small primary', textContent: filtered ? `Use only these ${n(view.length)}` : 'Save order', disabled: !view.length || order.length < 2, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : S.settings.modelChoice === 'fit' ? 'keep the order shown: the orchestrator sees the others in this order, and a failed model goes to the next' : 'HeartCode uses them in the order shown (#1 first)', onclick: saveList }))
@@ -2628,6 +2751,7 @@ function drawMine(s) {
         h('div', { className: 'mt-pickbar' },
           h('b', { textContent: `${n(PICKED.size)} selected` }),
           h('button', { className: 'small', textContent: 'Test', disabled: testingAll, onclick: () => tryAll(pickedList) }),
+          h('button', { className: 'small', textContent: 'Test skills', disabled: skillTesting(), title: 'four small real jobs each (code, a web page, vision, tools), checked by HeartCode', onclick: () => testSkillsNow(pickedList) }),
           ...(S.settings.modelChoice === 'fit' ? ((now, same) => {
             const inLead = pickedList.filter((t) => now.some((o) => same(o, t)))
             const toAdd = pickedList.filter((t) => can(t).tools && !now.some((o) => same(o, t)))
@@ -2646,7 +2770,7 @@ function drawMine(s) {
           h('button', { className: 'small ghost', textContent: 'Invert', title: "select the ones shown that aren't selected, unselect the ones that are", onclick: () => (view.forEach((t) => (PICKED.has(keyOf(t)) ? PICKED.delete(keyOf(t)) : PICKED.add(keyOf(t)))), (lastPicked = null), drawMine(S)) }),
           h('button', { className: 'small ghost', textContent: 'Select none', onclick: () => (PICKED.clear(), drawMine(S)) })))
     : h('div', { className: 'mt mt-h' }, h('span'), selectAll,
-        h('span', { textContent: '#', title: 'its place in your list' }), head('model'), head('provider'), head('context', 'num'), head('tools', 'mid'), head('thinking', 'mid'), head('images', 'mid'), head('coding', 'num'), head('web', 'num'), head('vision', 'num'), head('price', 'num'), head('works'), h('span', { className: 'num', textContent: '' }))
+        h('span', { textContent: '#', title: 'its place in your list' }), head('model'), head('provider'), head('context', 'num'), head('tools', 'mid'), head('thinking', 'mid'), head('images', 'mid'), head('coding', 'num'), head('web', 'num'), head('vision', 'num'), head('price', 'num'), head('works'), head('skills'), head('jobs'), h('span', { className: 'num', textContent: '' }))
   const table = view.length ? h('ol', { className: 'mtable' + (view.length < 2 || busy ? '' : ' drag') }) : null
   // ticked or not; with Shift, every row from the last one ticked to this one
   const pick = (i, e) => {
@@ -2735,6 +2859,8 @@ function tableRow(t, at, pick) {
     rankCell(t, 'coding'), rankCell(t, 'web'), rankCell(t, 'vision'),
     h('span', { className: 'num price', textContent: priceOf(t), title: t.price ? `in ${money(t.price.input)} · out ${money(t.price.output)} per million tokens` : 'price not known' }),
     triedCell(t),
+    skillsCell(t),
+    jobsCell(t),
     h('span', { className: 'acts' },
       h('button', { type: 'button', className: 'small ghost ib k-test row-test', disabled: going || busy, title: going ? 'testing…' : 'Test: send it a short message to see that it really answers', 'aria-label': `test ${t.model}`, onclick: () => tryModel(t) }, ic(going ? 'clock' : 'play')),
       h('button', { type: 'button', className: 'small ghost ib k-info', title: 'Request: send it "Hello" and see exactly what was sent and what came back', 'aria-label': `raw request to ${t.model}`, onclick: () => hello(t.provider, t.model) }, ic('eye')),
@@ -3502,7 +3628,7 @@ else {
   api('/api/state').then(render, (e) => toast(e.message, true)).finally(() => job('state'))
 
     .then(() => api('/api/tests', {}))
-    .then(({ results, run }) => (Object.assign(TRIES, results), showRun(run)), (e) => toast(`the tests so far: ${e.message}`, true)) // and one going
+    .then(({ results, run, jobs, skills }) => (Object.assign(TRIES, results), (RECORDS = jobs ?? {}), skills && ((skillLive = skills), (skillTick = setInterval(() => $('sk').open && fillSkills(), 1000))), showRun(run)), (e) => toast(`the tests so far: ${e.message}`, true)) // and one going
   job('requests', { where: ['requests'], what: 'Loading the request log', detail: 'every request HeartCode logged' })
   api('/api/requests').then(({ items }) => ((REQS = items), drawReqs()), () => ((REQS = []), drawReqs())).finally(() => job('requests'))
 }
@@ -3538,6 +3664,7 @@ if (token) {
   })
   events.addEventListener('testrun', (e) => showRun(JSON.parse(e.data)))
   events.addEventListener('orchtest', (e) => showOrchTest(JSON.parse(e.data)))
+  events.addEventListener('skilltest', (e) => showSkillTest(JSON.parse(e.data)))
   // many at once (thousands of models added): taken in once a frame, the table drawn once
   const news = new Map()
   events.addEventListener('test', (e) => {

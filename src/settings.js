@@ -13,7 +13,7 @@ import { newer } from './update.js'
 import { DEFAULT_SERVERS, mcpAuth } from './mcp.js'
 import { sections, BUILTIN_PROMPTS } from './prompts.js'
 import { Client } from './client.js'
-import { clip } from './tools.js'
+import { clip, TOOL_DEFS } from './tools.js'
 import { loadProfile, strategy, profilePath, profileFrom } from './probe.js'
 import { loadPrices, priceOf, limitsOf } from './usage.js'
 import { THEMES, PERMISSIONS } from './ui.js'
@@ -24,6 +24,8 @@ import { connect, sendTelegram, tokenHint, tgReady, EVENTS } from './telegram.js
 import { searchSettings, testSearxng, ENGINE_NAMES } from './web.js'
 import { loadRankings, rankings, rankIn } from './rankings.js'
 import { testOrchestrator } from './orchtest.js'
+import { testSkills } from './skilltest.js'
+import { loadStats, summary, forget as forgetJobs } from './stats.js'
 // a model's places in the rankings shown on Your models: { coding, web, vision } as { rank, of, as }
 const RANKED_ON = { coding: 'text:coding', web: 'webdev:webdev', vision: 'vision:overall' }
 const ranksOf = (model, data) => (data ? Object.fromEntries(Object.entries(RANKED_ON).map(([k, list]) => [k, rankIn(model, list, data)])) : null)
@@ -247,6 +249,11 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   // How long a model test waits for its answer (cfg.testTimeout, seconds; the settings page sets it).
   const testWait = () => (Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10) * 1000
   const noAnswer = () => `no answer within ${testWait() / 1000} seconds`
+  const skillWait = () => testWait() * 6
+  let skillRun = null
+  const skillLive = () => ({ rows: skillRun.rows, wait: skillRun.wait })
+  // each model's record of handed-out jobs (stats.js), "provider/model" → { jobs, passed, failed, unchecked, lost, ms }
+  const jobsNow = () => Object.fromEntries(Object.entries(loadStats()).map(([k, list]) => [k.replace(' ', '/'), summary(list)]))
   // Never throws: { ok, ms, reply } or { ok: false, ms, status, error }; { stopped } when stop
   // (a run's Stop) cancels it.
   async function tryOne({ provider, model }, stop) {
@@ -259,16 +266,38 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       const r = await c.chat({ messages: [{ role: 'user', content: 'Reply with just the word OK.' }], stream: true }, { signal })
       const reply = (r.content || '').trim()
       if (!reply && !r.toolCalls.length) return { ok: false, ms: Date.now() - t0, error: `it answered with nothing${r.usage?.completion_tokens ? ` (${r.usage.completion_tokens} tokens it said it wrote)` : ''}` }
-      return { ok: true, ms: Date.now() - t0, reply: reply.slice(0, 80) }
+      const ms = Date.now() - t0
+      return { ok: true, ms, reply: reply.slice(0, 80), ...(testedOf({ provider, model })?.mode === 'tools' && (await toolTest(c, stop))) }
     } catch (e) {
       if (stop?.aborted) return { stopped: true }
       return { ok: false, ms: Date.now() - t0, status: e.status ?? null, error: e.name === 'TimeoutError' ? noAnswer() : whyFailed(e), ...(e.retryAfter > 0 && { retryAfter: Number(e.retryAfter) }) }
     }
   }
+  // A model that says it calls tools: can it do work with one? One of HeartCode's own tools and a
+  // small job; a call that does it passes. { toolsOk, toolsWhy }; nothing when it didn't answer in time.
+  async function toolTest(c, stop) {
+    const tools = TOOL_DEFS.filter((f) => f.name === 'write_file').map((f) => ({ type: 'function', function: f }))
+    try {
+      const signal = stop ? AbortSignal.any([AbortSignal.timeout(testWait()), stop]) : AbortSignal.timeout(testWait())
+      const r = await c.chat({ messages: [{ role: 'user', content: 'Create the file notes.txt containing exactly: hello' }], tools, stream: true }, { signal })
+      const call = r.toolCalls.find((x) => x.function.name === 'write_file')
+      if (!call) return { toolsOk: false, toolsWhy: r.toolCalls.length ? `it called ${r.toolCalls[0].function.name} instead of write_file` : `it answered in text instead of calling the tool: "${clip((r.content || '').trim(), 80)}"` }
+      let a
+      try {
+        a = JSON.parse(call.function.arguments || '{}')
+      } catch {
+        return { toolsOk: false, toolsWhy: `its tool call isn't valid JSON: ${clip(call.function.arguments, 80)}` }
+      }
+      return /notes\.txt$/.test(String(a.path ?? '')) && /hello/i.test(String(a.content ?? '')) ? { toolsOk: true } : { toolsOk: false, toolsWhy: `wrong arguments: ${clip(call.function.arguments, 100)}` }
+    } catch (e) {
+      if (stop?.aborted || e.name === 'TimeoutError') return {}
+      return { toolsOk: false, toolsWhy: `a request with tools failed: ${whyFailed(e)}` }
+    }
+  }
   // result: kept and sent to the page (given: a test already made, as a run decided to end it)
   async function testOne(t, given) {
     const key = `${t.provider}/${t.model}`
-    const result = { ...(given ?? (await tryOne(t))), at: Date.now() }
+    const result = { ...(given ?? (await tryOne(t))), at: Date.now(), ...(tests[key]?.skills && { skills: tests[key].skills }) } // Test skills' scores stay
     tests[key] = result
     saveTests()
     emit('tested', { key, result })
@@ -570,12 +599,12 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       return state()
     },
     // Test orchestrators: each marked one gets the same few scenes (src/orchtest.js), all at once;
-    // the list is then put in order, the most passed first (the quicker on a tie)
+    // the list is then put in order: the fewest mistakes first, then the fewest timeouts, then the quickest
     'POST /api/orchestrators/test': async () => {
       const lead = (cfg.orchestrators ?? []).filter((t) => cfg.providers[t.provider])
       if (!lead.length) throw new Error('mark models as orchestrators first')
       const isLead = (t) => lead.some((o) => o.provider === t.provider && o.model === t.model)
-      const team = state().order.filter((t) => !isLead(t)).map((t) => ({ provider: t.provider, model: t.model, tools: t.tested ? t.tested.mode === 'tools' : t.known?.tools !== false, images: Boolean(t.tested ? t.tested.vision : t.known?.images), thinking: Boolean(t.tested ? t.tested.thinking : t.known?.thinking) }))
+      const team = state().order.filter((t) => !isLead(t)).map((t) => ({ provider: t.provider, model: t.model, tools: t.tested ? t.tested.mode === 'tools' : t.known?.tools !== false, images: Boolean(t.tested ? t.tested.vision : t.known?.images), thinking: Boolean(t.tested ? t.tested.thinking : t.known?.thinking), toolsOk: tests[`${t.provider}/${t.model}`]?.toolsOk, replyMs: tests[`${t.provider}/${t.model}`]?.ok ? tests[`${t.provider}/${t.model}`].ms : undefined, skills: tests[`${t.provider}/${t.model}`]?.skills }))
       if (!team.length) throw new Error('no models left to hand work to: an orchestrator needs some of your models that aren\'t orchestrators')
       // the page sees it as it goes: each orchestrator's scene now and what it did in the ones done
       const live = lead.map((t) => ({ provider: t.provider, model: t.model, steps: [], now: null }))
@@ -587,7 +616,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
         show()
       })) })))
       show(true)
-      results.sort((a, b) => b.passed - a.passed || a.ms - b.ms)
+      results.sort((a, b) => a.fails.length - b.fails.length || a.slow - b.slow || a.ms - b.ms) // fewest mistakes, then fewest without an answer in time, then the quickest
       cfg.orchestrators = results.map(({ provider, model }) => ({ provider, model }))
       save('setting:orchestrators')
       log('fit', results.map((r) => `${r.provider} ${r.model}: ${r.passed}/${r.of} in ${r.ms}ms${r.fails.length ? ` (${r.fails.map((f) => `${f.scene}: ${f.why}`).join('; ')})` : ''}`).join('\n'))
@@ -622,7 +651,46 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
         return { sent, received: { error: e.name === 'TimeoutError' ? noAnswer() : `couldn't send it: ${e.cause?.code || e.cause?.message || e.message}`, ms: Date.now() - t0 } }
       }
     },
-    'POST /api/tests': () => ({ results: tests, run: run && { ...runState(), pending: [...run.pending] } }),
+    'POST /api/tests': () => ({ results: tests, run: run && { ...runState(), pending: [...run.pending] }, jobs: jobsNow(), skills: skillRun && skillLive() }),
+    // Test skills: small jobs scored by HeartCode itself (src/skilltest.js): the models given, else
+    // your models that answered their last test (else all). Every provider at once, its models one at
+    // a time (a free tier isn't flooded). Each answer may take Tests wait × 6: these are real jobs.
+    'POST /api/skills/test': async ({ only } = {}) => {
+      if (skillRun) throw new Error('Test skills is running: wait for it, or stop it')
+      const order = state().order
+      const pick = Array.isArray(only) ? order.filter((t) => only.some((o) => o?.provider === t.provider && o?.model === t.model)) : order.filter((t) => tests[`${t.provider}/${t.model}`]?.ok)
+      const list = pick.length || Array.isArray(only) ? pick : order
+      if (!list.length) throw new Error('no model to test')
+      const can = (t) => ({ tools: t.tested ? t.tested.mode === 'tools' : t.known?.tools !== false, images: Boolean(t.tested ? t.tested.vision : t.known?.images) })
+      skillRun = { stop: new AbortController(), rows: list.map((t) => ({ provider: t.provider, model: t.model, can: can(t), cells: {}, now: null })), wait: skillWait() }
+      const show = (over) => emit('skilltest', { ...skillLive(), over })
+      show()
+      const byProvider = new Map()
+      for (const r of skillRun.rows) byProvider.set(r.provider, [...(byProvider.get(r.provider) ?? []), r])
+      await Promise.all([...byProvider.values()].map(async (rows) => {
+        for (const r of rows) {
+          if (skillRun.stop.signal.aborted) break
+          const c = clientFor(r)
+          c.purpose = 'test'
+          const out = await testSkills(c, r.can, skillRun.wait, skillRun.stop.signal, (st) => {
+            if (st.now) r.now = { skill: st.skill, since: Date.now() }
+            else (r.now = null), (r.cells[st.skill] = st)
+            show()
+          })
+          const key = `${r.provider}/${r.model}`
+          if (Object.keys(out).length) (tests[key] = { ...tests[key], skills: { ...tests[key]?.skills, ...out, at: Date.now() } }), saveTests()
+        }
+      }))
+      const rows = skillRun.rows
+      const stopped = skillRun.stop.signal.aborted
+      skillRun = null
+      emit('skilltest', { rows, wait: skillWait(), over: true, stopped })
+      log('fit', `Test skills: ${rows.map((r) => `${r.provider} ${r.model}: ${Object.entries(r.cells).map(([k, v]) => `${k} ${v.score != null ? Math.round(v.score * 100) + '%' : v.slow ? 'no answer in time' : v.skipped ? '-' : 'failed'}`).join(', ')}`).join('\n')}`)
+      return { rows, results: tests }
+    },
+    'POST /api/skills/stop': () => (skillRun?.stop.abort(), {}),
+    // a model's record of handed-out jobs, cleared (its provider now serves something else under that name)
+    'POST /api/jobs/forget': ({ provider, model }) => (forgetJobs(`${provider} ${model}`), { jobs: jobsNow() }),
     // a run: all your models, or the ones given (only); one at a time if one is going already
     'POST /api/tests/start': ({ only } = {}) => {
       if (run) throw new Error('a test is running: wait for it, or stop it')
