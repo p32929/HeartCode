@@ -9,9 +9,9 @@ import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import zlib from 'node:zlib'
 import { HOME } from './config.js'
+import { log } from './log.js'
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 const tail = (t, n = 2500) => ((t = String(t).trim()), t.length > n ? `…${t.slice(-n)}` : t)
@@ -253,53 +253,15 @@ export async function browseFile(root, target, fn, opts) {
   }
 }
 
-// --- a handoff's check ---
-// { ok, report }: report says what was checked and how it went (the output of a failed command)
-// (Esc meanwhile: an AbortError, not a failed check.) note(text): what it's doing (fetching a browser)
-export async function runCheck(root, check, signal, note) {
-  const c = String(check ?? '').trim()
-  const page = /^page\s+(.+)$/i.exec(c)
-  const r = page ? await pageCheck(root, page[1].trim().replace(/^["']|["']$/g, ''), signal, null, note) : await commandCheck(root, c, signal)
-  if (signal?.aborted) throw Object.assign(new Error('stopped by the user'), { name: 'AbortError' })
-  return r
-}
-
-// "heartcode page <file|url>": the same check from a shell (a model checks its own page), with
+// --- a page's check ---
+// "heartcode page <file|url>": a page checked from a shell (a model checks its own page), with
 // screenshots at desktop and phone size in .heartcode/page-shots/ to look at. Exit 0 when it passes.
-export const PAGE_COMMAND = `"${process.execPath}" "${fileURLToPath(new URL('../bin/heartcode.js', import.meta.url))}" page`
 export async function pageCommand(target) {
   if (!target) return console.error('usage: heartcode page <file or URL>'), 2
   const shots = path.join(process.cwd(), '.heartcode', 'page-shots')
   const r = await pageCheck(process.cwd(), target, null, shots, (t) => console.error(t))
   console.log(`${r.ok ? 'PASSED' : 'FAILED'}: ${r.report}`)
   return r.ok ? 0 : 1
-}
-
-// a command must end by itself: one that's still going after this is a server or a watcher, not a check
-const COMMAND_WAIT = 5 * 60_000
-function commandCheck(root, cmd, signal) {
-  return new Promise((done) => {
-    const t0 = Date.now()
-    const p = spawn(cmd, { cwd: root, shell: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] })
-    let out = ''
-    p.stdout.on('data', (d) => (out = (out + d).slice(-20_000)))
-    p.stderr.on('data', (d) => (out = (out + d).slice(-20_000)))
-    const kill = () => {
-      try {
-        process.platform === 'win32' ? p.kill() : process.kill(-p.pid, 'SIGKILL')
-      } catch {}
-    }
-    const timer = setTimeout(() => ((out += `\n(still running after ${COMMAND_WAIT / 60_000} minutes: stopped. A check must end by itself: no servers or watchers; for a web page use "page <file>")`), kill()), COMMAND_WAIT)
-    const onAbort = () => kill()
-    signal?.addEventListener('abort', onAbort, { once: true })
-    p.on('error', (e) => (out += `\n${e.message}`))
-    p.on('close', (code) => {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', onAbort)
-      const ok = code === 0
-      done({ ok, report: `\`${cmd}\` ${ok ? 'passed' : `failed (exit ${code ?? 'killed'})`} in ${Math.round((Date.now() - t0) / 1000)} s${out.trim() ? `:\n${tail(out)}` : ''}` })
-    })
-  })
 }
 
 // A web page: it loads without errors, shows something, and pressing its first button and a few keys
@@ -322,6 +284,7 @@ async function pageCheck(root, target, signal, shots, note) {
         const shown = [...document.querySelectorAll('body *')].filter((e) => { const r = e.getBoundingClientRect(), st = getComputedStyle(e); return r.width * r.height > 4 && st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) > 0 })
         return { shown: shown.length, text: (document.body?.innerText ?? '').trim().length, canvas: shown.filter((e) => e.tagName === 'CANVAS').length, pictures: shown.filter((e) => /^(IMG|SVG|VIDEO)$/.test(e.tagName)).length, wide: document.documentElement.scrollWidth > innerWidth + 1 }
       })()`)
+      const looks = await page.run(LOOKS).catch((e) => (log('check', `looks: ${e.message}`), null))
       const atLoad = page.errors.length
       const saved = []
       let tooSlow = '' // a screenshot this computer couldn't take in time: left out, the rest still checked
@@ -353,6 +316,10 @@ async function pageCheck(root, target, signal, shots, note) {
       await wait(1500)
       const problems = []
       if (!seen.shown || (!seen.text && !seen.canvas && !seen.pictures)) problems.push('the page shows nothing')
+      if (looks?.lowContrast.length) problems.push(`text too faint to read (WCAG 1.4.3: 4.5:1, large text 3:1): ${looks.lowContrast.map((x) => `"${x.text}" ${x.ratio}:1 (${x.fg} on ${x.bg})`).join('; ')}`)
+      if (looks?.hidden) problems.push(`${looks.hidden}% of the page's text is invisible (opacity 0 or hidden) when it's loaded: content shown only after scrolling or an animation is blank in screenshots, print and with reduced motion; show it by default`)
+      if (looks?.icons.length) problems.push(`icons that didn't draw (no such name): ${looks.icons.join(', ')}`)
+      if (seen.phoneWide) problems.push('on a phone (390 px) it scrolls sideways: something is wider than the screen')
       if (page.errors.length) problems.push(`${page.errors.length} error${page.errors.length === 1 ? '' : 's'}${page.errors.length > atLoad ? (atLoad ? ` (${page.errors.length - atLoad} after pressing ${button ? `"${button}" and ` : ''}keys)` : ` after pressing ${button ? `"${button}" and ` : ''}keys`) : ''}:\n${[...new Set(page.errors)].slice(0, 8).join('\n')}`)
       const what = `${seen.shown} things shown${seen.canvas ? `, ${seen.canvas} canvas` : ''}${button ? `; pressed "${button}"` : ''} and keys (Enter, Space, arrows)${seen.wide ? '; wider than the window (scrolls sideways)' : ''}${seen.phoneWide ? '; on a phone it scrolls sideways' : ''}${saved.length ? `\nscreenshots (look at them): ${saved.join(', ')}` : ''}${tooSlow ? `\nno screenshots: ${tooSlow}` : ''}`
       return { ok: !problems.length, report: `page ${target} in a browser: ${problems.length ? problems.join('; ') : 'loaded without errors'}; ${what}` }
@@ -363,6 +330,50 @@ async function pageCheck(root, target, signal, shots, note) {
     return unchecked(e.message)
   }
 }
+
+// What a page looks like, measured in the browser, for what can be told for sure: text whose contrast
+// with what's behind it is under WCAG's minimum (colors through a canvas, so any CSS color works;
+// text on an image or gradient is skipped), how much of the text is invisible at load (opacity 0,
+// visibility hidden: revealed later by scrolling or a timer), and Lucide icons left undrawn.
+const LOOKS = `(() => {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 1
+  const cx = cv.getContext('2d', { willReadFrequently: true })
+  const rgba = (c) => { cx.clearRect(0, 0, 1, 1); cx.fillStyle = '#000'; cx.fillStyle = c; cx.fillRect(0, 0, 1, 1); const d = cx.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2], d[3] / 255] }
+  const lum = ([r, g, b]) => { const f = (v) => (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b) }
+  const over = (top, under) => top.slice(0, 3).map((v, i) => v * top[3] + under[i] * (1 - top[3]))
+  const behind = (el) => { // the solid color behind el, or null over an image or gradient
+    const layers = []
+    for (let e = el; e; e = e.parentElement) {
+      const st = getComputedStyle(e)
+      if (st.backgroundImage !== 'none') return null
+      const c = rgba(st.backgroundColor)
+      if (c[3] > 0) layers.push(c)
+      if (c[3] >= 1) break
+    }
+    return layers.reduceRight((acc, c) => over(c, acc), [255, 255, 255])
+  }
+  const hex = (c) => '#' + c.slice(0, 3).map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')
+  const low = []
+  let all = 0, unseen = 0
+  for (const el of document.querySelectorAll('body *')) {
+    const own = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim()
+    if (!/[\\p{L}\\p{N}]/u.test(own) || el.closest('[aria-hidden=true],[inert],script,style,noscript,template,option') || el.matches(':disabled')) continue
+    const st = getComputedStyle(el), r = el.getBoundingClientRect()
+    if (st.display === 'none' || !r.width || !r.height) continue
+    all += own.length
+    if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) { unseen += own.length; continue }
+    const bg = behind(el)
+    if (!bg) continue
+    const fg = rgba(st.color)
+    const text = over(fg, bg)
+    const [a, b] = [lum(text), lum(bg)].sort((x, y) => y - x)
+    const ratio = (a + 0.05) / (b + 0.05)
+    const size = parseFloat(st.fontSize), bold = Number(st.fontWeight) >= 700
+    const need = size >= 24 || (bold && size >= 18.66) ? 3 : 4.5
+    if (ratio < need) low.push({ text: own.slice(0, 40), ratio: Math.round(ratio * 10) / 10, fg: hex(text), bg: hex(bg) })
+  }
+  return { lowContrast: low.slice(0, 6), hidden: all && unseen / all > 0.25 ? Math.round((100 * unseen) / all) : 0, icons: [...new Set([...document.querySelectorAll('i[data-lucide]')].map((e) => e.dataset.lucide))].slice(0, 10) }
+})()`
 
 // No browser: the files a page uses are there and its scripts parse
 function staticPage(root, target, why = 'no browser here') {

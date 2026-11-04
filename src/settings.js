@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import os from 'node:os'
-import { HOME, saveConfig, readJson, writeJson, byName, takeIn, whatOf, VERSION } from './config.js'
+import { HOME, saveConfig, readJson, writeJson, byName, takeIn, whatOf, VERSION, speedOf, SPEED_LIMITS } from './config.js'
 import { newer } from './update.js'
 import { DEFAULT_SERVERS, mcpAuth } from './mcp.js'
 import { sections, BUILTIN_PROMPTS, prompt, reloadPrompts } from './prompts.js'
@@ -17,20 +17,15 @@ import { clip, TOOL_DEFS } from './tools.js'
 import { loadProfile, strategy, profilePath, profileFrom } from './probe.js'
 import { loadPrices, priceOf, limitsOf } from './usage.js'
 import { THEMES, PERMISSIONS } from './ui.js'
-import { loadSkills, frontMatter, BUNDLED } from './skills.js'
+import { loadSkills, frontMatter, skillFiles } from './skills.js'
+import { loadRankings, rankings, rankIn } from './rankings.js'
+// a model's places in LMArena's public rankings, shown on Your models: { coding, web, vision } as { rank, of, score }
+const RANKED_ON = { coding: 'text:coding', web: 'webdev:webdev', vision: 'vision:overall' }
+const ranksOf = (model, data) => (data ? Object.fromEntries(Object.entries(RANKED_ON).map(([k, list]) => [k, rankIn(model, list, data)])) : null)
 import { installSkill, findImports } from './importer.js'
 import { capabilities } from './capabilities.js'
 import { connect, sendTelegram, tokenHint, tgReady, EVENTS } from './telegram.js'
 import { searchSettings, testSearxng, ENGINE_NAMES } from './web.js'
-import { loadRankings, rankings, rankIn } from './rankings.js'
-import { testOrchestrator } from './orchtest.js'
-import { testSkills, SKILLS } from './skilltest.js'
-import { whyUnusable } from './usable.js'
-import { firstRequest } from './agent.js'
-import { loadStats, summary, forget as forgetJobs } from './stats.js'
-// a model's places in the rankings shown on Your models: { coding, web, vision } as { rank, of, as }
-const RANKED_ON = { coding: 'text:coding', web: 'webdev:webdev', vision: 'vision:overall' }
-const ranksOf = (model, data) => (data ? Object.fromEntries(Object.entries(RANKED_ON).map(([k, list]) => [k, rankIn(model, list, data)])) : null)
 import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays, logSize, clearLogs, LOG_KINDS, kindsOn, listLogRuns, readLog } from './log.js'
 
 const PAGE = new URL('./settings.html', import.meta.url)
@@ -95,13 +90,14 @@ function setPrompt(file, name, text) {
   fs.writeFileSync(f, `# ${file}.md: your changes to HeartCode's prompts (the settings page; prompts/README.md in HeartCode)\n\n` + [...own].map(([n, t]) => `## ${n}\n\n${t}\n`).join('\n'))
 }
 
-// MCP servers: built in, yours (mcp.json); each on or off.
+// MCP servers: yours (mcp.json), each on or off (an entry with neither command nor url only switched off a
+// server HeartCode used to come with: not listed).
 function mcpServers() {
   const own = readJson(path.join(HOME, 'mcp.json'), {})?.mcpServers ?? {}
   const from = Object.fromEntries(Object.keys(DEFAULT_SERVERS).map((n) => [n, 'built in']))
   const all = structuredClone(DEFAULT_SERVERS)
   for (const [n, c] of Object.entries(own)) all[n] = { ...all[n], ...c }
-  return Object.entries(all).map(([name, c]) => ({ name, from: from[name] ?? 'yours', on: !c.disabled, remote: Boolean(c.url), auth: mcpAuth(c), what: c.url ?? [c.command, ...(c.args ?? [])].filter(Boolean).join(' '), description: c.description ?? '' }))
+  return Object.entries(all).filter(([, c]) => c.command || c.url).map(([name, c]) => ({ name, from: from[name] ?? 'yours', on: !c.disabled, remote: Boolean(c.url), auth: mcpAuth(c), what: c.url ?? [c.command, ...(c.args ?? [])].filter(Boolean).join(' '), description: c.description ?? '' }))
 }
 
 // The model list: #1 is the model (cfg.provider/model), the rest cfg.rotation.then, in order.
@@ -145,7 +141,7 @@ function forgetList(...names) {
   writeJson(LISTS, all)
 }
 
-export function startSettings({ cfg, apply = () => {}, port = 0, root = process.cwd(), onLoginMcp = null, onTested = null } = {}) {
+export function startSettings({ cfg, apply = () => {}, port = 0, root = process.cwd(), onLoginMcp = null } = {}) {
   let importCache = [] // the last /api/imports listing, so /api/imports/run can execute by id
   const token = crypto.randomBytes(24).toString('hex')
   const changed = (what) => {
@@ -252,149 +248,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   // How long a model test waits for its answer (cfg.testTimeout, seconds; the settings page sets it).
   const testWait = () => (Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10) * 1000
   const noAnswer = () => `no answer within ${testWait() / 1000} seconds`
-  const skillWait = () => testWait() * 6
-  // Why HeartCode leaves a model out (usable.js), as the running HeartCode would: as an orchestrator
-  // (with an orchestrator, the ones chosen for it) or as a model that does the work
-  const needs = {}
-  const leftOut = (t, tested) => {
-    const lead = cfg.modelChoice === 'fit' && (cfg.orchestrators ?? []).some((o) => o.provider === t.provider && o.model === t.model)
-    const need = (needs[lead] ??= firstRequest(root, lead, lead ? rotationOf(cfg).then : []))
-    const orch = lead ? readJson(path.join(HOME, 'full-test.json'), null)?.orchestrators?.find((r) => r.provider === t.provider && r.model === t.model) : null
-    return whyUnusable({ test: tests[`${t.provider}/${t.model}`], context: tested?.context, need, orch }) || null
-  }
-  let skillRun = null
-  const skillLive = () => ({ rows: skillRun.rows, wait: skillRun.wait })
-  // each model's record of handed-out jobs (stats.js), "provider/model" → { jobs, passed, failed, unchecked, lost, ms }
-  const jobsNow = () => Object.fromEntries(Object.entries(loadStats()).map(([k, list]) => [k.replace(' ', '/'), summary(list)]))
-  // A Test's requests, at most AT_ONCE at a time to a provider (every step together keeps to it):
-  // fast, and not so many at once that a free tier answers with rate limits. gate(provider)(fn)
+  // A provider's models tested a few at a time (more for a long list: startRun)
   const AT_ONCE = 4
-  const lanes = new Map() // provider → { busy, queue }
-  const gate = (provider) => async (fn) => {
-    const lane = lanes.get(provider) ?? lanes.set(provider, { busy: 0, queue: [] }).get(provider)
-    if (lane.busy >= AT_ONCE) await new Promise((r) => lane.queue.push(r))
-    lane.busy++
-    try {
-      return await fn()
-    } finally {
-      lane.busy--
-      lane.queue.shift()?.()
-    }
-  }
-  const FULL_FILE = path.join(HOME, 'full-test.json') // the last Test with an orchestrator: { at, orchestrators } (HeartCode suggests one until there is)
-  const canOf = (t) => ({ tools: t.tested ? t.tested.mode === 'tools' : t.known?.tools !== false, images: Boolean(t.tested ? t.tested.vision : t.known?.images) })
-  // Skills: small jobs scored by HeartCode itself (src/skilltest.js). Every provider at once, its
-  // models one at a time (a free tier isn't flooded). Each answer may take Tests wait × 6: real jobs.
-  async function skillsRun(list, stop) {
-    skillRun = { stop, rows: list.map((t) => ({ provider: t.provider, model: t.model, can: canOf(t), cells: {}, now: null })), wait: skillWait() }
-    const rows = skillRun.rows
-    const show = (over) => emit('skilltest', { rows, wait: skillWait(), over })
-    show()
-    try {
-      await Promise.all(rows.map(async (r) => {
-        const c = clientFor(r)
-        if (!c || stop.signal.aborted) return // (its provider taken away meanwhile)
-        c.purpose = 'test'
-        r.running = []
-        const out = await testSkills(c, r.can, skillRun.wait, stop.signal, (st) => {
-          if (st.now) r.running = [...r.running.filter((x) => x.skill !== st.skill), { skill: st.skill, since: Date.now() }]
-          else (r.running = r.running.filter((x) => x.skill !== st.skill)), (r.cells[st.skill] = st)
-          show()
-        }, gate(r.provider))
-        const key = `${r.provider}/${r.model}`
-        // stopped before all its jobs: what it did is kept, but it isn't "scored" (the next Test does the rest)
-        const whole = SKILLS.every((k) => out[k])
-        if (Object.keys(out).length) (tests[key] = { ...tests[key], skills: { ...tests[key]?.skills, ...out, at: whole ? Date.now() : tests[key]?.skills?.at } }), saveTests()
-      }))
-    } finally {
-      skillRun = null
-    }
-    emit('skilltest', { rows, wait: skillWait(), over: true })
-    log('fit', `Skills: ${rows.map((r) => `${r.provider} ${r.model}: ${Object.entries(r.cells).map(([k, v]) => `${k} ${v.score != null ? Math.round(v.score * 100) + '%' : v.slow ? 'no answer in time' : v.skipped ? '-' : 'failed'}`).join(', ')}`).join('\n')}`)
-    return rows
-  }
-  // Orchestrators: each gets the same few scenes (src/orchtest.js), all at once, handing work to the
-  // others (with what it would see for real: their speed, scores, record), then put in order: the most
-  // scenes passed first.
-  async function orchRun(lead, stop) {
-    const isLead = (t) => (cfg.orchestrators ?? []).some((o) => o.provider === t.provider && o.model === t.model)
-    const team = state().order.filter((t) => !isLead(t)).map((t) => ((r) => ({ provider: t.provider, model: t.model, ...canOf(t), thinking: Boolean(t.tested ? t.tested.thinking : t.known?.thinking), toolsOk: r?.toolsOk, replyMs: r?.ok ? r.ms : undefined, skills: r?.skills }))(tests[`${t.provider}/${t.model}`]))
-    if (!team.length) throw new Error("no models left to hand work to: an orchestrator needs some of your models that aren't orchestrators")
-    const live = lead.map((t) => ({ provider: t.provider, model: t.model, steps: [], running: [] }))
-    const show = (over) => emit('orchtest', { list: live, team: team.length, over })
-    show()
-    const results = await Promise.all(lead.map(async (t, k) => ({ provider: t.provider, model: t.model, ...(await testOrchestrator(clientFor(t), root, team, testWait(), stop.signal, (st) => {
-      if (st.asking) live[k].running = [...live[k].running, { i: st.i, since: Date.now() }]
-      else (live[k].running = live[k].running.filter((x) => x.i !== st.i)), (live[k].steps[st.i] = st)
-      show()
-    }, gate(t.provider)).catch(() => ({ passed: 0, of: 0, fails: [], slow: 0, ms: 0, steps: live[k].steps.filter(Boolean) }))) })))
-    show(true)
-    results.sort((a, b) => b.passed - a.passed || a.fails.length - b.fails.length || a.slow - b.slow || a.ms - b.ms) // the most scenes passed (no answer isn't a pass), then the fewest mistakes, the fewest without an answer, the quickest
-    // best first; the ones not tested this time (no answer, or not selected) after them, as they were.
-    // Only when all of them were tested: a Test of a few selected doesn't move the others
-    const same = (a, b) => a.provider === b.provider && a.model === b.model
-    const rest = (cfg.orchestrators ?? []).filter((o) => !results.some((r) => same(r, o)))
-    if (!stop.signal.aborted && (rest.length === 0 || full?.all)) {
-      cfg.orchestrators = [...results.map(({ provider, model }) => ({ provider, model })), ...rest]
-      save('setting:orchestrators')
-    }
-    log('fit', results.map((r) => `${r.provider} ${r.model}: ${r.passed}/${r.of} in ${r.ms}ms${r.fails.length ? ` (${r.fails.map((f) => `${f.scene}: ${f.why}`).join('; ')})` : ''}`).join('\n'))
-    return results
-  }
-  // Test (with an orchestrator): does each answer, then the skills of the ones that do the work
-  // (scored in the last week: kept), then the orchestrators with them. One run, step by step, here on
-  // the server (closing the page doesn't stop it). only: the models selected.
-  let full = null
-  const FRESH = 7 * 86_400_000
-  const fullNews = (extra = {}) => emit('fulltest', { phase: full?.phase ?? null, on: full?.on ?? [], skipped: full?.skipped ?? 0, done: full?.done ?? {}, started: full?.started, ...extra })
-  const few = (list) => list.slice(0, 3).map((t) => t.model).join(', ') + (list.length > 3 ? ` and ${list.length - 3} more` : '')
-  async function fullRun(list, some) {
-    const isLead = (t) => (cfg.orchestrators ?? []).some((o) => o.provider === t.provider && o.model === t.model)
-    full = { phase: 'answers', on: ['answers'], stop: new AbortController(), skipped: 0, started: Date.now(), done: {}, all: !some } // done: what each finished step came to, in a line
-    let results = null
-    let error = null
-    let done = full.done
-    try {
-      fullNews()
-      await startRun(list.map(({ provider, model }) => ({ provider, model })), some)
-      if (full.stop.signal.aborted) return
-      const answered = list.filter((t) => tests[`${t.provider}/${t.model}`]?.ok)
-      const silent = list.filter((t) => !tests[`${t.provider}/${t.model}`]?.ok)
-      done.answers = `${answered.length} of ${list.length} answer${silent.length ? ` (not ${few(silent)}: left out of the rest)` : ''}`
-      const fresh = (t) => Date.now() - (tests[`${t.provider}/${t.model}`]?.skills?.at ?? 0) < FRESH
-      const workers = answered.filter((t) => !isLead(t))
-      const due = workers.filter((t) => !fresh(t))
-      const lead = answered.filter(isLead)
-      full.skipped = workers.length - due.length
-      // the skills and the orchestrators' scenes together (each provider's requests kept to AT_ONCE):
-      // the scenes need the models' list, not their scores
-      full.phase = 'both'
-      full.on = ['skills', 'orchestrators']
-      fullNews()
-      const ended = (k) => ((full.on = full.on.filter((x) => x !== k)), fullNews())
-      await Promise.all([
-        (due.length ? skillsRun(due, full.stop) : Promise.resolve()).then(() => {
-          done.skills = [due.length && `${due.length} tested`, full.skipped && `${full.skipped} scored this week: kept`].filter(Boolean).join(' · ') || 'no model here does the work'
-          ended('skills')
-        }),
-        (lead.length ? orchRun(lead, full.stop) : Promise.resolve(null)).then((r) => {
-          results = r
-          done.orchestrators = lead.length ? results.map((x) => `${x.model} ${x.steps.filter((y) => y.ok).length}/${x.of}`).join(' · ') : 'none among these'
-          ended('orchestrators')
-        }),
-      ])
-      if (full.stop.signal.aborted) return
-      if (!full.stop.signal.aborted) writeJson(FULL_FILE, { at: Date.now(), took: Date.now() - full.started, orchestrators: results, done }), setTimeout(() => onTested?.(), 1500) // (a HeartCode waiting on it: its message goes; the page shows the results first)
-    } catch (e) {
-      error = e.message
-      log('fit', `Test failed: ${e.stack}`)
-    } finally {
-      const stopped = full.stop.signal.aborted
-      const started = full.started
-      full = null
-      fullNews({ over: true, stopped, results, done, took: Date.now() - started, ...(error && { error }) })
-    }
-  }
   // Never throws: { ok, ms, reply } or { ok: false, ms, status, error }; { stopped } when stop
   // (a run's Stop) cancels it.
   async function tryOne({ provider, model }, stop) {
@@ -438,7 +293,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   // result: kept and sent to the page (given: a test already made, as a run decided to end it)
   async function testOne(t, given) {
     const key = `${t.provider}/${t.model}`
-    const result = { ...(given ?? (await tryOne(t))), at: Date.now(), ...(tests[key]?.skills && { skills: tests[key].skills }) } // Test skills' scores stay
+    const result = { ...(given ?? (await tryOne(t))), at: Date.now() }
     tests[key] = result
     saveTests()
     emit('tested', { key, result })
@@ -544,11 +399,10 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     model: cfg.model ?? null,
     version: VERSION,
     update: (({ latest } = {}) => (cfg.updateCheck !== false && latest && newer(latest, VERSION) ? latest : null))(readJson(path.join(HOME, 'update-check.json'), {})), // the day's answer from npm: no request here
-    order: [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then].map((t) => ((tested) => ({ ...t, tested, known: knownOf(t), price: priceFor(t), ranks: ranksOf(t.model, ranked), unusable: leftOut(t, tested) }))(testedOf(t))),
+    order: [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then].map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t), ranks: ranksOf(t.model, ranked) })),
     rankings: ranked && { fetched: ranked.fetched, source: ranked.source },
-    orchestrators: cfg.orchestrators ?? [],
     rotation: (({ then, ...opts }) => opts)(rotationOf(cfg)),
-    settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), logs: kindsOn(cfg), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg), testTimeout: Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10, modelChoice: cfg.modelChoice === 'fit' ? 'fit' : 'order', replyStart: Number(cfg.replyStart) > 0 ? Number(cfg.replyStart) : 60 },
+    settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), logs: kindsOn(cfg), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg), testTimeout: Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10, ...speedOf(cfg) },
     logs: { runs: tilde(path.join(LOGS, 'runs')), requests: tilde(REQUESTS) },
     voice: cfg.voice ? JSON.stringify(cfg.voice, null, 2) : '',
     statusBar: cfg.statusBar === undefined ? null : cfg.statusBar, // false (off), a list of lines, or null (default)
@@ -558,7 +412,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     capabilities: capabilities(cfg), // features that need outside tools, and whether they're here
     choices: { permissions: PERMISSIONS, effort: EFFORTS, theme: Object.keys(THEMES), toggles: TOGGLES, statusItems: STATUS_ITEMS, logKinds: Object.fromEntries(Object.entries(LOG_KINDS).map(([k, { label, about }]) => [k, { label, about }])) },
     files: FILES.map(([name, about, json, example]) => ({ name, about, json, example, text: fs.existsSync(path.join(HOME, name)) ? fs.readFileSync(path.join(HOME, name), 'utf8') : '' })),
-    skills: [...loadSkills(null).values()].map((s) => ({ name: s.name, description: s.description, use: s.use, mine: s.file.startsWith(skillsDir() + path.sep), builtIn: s.file.startsWith(BUNDLED), text: fs.readFileSync(s.file, 'utf8') })),
+    skills: [...loadSkills(null).values()].map((s) => ({ name: s.name, description: s.description, use: s.use, mine: s.file.startsWith(skillsDir() + path.sep), text: fs.readFileSync(s.file, 'utf8'), path: tilde(path.basename(s.file) === 'SKILL.md' ? path.dirname(s.file) : s.file), files: skillFiles(s) })), // a folder skill: its other files (guides, assets)
     mcp: mcpServers(),
     prompts: prompts(),
     home: tilde(HOME),
@@ -567,7 +421,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
 
   const routes = {
     'GET /api/state': () => state(),
-    // the public rankings, fetched now (with models.dev: Update model info on Your models)
+    // LMArena's public rankings, fetched now (with models.dev: Update model info on Your models)
     'POST /api/rankings': async () => {
       if (!(await rankings({ now: true }))) throw new Error("couldn't get the rankings (huggingface.co)")
       return state()
@@ -730,22 +584,12 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       forgetTests()
       return state()
     },
-    // The models that orchestrate when Pick is "an orchestrator hands it out": [{ provider, model }]
-    // (none: your first that calls tools)
-    'POST /api/orchestrators': ({ list }) => {
-      if (!Array.isArray(list)) throw new Error('a list of models is needed')
-      const clean = list.map((t) => ({ provider: String(t?.provider ?? ''), model: String(t?.model ?? '').trim() })).filter((t) => cfg.providers[t.provider] && t.model)
-      cfg.orchestrators = clean.length ? clean : undefined
-      save('setting:orchestrators')
-      return state()
-    },
     // models.dev again (one model, or all of yours): its list fetched anew, and each model's profile
     // takes what it says now (one it didn't know before becomes "from models.dev"; your own settings
     // for it stay above). A running HeartCode takes it at once.
     // Test: one short message to the model, to see that it answers (key, access, name, the server
     // itself). In the requests log as a model test. Never throws: { ok, ms, reply } or { ok: false, error }.
     'POST /api/try': ({ provider, model } = {}) => testOne({ provider, model: String(model ?? '') }),
-    // the tests' results, and the run going now (with the models it hasn't tested yet)
     // Test, on a model's row: one "Hello" to it, and exactly what was sent and what came back (the
     // key masked), for the page to show. Not streamed, so the answer is the provider's own JSON.
     'POST /api/hello': async ({ provider, model }) => {
@@ -768,26 +612,11 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
         return { sent, received: { error: e.name === 'TimeoutError' ? noAnswer() : `couldn't send it: ${e.cause?.code || e.cause?.message || e.message}`, ms: Date.now() - t0 } }
       }
     },
-    'POST /api/tests': () => ({ results: tests, run: run && { ...runState(), pending: [...run.pending] }, jobs: jobsNow(), skills: skillRun && skillLive(), full: full && { phase: full.phase, on: full.on, skipped: full.skipped, done: full.done, started: full.started }, last: readJson(FULL_FILE, null) }),
-    // Test with an orchestrator: everything, step by step (fullRun); its progress comes as events
-    'POST /api/fulltest': ({ only } = {}) => {
-      if (full || run || skillRun) throw new Error('a test is running: wait for it, or stop it')
-      const order = state().order
-      const list = Array.isArray(only) ? order.filter((t) => only.some((o) => o?.provider === t.provider && o?.model === t.model)) : order
-      if (!list.length) throw new Error('no model to test')
-      if (!order.some((t) => !(cfg.orchestrators ?? []).some((o) => o.provider === t.provider && o.model === t.model))) throw new Error("all your models are orchestrators: an orchestrator needs some models that aren't, to hand the work to")
-      fullRun(list, Array.isArray(only))
-      return {}
-    },
-    'POST /api/fulltest/stop': () => {
-      if (full) full.stop.abort(), run && !run.stopping && ((run.stopping = true), run.cancel.abort(), emit('testrun', runState()))
-      return {}
-    },
-    // a model's record of handed-out jobs, cleared (its provider now serves something else under that name)
-    'POST /api/jobs/forget': ({ provider, model }) => (forgetJobs(`${provider} ${model}`), { jobs: jobsNow() }),
+    // the tests' results, and the run going now (with the models it hasn't tested yet)
+    'POST /api/tests': () => ({ results: tests, run: run && { ...runState(), pending: [...run.pending] } }),
     // a run: all your models, or the ones given (only); one at a time if one is going already
     'POST /api/tests/start': ({ only } = {}) => {
-      if (run || full) throw new Error('a test is running: wait for it, or stop it')
+      if (run) throw new Error('a test is running: wait for it, or stop it')
       const order = state().order
       const mine = new Set(order.map((t) => `${t.provider}/${t.model}`))
       const list = Array.isArray(only) ? only.map((t) => ({ provider: String(t?.provider ?? ''), model: String(t?.model ?? '') })).filter((t) => mine.has(`${t.provider}/${t.model}`)) : order.map(({ provider, model }) => ({ provider, model }))
@@ -861,9 +690,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       if (name === 'logDays' && !(Number.isInteger(value) && value >= 1 && value <= 3650)) throw new Error('logDays: a whole number of days, 1 to 3650')
       if (name === 'logDetail' && !DETAILS.includes(value)) throw new Error(`logDetail: ${DETAILS.join(' or ')}`)
       if (name === 'testTimeout' && !(Number.isInteger(value) && value >= 1 && value <= 600)) throw new Error('test timeout: a whole number of seconds, 1 to 600')
-      if (name === 'replyStart' && !(Number.isInteger(value) && value >= 5 && value <= 600)) throw new Error('a reply must start within: a whole number of seconds, 5 to 600')
-      if (!['permissions', 'effort', 'theme', 'context', 'logDetail', 'logDays', 'testTimeout', 'modelChoice', 'replyStart', ...Object.keys(TOGGLES)].includes(name)) throw new Error(`no setting "${name}"`)
-      if (name === 'modelChoice' && !['order', 'fit'].includes(value)) throw new Error('modelChoice: order or fit (an orchestrator)')
+      if (name in SPEED_LIMITS && !(Number.isInteger(value) && value >= SPEED_LIMITS[name][0] && value <= SPEED_LIMITS[name][1])) throw new Error(`${name}: a whole number, ${SPEED_LIMITS[name][0]} to ${SPEED_LIMITS[name][1]}`)
+      if (!['permissions', 'effort', 'theme', 'context', 'logDetail', 'logDays', 'testTimeout', ...Object.keys(SPEED_LIMITS), ...Object.keys(TOGGLES)].includes(name)) throw new Error(`no setting "${name}"`)
       cfg[name] = name === 'effort' && value === 'default' ? undefined : name === 'context' ? (value === null ? undefined : Number(value)) : value
       save(`setting:${name}`)
       if (name === 'logDetail') useRequestLog(cfg) // from the next request (a running HeartCode takes it in too: applySettings)
@@ -1065,10 +893,19 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       if (!String(text ?? '').trim()) throw new Error('a skill needs its text')
       const { meta } = frontMatter(text)
       if (meta.name && safeName(meta.name) !== name) throw new Error(`the text says name: ${meta.name}, but the skill is called ${name}`)
-      if (was && was !== name) removeSkill(was)
-      const dir = path.join(skillsDir(), name)
-      fs.mkdirSync(dir, { recursive: true })
-      fs.writeFileSync(path.join(dir, 'SKILL.md'), text.endsWith('\n') ? text : text + '\n')
+      // where it lives: a one-file skill (<name>.md) stays one; a folder skill keeps its other files.
+      // Renamed: its file or folder moves (a folder's guides go with it). New: a folder.
+      const fileOf = (n) => (fs.existsSync(path.join(skillsDir(), `${n}.md`)) ? path.join(skillsDir(), `${n}.md`) : path.join(skillsDir(), n, 'SKILL.md'))
+      const old = was && safeName(was)
+      if (old && old !== name) {
+        const from = fileOf(old)
+        const to = path.basename(from) === 'SKILL.md' ? path.join(skillsDir(), name) : path.join(skillsDir(), `${name}.md`)
+        if (fs.existsSync(to) || fs.existsSync(fileOf(name))) throw new Error(`there's already a skill called ${name}`)
+        if (fs.existsSync(from)) fs.renameSync(path.basename(from) === 'SKILL.md' ? path.dirname(from) : from, to)
+      }
+      const file = fileOf(name)
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      fs.writeFileSync(file, text.endsWith('\n') ? text : text + '\n')
       changed('skill')
       return state()
     },

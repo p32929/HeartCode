@@ -3,18 +3,16 @@ import os from 'node:os'
 import { log } from './log.js'
 import { prompt, userInstructions } from './prompts.js'
 import { newChat } from './sessions.js'
+import { skillFiles, readSkillFile } from './skills.js'
 import path from 'node:path'
 import { est, estMessages, Client, writtenBy, tokensOf, COMPACT_SHARE } from './client.js'
 import { runGuided } from './guided.js'
 import { markUsed, removeResearch, findResearch } from './research.js'
-import { loadRankings, rankIn, rankings } from './rankings.js'
 import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, searchesOutside, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, noteNamedPaths } from './tools.js'
 import { serversNote } from './lsp.js'
 import { newlyEnded, jobLine } from './background.js'
 import { loadHooks, runHooks } from './hooks.js'
-import { takeConfigErrors, HOME } from './config.js'
-import { runCheck, PAGE_COMMAND } from './check.js'
-import { record, recordLine, similar, loadStats, summary } from './stats.js'
+import { takeConfigErrors } from './config.js'
 import { c, duration, Block, Markdown, color, diffLines, renderDiff } from './ui.js'
 
 // Images for a helper (the agent tool's "images"), as data: URLs: image URLs (fetched), data: URLs,
@@ -204,24 +202,12 @@ export class Session {
     let { text, images } = extractImages(task, this.root)
     images = [...images, ...extra]
     if (images.length && !this.strat.vision) {
-      const fails = (t) => this.failures?.[`${t.provider} ${t.model}`] ?? 0
-      const seers = (this.team?.() ?? []).filter((t) => t.images).sort((a, b) => fails(a) - fails(b)) // your models that can: they describe them
+      const seers = (this.team?.() ?? []).filter((t) => t.images) // your models that can, in your order: they describe them
       if (seers.length) text += await this.describeImages(images, seers, text, signal)
       else this.ui.warn(`${this.client.model} can't read images (per its probe); ignoring ${images.length} image(s)`)
       images = []
     }
-    // An orchestrator: the message starts on one of the models picked for it, which answers at once
-    // or hands the work to your other models (it decides) — only when there are others to hand to.
-    if (!this.isSub) {
-      const lead = this.fitMode?.() ? (this.orchestrators?.() ?? []) : []
-      this.client.orderBy?.(lead.length ? lead.map((t) => `${t.provider} ${t.model}`) : null)
-      this.orchestrating = lead.length > 0 // (then team() leaves the orchestrators out)
-      if (this.orchestrating && !this.team?.().length) this.orchestrating = false // no one to hand to: it does the work itself
-      if (this.orchestrating) rankings().catch(() => {}) // their places, for its list of models: fetched behind (once a week), never waited for
-      // never tested together (the settings page's Test): it picks by names and ranks alone, so say how to do better, once
-      if (this.orchestrating && !this.ui.full && !Session.tipped && !fs.existsSync(path.join(HOME, 'full-test.json'))) (Session.tipped = true), this.ui.warn(prompt('agent/orchestrator-untested'))
-      log('rotate', `this message starts on ${this.client.provider ?? ''} · ${this.client.model}${this.client.rotation ? ` (#${this.client.rotation.at + 1} of ${this.client.rotation.list.length}${this.orchestrating ? ', orchestrating' : ', your order'})` : ''}`)
-    }
+    if (!this.isSub) log('rotate', `this message starts on ${this.client.provider ?? ''} · ${this.client.model}${this.client.rotation ? ` (#${this.client.rotation.at + 1} of ${this.client.rotation.list.length})` : ''}`)
     log('task', `${text} (${this.strat.actions} mode, ${images.length} image(s))`)
     const answer = this.strat.actions === 'tools' ? await runNative(this, text, images, signal) : await runGuided(this, text, images, signal)
     log('answer', answer) // the conversation's log
@@ -239,11 +225,7 @@ export class Session {
   // ACP) as that call's.
   async subagent(args, signal, id) {
     const task = String(args.prompt ?? args.task ?? '').trim()
-    if (!task) return this.orchestrating ? 'error: "prompt" is missing: put the whole task for the model in "prompt", and which model does it in "model"' : 'error: give the helper its job in "prompt"'
-    // an orchestrator's handoff: with what the user asked, in their words (a summary loses what they cared about)
-    this.handed = true
-    const check = this.orchestrating ? String(args.check ?? '').trim() : '' // how HeartCode proves it worked, run when the model is done
-    const job = this.orchestrating ? `${task}\n\n${prompt('agent/hand-request', { request: requestsOf(this.chat, 1500), choices: (this.chat?.choices ?? []).join('; '), check, run: /^page\s/i.test(check) ? check.replace(/^page/i, PAGE_COMMAND) : check })}` : task
+    if (!task) return 'error: give the helper its job in "prompt"'
     let images
     try {
       images = await loadImages(args.images, this, signal)
@@ -253,72 +235,30 @@ export class Session {
     }
     const name = (t) => `${t.provider} ${t.model}`
     const self = { provider: this.client.provider, model: this.client.model, images: this.strat.vision, tools: this.strat.actions === 'tools', self: true }
-    const all = [...(this.orchestrating ? [] : [self]), ...(this.team?.() ?? [])] // an orchestrator hands work out, never to itself
+    const all = [self, ...(this.team?.() ?? [])] // this model, then your others in your list's order
     const want = String(args.model ?? '').trim()
     // only one model available (a pinned model, or you have just one): helpers use it, whatever was asked
     const first = !want || all.length === 1 ? all[0] : (all.find((t) => name(t) === want || `${t.provider}/${t.model}` === want) ?? all.find((t) => t.model === want || want.endsWith(` ${t.model}`) || t.model.endsWith(`/${want}`)))
     if (!first) return `error: no model "${want}". Yours: ${all.map(name).join(', ')}`
-    const until = this.resting?.[name(first)] ?? 0
-    if (this.orchestrating && until > Date.now()) return `error: ${name(first)} is out of quota for ${Math.ceil((until - Date.now()) / 60_000)} more minutes (its provider said so); hand it to another model` // not asked again: it would only refuse
-    // the one asked for first (if it can do the job), then the others that can: those that call
-    // tools first, then the ones that failed least this session, in your list's order
+    // the one asked for first, then the others in your list's order: only those that can do the job
+    // (images need a model that sees them)
     const able = (t) => !images.length || t.images
-    const fails = (t) => this.failures?.[name(t)] ?? 0
-    const rests = (t) => (this.resting?.[name(t)] ?? 0) > Date.now() // out of quota: tried last
-    // an orchestrator's choice only: when it fails, the orchestrator chooses again (a model of the size it wants)
-    const order = (this.orchestrating ? [first] : [first, ...all.filter((t) => t !== first).sort((a, b) => b.tools - a.tools || fails(a) - fails(b))]).filter(able).sort((a, b) => rests(a) - rests(b))
-    if (!order.length) return this.orchestrating ? `error: ${name(first)} can't see images; hand it to one that can` : 'error: none of your models can see images'
+    const order = [first, ...all.filter((t) => t !== first)].filter(able)
+    if (!order.length) return 'error: none of your models can see images'
     const failed = []
-    // what each did, for the record (stats.js): what the orchestrator learns models by
-    const about = { job: clip(String(args.description ?? '').trim() || task.split('\n')[0], 80), about: clip(`${task} ${requestsOf(this.chat, 300)}`, 300) }
     for (const [i, t] of order.entries()) {
       let answer = ''
-      const t0 = Date.now()
       try {
-        answer = (await this.#helper(t, job, images, args.description, id, signal, args.ownFiles))?.trim()
+        answer = (await this.#helper(t, task, images, args.description, id, signal, args.ownFiles))?.trim()
       } catch (e) {
         if (e.name === 'AbortError' || signal?.aborted) throw e
         failed.push(`${t.model}: ${clip(e.message, 150)}`)
-        if (e.status !== 429) record(name(t), { ...about, ms: Date.now() - t0, ok: false, why: clip(e.message, 120) }) // out of quota says nothing of the model (this.resting has it)
       }
-      if (answer) {
-        const ms = Date.now() - t0
-        let checked = null
-        let unchecked = '' // why the check wasn't run
-        if (check) {
-          this.ui.step('check', clip(check, 80))
-          unchecked = await this.#mayCheck(check)
-          if (unchecked) this.ui.result(unchecked)
-          else {
-            checked = await runCheck(this.root, check, signal, (t) => this.ui.step('browser', t)) // Esc: an AbortError, not a failed check
-            log('agent', `check of ${name(t)}'s work: ${checked.report}`)
-            this.ui.step('check', `${checked.ok ? 'passed' : 'failed'}: ${clip(checked.report.split('\n')[0], 100)}`)
-          }
-        }
-        record(name(t), { ...about, ms, ok: true, ...(checked && { check: checked.ok ? 'pass' : 'fail', why: checked.ok ? undefined : clip(checked.report, 120) }) })
-        const said = t === first ? answer : `(Answered by ${name(t)}, not ${name(first)}${failed.length ? `: ${failed.join('; ')}` : ''})\n\n${answer}`
-        return checked ? `${said}\n\n${prompt(checked.ok ? 'agent/check-passed' : 'agent/check-failed', { model: name(t), report: checked.report })}` : unchecked ? `${said}\n\n(HeartCode didn't run the check: ${unchecked.replace(/^not run: /, '')}.)` : said
-      }
-      if (failed.length < i + 1) {
-        record(name(t), { ...about, ms: Date.now() - t0, ok: false, why: 'no reply' })
-        failed.push(`${t.model}: no reply`)
-        if (this.failures) this.failures[name(t)] = fails(t) + 1 // (a failed request is counted where it fails: engine's onFail)
-      }
+      if (answer) return t === first ? answer : `(Answered by ${name(t)}, not ${name(first)}${failed.length ? `: ${failed.join('; ')}` : ''})\n\n${answer}`
+      if (failed.length < i + 1) failed.push(`${t.model}: no reply`)
       if (order[i + 1]) this.ui.warn(`${t.model} couldn't do it (${failed.at(-1).slice(t.model.length + 2)}); handing it to ${order[i + 1].model}`)
     }
-    if (this.orchestrating) return `error: ${name(first)} couldn't do it (${failed.join('; ').slice(first.model.length + 2)}). Hand it to another model.`
     return `error: none of your models that can do it managed: ${failed.join('; ')}`
-  }
-
-  // A handoff's check goes through what any command does: a page is only opened (always fine); a
-  // command isn't run in plan mode (unless it only reads), nor when it reaches outside the project,
-  // and the user's permission setting asks first. Returns why it isn't run, or ''.
-  async #mayCheck(check) {
-    if (/^page\s/i.test(check)) return ''
-    if (this.ui.permission === 'plan' && !readOnlyCommand(check)) return 'not run: plan mode'
-    if (searchesOutside(check, this.root)) return 'not run: it reaches outside the project'
-    const ok = this.ui.permission === 'plan' ? true : await this.ui.confirm(`Run the check ${c.bold(check)}?`, 'command')
-    return ok === true ? '' : 'not run: the user declined'
   }
 
   // One helper on one model (t: this one, or another of yours), with its own connection (a helper's
@@ -333,7 +273,6 @@ export class Session {
     }
     const label = clip(`${client.model}: ${String(description ?? '').trim() || task.split('\n')[0]}`, 60)
     const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
-    helper.worker = Boolean(this.orchestrating) // it does the work an orchestrator handed out: held to proving it like the main conversation (notDone; the review is the orchestrator's)
     if (ownFiles?.length) helper.ownFiles = ownFiles.map((f) => path.resolve(this.root, f)) // a part of the plan: changes only its own files
     Object.assign(helper, { isSub: true, research: this.research, ran: this.ran, noResearch: this.noResearch, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
     helper.track = (rel, before) => this.track(rel, before)
@@ -596,28 +535,19 @@ const rootList = (root) => {
   return v.error ? `(can't read it: ${v.error})` : v.entries.length ? v.entries.join(' · ') + (v.more ? ` · … ${v.more} more` : '') : '(empty)'
 }
 
-// An orchestrator's system prompt and tools as a session gives them, handing work to team (the
-// settings page's Test orchestrators)
-export function orchestratorSetup(root, team) {
-  const s = { root, orchestrating: true, subagent: true, fitMode: () => true, team: () => team, strat: {}, client: {} }
-  return { system: SYSTEM(s), tools: [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name)).map((f) => ({ type: 'function', function: f })) }
-}
-
-// How big a model's first request is in a role (its system prompt and tools), in tokens: a model that
-// takes less in one request can't be used for it (usable.js). team: the models an orchestrator lists.
-export function firstRequest(root, orchestrating, team = []) {
-  const s = orchestrating ? null : { root, isSub: true, strat: {}, client: {} }
-  const { system, tools } = orchestrating ? orchestratorSetup(root, team) : { system: SYSTEM(s), tools: [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name)).map((f) => ({ type: 'function', function: f })) }
-  return est(system) + est(JSON.stringify(tools))
+// An always-on skill in the system prompt as the skill tool would give it: its text, the files it
+// says come with it (load), and the list of its other files (read with the skill tool's "file")
+const alwaysSkill = (k) => {
+  const files = skillFiles(k)
+  return k.body + (k.load ?? []).map((f) => `\n\n--- ${f} ---\n${readSkillFile(k, f)}`).join('') + (files.length ? `\n\n${prompt('agent/skill-files', { name: k.name, files: files.join('\n') })}` : '')
 }
 
 const SYSTEM = (s) => {
-  if (s.orchestrating) return prompt('agent/orchestrator', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), ...teamOf(s) })
   const instructions = userInstructions(s.root)
   return [
     prompt('agent/system', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), rootList: rootList(s.root), servers: serversNote(s.root), files: '', more: '', caller: Boolean(s.appendSystem) }),
     instructions && prompt('agent/instructions', { instructions }),
-    ...[...(s.skills?.values() ?? [])].filter((k) => k.use === 'always').map((k) => k.body), // skills that say how to work (use: always)
+    ...[...(s.skills?.values() ?? [])].filter((k) => k.use === 'always').map(alwaysSkill), // skills that say how to work (use: always), with the files they bring
     s.memory && prompt('agent/memory', { tags: s.memory.tagSummary() || '(none yet)' }),
     s.strat.vision && prompt('agent/you-see'), // models that can see often say they can't
     s.director && !s.appendSystem && s.director.app.cfg.director !== false && prompt('agent/director'),
@@ -631,38 +561,13 @@ const SYSTEM = (s) => {
 }
 
 // Your other models and what each can do, for the agent tool's model (only when there are any): a
-// short line each — with an orchestrator, with its places in the public rankings (rankings.js).
-const RANKED_AS = { overall: 'text:overall', code: 'text:coding', web: 'webdev:webdev', vision: 'vision:overall' }
+// short line each, in your list's order.
 const teamPrompt = (s) => {
   const team = s.team?.() ?? []
-  return team.length ? prompt('agent/team', teamOf(s, team)) : ''
-}
-const teamOf = (s, team = s.team?.() ?? []) => {
-  const data = s.fitMode?.() ? loadRankings() : null
-  const ranks = (t) => (data ? Object.entries(RANKED_AS).map(([k, list]) => ((r) => r && `${k} #${r.rank}`)(rankIn(t.model, list, data))).filter(Boolean).join(' ') : '')
-  const line = (t) => {
-    const failed = s.failures?.[`${t.provider} ${t.model}`]
-    const rest = Math.ceil(((s.resting?.[`${t.provider} ${t.model}`] ?? 0) - Date.now()) / 60_000)
-    // what it has shown first (its record, its tests, its speed), then what it can do, then ranks
-    const slow = t.replyMs != null && typical && t.replyMs > Math.max(5000, typical * 3)
-    const facts = [rest > 0 && `out of quota for ${rest < 120 ? `${rest} min` : `${Math.round(rest / 60)} h`}`, failed && `failed ${failed}× this session`, recordLine(stats[`${t.provider} ${t.model}`]), skillsLine(t.skills), t.replyMs != null && `${slow ? 'SLOW: ' : ''}a one-word reply takes it ${(t.replyMs / 1000).toFixed(1)} s`, t.tools === false && 'no tool calls', t.toolsOk === false && "failed a test of doing a job with a tool", t.images && 'images', t.thinking && 'thinking', ranks(t) && `ranked ${ranks(t)}`].filter(Boolean)
-    return `- ${t.provider} ${t.model}${facts.length ? `: ${facts.join('; ')}` : ''}`
-  }
-  const stats = loadStats()
-  const times = team.map((t) => t.replyMs).filter((x) => x != null).sort((a, b) => a - b)
-  const typical = times[Math.floor(times.length / 2)] // the median: "slow" is slow next to your others
-  // the models with something to show for themselves first (best first), then the rest in your order
-  const proof = (t) => { const xs = [...Object.values(t.skills ?? {}).filter((r) => r?.score != null).map((r) => r.score), ...((j) => (j.jobs ? [j.passed + j.failed ? j.passed / (j.passed + j.failed) : (j.jobs - j.lost) / j.jobs] : []))(summary(stats[`${t.provider} ${t.model}`]))]; return xs.length ? xs.reduce((a, b) => a + b) / xs.length : null }
-  team = team.map((t) => [t, proof(t)]).sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1)).map(([t]) => t)
-  const you = [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking', ranks(s.client) && `ranked ${ranks(s.client)}`].filter(Boolean).join(', ')
-  return { models: team.map(line).join('\n'), you, ranked: Boolean(data), past: s.orchestrating ? similar(s.chat?.turns?.at(-1)?.task, team.map((t) => `${t.provider} ${t.model}`), 6, stats) : '' }
-}
-
-// Test skills' scores (settings page, skilltest.js), in words: "tests: code 90%, web page 75%, …"
-const SKILL_WORDS = { code: 'code', page: 'web page', vision: 'finding things in an image', tools: 'a job with tools' }
-const skillsLine = (k) => {
-  const done = Object.entries(SKILL_WORDS).filter(([key]) => k?.[key] && !k[key].skipped).map(([key, w]) => ((r) => `${w} ${r.slow ? 'no answer in time' : r.error ? 'failed to answer' : `${Math.round(r.score * 100)}%${r.ms ? ` in ${Math.round(r.ms / 1000)} s` : ''}`}`)(k[key]))
-  return done.length ? `tests: ${done.join(', ')}` : ''
+  if (!team.length) return ''
+  const can = (t) => [t.tools === false && 'no tool calls', t.images && 'images', t.thinking && 'thinking'].filter(Boolean)
+  const line = (t) => `- ${t.provider} ${t.model}${can(t).length ? `: ${can(t).join(', ')}` : ''}`
+  return prompt('agent/team', { models: team.map(line).join('\n'), you: [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking'].filter(Boolean).join(', ') })
 }
 
 const sizeOf = (m) =>
@@ -930,7 +835,6 @@ async function runNative(s, task, images, signal) {
   s.edits = 0 // successful file edits so far this message (to tell a real fix from a lucky rerun)
   s.userSaid = [] // what the user typed with a "no" to a tool call: sent as their message after the results (declined in tools.js)
   s.acted = false // used a tool this message (so a reply that only promises more is a premature stop)
-  s.handed = s.workNudged = false // an orchestrator: handed work out this message; told it wrote the work itself
   let nudged = 0 // reminders sent this message about open todo items, a premature stop, or a Stop hook
   let sinceNudge = true // a tool call made since the last reminder: one that changed nothing isn't sent again (no count: it goes on while the model gets on)
   s.planAsked = false // asked for a plan before its first change, this message
@@ -943,9 +847,12 @@ async function runNative(s, task, images, signal) {
   let stuck = null // why it's going round in circles (then the next model takes over; nothing stops but Esc)
   // Going round in circles: the next of your models carries on (a different model often gets out of
   // it); with no other model, a warning, and it goes on being told what it repeats — only Esc stops it.
+  // A helper has only the model it was given and maybe nobody to press Esc: it ends, failed, and
+  // the job goes to your next model.
   const handOver = (why) => {
     const was = client.model
     if (client.moveOn?.(`${was} ${why}`)) ui.warn(`${was} ${why}; handing over to ${client.model}`)
+    else if (s.isSub) throw Object.assign(new Error(`${was} ${why}`), { stuck: true })
     else ui.warn(`${was} ${why} — it carries on, told so; Esc stops it`)
   }
   let garbled = 0 // replies with a tool call written as text (template markup), this message
@@ -1074,10 +981,7 @@ async function runNative(s, task, images, signal) {
     }
     empty = 0
     if (!res.toolCalls.length) {
-      // an orchestrator that wrote the work (a lot of code) in its reply and handed nothing out: told once
-      const didWork = s.orchestrating && !s.handed && !s.workNudged && codeLines(res.content) > 30 && (s.workNudged = true)
-      if (didWork) log('task', 'the orchestrator wrote the work in its reply; telling it to hand it out')
-      const more = didWork ? prompt('agent/orchestrator-did-work') : sinceNudge && (!s.isSub || s.worker) && ((await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal)))
+      const more = sinceNudge && !s.isSub && ((await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal)))
       if (!more) {
         s.wrapUpLater?.(task, res.content) // after the answer, beside what comes next
         return res.content
@@ -1100,8 +1004,7 @@ async function runNative(s, task, images, signal) {
     const together = new Map()
     for (const call of res.toolCalls) {
       const args = argsOf(call)
-      // an orchestrator's: one after another (several at once went over each other's work)
-      if (call.function.name !== 'agent' || !args || !allowed(s, 'agent') || s.orchestrating || res.toolCalls.filter((x) => x.function.name === 'agent').length < 2) continue
+      if (call.function.name !== 'agent' || !args || !allowed(s, 'agent') || res.toolCalls.filter((x) => x.function.name === 'agent').length < 2) continue
       ui.step('agent', clip([args.model && `${args.model}:`, args.description].filter(Boolean).join(' '), 80))
       together.set(call.id, runTool('agent', args, s, signal, call.id))
     }
@@ -1158,12 +1061,6 @@ async function runNative(s, task, images, signal) {
             if (n === 3) out += `\n\n${prompt('agent/same-spot', { file: String(args.path), line: at })}`
           }
           if (args.path) s.changed.add(String(args.path))
-        } else if (name === 'agent' && s.orchestrating) {
-          // the files a model it handed work to changed: changes of this message, for the review (the
-          // model ran its own checks; the orchestrator can't)
-          const was = s.changed.size
-          for (const rel of Object.keys(s.chat.turns.at(-1)?.files ?? {})) s.changed.add(rel)
-          if (s.changed.size > was) s.lastChangeAt = s.lastCheckAt = s.seq
         } else if (CHECKS.has(name)) {
           s.lastCheckAt = s.seq // ran something: a check of what changed (the model judges its result)
           // checking on and on with nothing changed (sleeps, screenshots, play-throughs): told once per
@@ -1226,6 +1123,7 @@ const EDITS = new Set(['edit_file', 'write_file', 'append_file', 'apply_patch'])
 const CHECKS = new Set(['run_command', 'mcp', 'agent', 'lsp'])
 // Files only read by people (a change there needs no run to check it).
 const DOC_FILE = /\.(md|mdx|txt|rst|adoc)$/i
+
 // Tools that only look (nothing changes): several in one reply run at the same time.
 const LOOKUPS = new Set(['web_search', 'web_fetch', 'read_file', 'search', 'list_files', 'find_command', 'lsp', 'changes'])
 export function newGuard() {
@@ -1371,9 +1269,6 @@ export async function notDone(s, signal, again, reply = '') {
   return hook.block ? prompt('agent/hook-stop', { reason: hook.block }) : null
 }
 
-// lines inside the reply's fenced code blocks
-export const codeLines = (text) => [...String(text ?? '').matchAll(/```[^\n]*\n([\s\S]*?)```/g)].reduce((n, m) => n + m[1].split('\n').length, 0)
-
 // Files the final answer says were made, that aren't in the project: a path in backticks, or one
 // with a folder, with a source/config/doc extension, while the answer says it created or wrote
 // something. A name that's anywhere in the project (by its file name) counts as there.
@@ -1458,9 +1353,8 @@ export async function review(s, task, answer, signal) {
   const ran = (s.ran ?? []).slice(-15).map((r) => `- ${clip(r.command.replace(/\s+/g, ' '), 160)} → ${r.result}`).join('\n')
   const ask = prompt('agent/review', { request: requestsOf(s.chat, 1200), emphasis: (s.chat?.choices ?? []).join('; '), plan: plan || '(none)', answer: clip(String(answer ?? ''), 3000), changes: diffs.join('\n\n'), ran: ran || '(nothing)' })
   const self = { provider: s.client.provider, model: s.client.model, self: true }
-  const fails = (t) => s.failures?.[`${t.provider} ${t.model}`] ?? 0
-  const team = (s.team?.() ?? []).filter((t) => t.tools !== false && !(t.provider === self.provider && t.model === self.model)).sort((a, b) => fails(a) - fails(b))
-  for (const t of [...team.slice(0, 2), ...(s.orchestrating ? [] : [self])]) { // an orchestrator doesn't check the work
+  const team = (s.team?.() ?? []).filter((t) => t.tools !== false && !(t.provider === self.provider && t.model === self.model)) // your next two, in your order
+  for (const t of [...team.slice(0, 2), self]) {
     s.ui.spinner(`${t.model} is reviewing the work`)
     try {
       const { client } = t.self ? { client: s.client } : await s.engineFor(t)
@@ -1502,7 +1396,7 @@ const asking = new WeakMap() // ui → the question being asked
 const streaming = new WeakMap() // ui → helper replies coming in now (only one: its thinking is shown as it comes)
 function helperUI(ui, label) {
   // What the helper says is shown in full under its name. Its thinking is shown as it comes, like the
-  // conversation's (an orchestrator's helpers work one at a time); with other helpers replying at the
+  // conversation's; with other helpers replying at the
   // same time, held until its reply ends, then printed at once (two streams would interleave).
   const response = () => {
     const t0 = Date.now()

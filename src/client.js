@@ -263,27 +263,6 @@ export class Client {
     }
     return i
   }
-  // An orchestrator: these models first ("provider model"), the others after in your list's order;
-  // this message starts with the first, and a failure goes on to the next. false: no list.
-  // null: your order again (switched off).
-  orderBy(names) {
-    const r = this.rotation
-    if (!r) return false
-    if (!names) {
-      if (!r.base) return false // never reordered: nothing to undo (and "stay on the last that answered" holds)
-      ;[r.list, r.base, r.at] = [r.base, null, 0]
-      this.#use(r.list[0])
-      return true
-    }
-    r.base ??= [...r.list] // your order, kept for when it's switched off
-    const first = names.map((n) => r.list.find((t) => `${t.provider} ${t.model}` === n)).filter(Boolean)
-    if (!first.length) return false
-    r.list = [...new Set([...first, ...r.base])]
-    r.at = 0
-    log('rotate', `orchestrators: ${first.map((t) => t.model).join(', ')} first`)
-    this.#use(r.list[0])
-    return true
-  }
   // A new message: back to #1 (unless it stays on the one that worked)
   newMessage() {
     const r = this.rotation
@@ -498,7 +477,7 @@ export class Client {
         return r
       } catch (e) {
         if (e.name === 'AbortError' || opts.signal?.aborted) throw e
-        this.onFail?.(e, { provider: this.provider, model: this.model }) // counted for orchestration
+        this.onFail?.(e, { provider: this.provider, model: this.model }) // what it says is learned (a stated limit)
         // With a list of models, any failure makes way for the next one (another provider's first).
         // Without one, only what waiting can fix is tried again.
         if (!(this.rotation?.list.length > 1) && !outage(e)) throw e

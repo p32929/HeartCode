@@ -19,7 +19,16 @@ export function projectDir(root, what) {
   return dir
 }
 
-const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director', 'theme', 'format', 'lsp', 'voice', 'queue', 'rotation', 'statusBar', 'log', 'logRequests', 'logDetail', 'logDays', 'telegram', 'search', 'testTimeout', 'updateCheck', 'modelChoice', 'orchestrators', 'logs', 'replyStart', 'mouse']
+const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director', 'theme', 'format', 'lsp', 'voice', 'queue', 'rotation', 'statusBar', 'log', 'logRequests', 'logDetail', 'logDays', 'telegram', 'search', 'testTimeout', 'updateCheck', 'logs', 'replyStart', 'replyIdle', 'mouse']
+// How long a reply may take (the settings page's Your models), in seconds, with the defaults:
+// replyStart: a reply must start within it, else that model failed; replyIdle: a reply that stops
+// sending for it is stalled.
+export function speedOf(cfg) {
+  const sec = (v, d, min, max) => (Number.isInteger(Number(v)) && Number(v) >= min && Number(v) <= max ? Number(v) : d)
+  return { replyStart: sec(cfg.replyStart, 60, 5, 600), replyIdle: sec(cfg.replyIdle, 150, 10, 1800) }
+}
+export const SPEED_LIMITS = { replyStart: [5, 600], replyIdle: [10, 1800] }
+
 const LOCAL_NAMES = { 11434: 'ollama', 1234: 'lmstudio', 8080: 'llamacpp' }
 
 export function readJson(file, fallback) {

@@ -19,28 +19,9 @@ import { HOME, readJson, readConfig, writeJson, VERSION } from './config.js'
 import { log } from './log.js'
 import { savedToken, signIn, hasToken } from './oauth.js'
 
-// Built in; a config entry with the same name changes it, "disabled": true turns it off.
-export const DEFAULT_SERVERS = {
-  'chrome-devtools': {
-    command: 'npx',
-    // headless: no window pops up (works over SSH too); isolated: its own throwaway profile, so
-    // runs don't fight over one. Override args in ~/.heart/mcp.json for a visible browser.
-    args: ['-y', 'chrome-devtools-mcp@latest', '--headless', '--isolated'],
-    // a screenshot/snapshot saved by a relative path lands in the server's cwd: a scratch dir, not
-    // the project, so the browser never litters it (pages are opened by absolute file:// URLs).
-    scratchCwd: true,
-    description: 'a Chrome browser: open pages, click, fill forms, read the console and network requests, take screenshots',
-  },
-  'computer-use': {
-    command: 'npx',
-    args: ['-y', '@zavora-ai/computer-use-mcp@latest'],
-    // Off until you switch it on (/settings → MCP servers, or /mcp): it controls your whole desktop.
-    // Needs the OS's permission (macOS: Screen Recording + Accessibility for your terminal) and a
-    // vision model that's good at computer use — a weak model won't drive it well.
-    disabled: true,
-    description: 'control your computer like a person — screenshots, mouse, keyboard, clipboard (off by default; needs screen/accessibility permission and a capable vision model)',
-  },
-}
+// Built in: none. HeartCode comes with no MCP servers; you add the ones you want (/settings → MCP
+// servers, /mcp, or ~/.heart/mcp.json). Kept as a map so a server could be built in again by name.
+export const DEFAULT_SERVERS = {}
 
 // extra: more configs from the caller (--mcp-config: a file path or JSON text); strict: only those
 // (no built-in or configured servers), like Claude Code's --strict-mcp-config.

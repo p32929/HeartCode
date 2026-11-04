@@ -1,5 +1,5 @@
 // Every text HeartCode sends to a model is a section of a markdown file in prompts/ (agent.md,
-// guided.md, compact.md, tests.md: what the settings page's tests ask). prompt('guided/next-action') is the "## next-action" section of
+// guided.md, compact.md). prompt('guided/next-action') is the "## next-action" section of
 // guided.md. The user's own sections override the built-in ones, by name:
 //   ~/.heart/prompts/<file>.md          for every project
 //   <project>/.heartcode/prompts/<file>.md   for one project

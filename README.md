@@ -59,25 +59,14 @@ tried did what I needed:
 - **Tells you when a newer version is out** (a check with npm each time it starts, in the status bar):
   `/update` shows what changed and installs it the way you installed HeartCode. Switch it off in
   `/settings` → General.
-- **An orchestrator that hands work out**: with **Orchestrator** chosen at the top of Your models (in place of **Your order**),
-  each message starts on a model you choose for that (a quick, cheap one is enough). It answers
-  at once when it can ("hi" needs no other model), and otherwise hands the work to whichever of
-  your models it thinks suits it. It picks by what each model has shown: how quick it is, its
-  skill scores, and its record on the jobs it was handed before (the most similar ones shown to it),
-  then LMArena's public rankings. One **Test** checks the whole team at once, live in one dialog: does
-  each model answer, the skills of the ones that do the work, then each orchestrator handing them
-  work in a few short scenes (the best go first). Until it's run, HeartCode asks before your first message: test now, use your order, or send anyway.
-- **Work is checked, not taken on trust**: every job an orchestrator hands out comes with a check
-  that HeartCode runs itself when the model is done: a command (the tests, the program) that must
-  pass, or `page <file>`, which opens a web page in a real browser (Chrome, Chromium or Edge, found
-  on your computer; with none, a headless one is fetched once into ~/.heart/browser) and fails on errors, a blank page, or a click that
-  breaks it. A failed check goes back to the orchestrator with the output, to hand the fix on. Each
-  result goes into the model's record, so it picks better over time. `heartcode page index.html`
-  runs the same check from your shell and saves desktop and phone screenshots.
-- **Skills** (part of Test, with an orchestrator): four small real jobs per model, each scored by HeartCode, not by
-  another model: a function run against hidden tests, a small web app used in a real browser, a
-  picture with known shapes to find and count, and a bug to fix with HeartCode's tools. The scores
-  and each model's record of real jobs are columns of their own (Skills, Jobs).
+- **Your models, in your order**: #1 answers; when it fails, the next one in your list does. Your
+  models page shows what each can do and costs (from your providers and models.dev) and its places in
+  LMArena's public rankings for coding, web apps and vision (**Update model info** gets both); sort by
+  any of them, then keep the order you like. #1 can
+  hand a part of a job to your other models (the agent tool), picking one that can do it (one that
+  sees images, for a picture). `heartcode page index.html` checks a web page in a real browser
+  (errors, a blank page, text too faint to read, content hidden at load, icons that don't draw) and
+  saves desktop and phone screenshots.
 - **Works with discipline by default**: its rules (from Karpathy's guidelines, Grill Me,
   Superpowers, Ponytail and Caveman) have it ask before building, find a bug's root cause first,
   write the least code that works, change only what the task needs, prove it before saying done,
@@ -158,13 +147,14 @@ On **Models → Your list**:
    drop it). Click **Save order** to keep it.
 2. **Rearrange a bit more.** Drag a row to move it. #1 is the one HeartCode uses; the others are
    its fallbacks, tried in order.
-3. **Test them** (optional): **Test all** sends each a short message and shows which really answer (with an
-   orchestrator, **Test** checks the whole team). Each test waits up to 10 seconds; **Tests wait** changes that.
+3. **Test them** (optional): **Test all** sends each a short message and shows which really answer and
+   how fast (Works?; sort by it for the fastest first). **Test** on a row tests one, the eye shows
+   exactly what was sent and what came back. Each test waits up to 10 seconds; **Tests wait** changes that.
 4. **Filter them** (optional): by name, provider, test result (works, doesn't, not tested, or one
    error like 402), context, tools, thinking, images or free. **Test N** then tests only the ones
-   shown, and **Use only these N** makes them the models HeartCode uses, in the order you see (the others
-   stay under Providers). Filter to the working ones, sort by Works?, Use only these: HeartCode uses your
-   working models, fastest first.
+   shown, and **Use only these N** makes them the models HeartCode uses, in the order you see (the
+   others stay under Providers). Filter to the working ones, sort by Works?, Use only these: HeartCode
+   uses your working models, fastest first.
 
 If a model says *not found* in models.dev, **Retry** looks it up again, or **Set up** tells
 HeartCode what it can do.

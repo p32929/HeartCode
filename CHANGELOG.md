@@ -2,6 +2,39 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.53 (2026-11-04)
+
+- **Your models, in your order, and nothing picks for you**: #1 answers, the next one in your list
+  when it fails; #1 can hand a part to your other models, the first in your order that can do it (one
+  that sees, for an image). Gone: the orchestrator (the Your order / Orchestrator switch,
+  `--model-choice`, its handoff checks and the "never tested" dialog), the skills tests and the
+  orchestrator scenes, each model's job record, and models left out as "not used". Helpers, image
+  describers, reviewers and guided mode all go by your order.
+- **Test stays**: Test all, Test on a row and on the ones selected, the Works? column (sort by it:
+  fastest first), the result filter, the Request viewer, Tests wait. While it runs, the top of the page
+  stays three lines: the list's settings, the filters with Test all and Save order, then "Testing 56
+  models ✓ 9 work · ✗ 0 don't … 9 of 56 · Stop".
+- **LMArena's ranks, to sort by**: Update model info gets models.dev and LMArena's public rankings
+  together; Coding, Web apps and Vision show each model's score and place. They never choose a model.
+- **Your models page tidier**: the list's settings in one row (If one fails, Give up after, Stalled
+  after, Tests wait, New message to), the filters as one row with them; Tools, Thinking, Images and
+  Free as pill toggles; the table sized to its columns.
+- **No built-in skills or MCP servers**: HeartCode comes with none; add or install the ones you want.
+  The design guides moved to their own repo (`/install_skill p32929/p32929_design_skill`). If you used
+  the built-in `computer-use` or `chrome-devtools` server, add it in /settings → MCP servers.
+- **Skills in the Agent Skills format**: a skill's `metadata:` block is read (HeartCode's own fields
+  there: `heartcode-use`, `heartcode-load`); `load` brings a folder skill's files with it; the skill
+  tool reads a skill's own files (`file`); an always-on skill brings its files too, and its guides can
+  be read.
+- **Skills page rewritten**: your skills listed on the left, the one chosen on the right (who uses it,
+  where it lives, its files, the prompt); install in one line. Saving a one-file skill no longer makes a
+  second copy in a folder, and renaming a folder skill moves it with its files instead of losing them.
+- **Page checks look at more**: `heartcode page` fails text too faint to read (WCAG contrast), content
+  hidden when the page loads (shown only on scroll), icons that don't draw, and sideways scrolling on a
+  phone, saying which.
+- A helper that keeps making the same call over and over ends, and the job goes to your next model,
+  instead of going round until Esc.
+
 ## 0.1.52 (2026-11-04)
 
 - **Sessions live with the project**: a new conversation is saved in the folder you opened, in

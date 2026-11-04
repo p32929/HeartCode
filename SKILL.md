@@ -58,7 +58,7 @@ reached has an `error` (in text: a line on stderr) and is skipped; the command s
 
 | `-m` | What runs |
 |---|---|
-| `auto`, or no `-m` | the user's list: #1, and the next one in order when it fails (with the user's orchestrator setting: an orchestrator model first, below). Use this unless you need one particular model. |
+| `auto`, or no `-m` | the user's list: #1, and the next one in order when it fails. Use this unless you need one particular model. |
 | `provider/model` (`-m groq/openai/gpt-oss-120b`), or a model of #1's provider alone | that model alone: never another one, also when it fails (a rate limit or an outage is tried again, up to `--max-retries`) |
 | that, plus `--fallback-model provider/model` (repeatable) | that model, then the fallbacks in order when it fails (as `claude -p --fallback-model`) |
 
@@ -80,27 +80,9 @@ image, one that can't call tools gets the tool calls as text.
 
 `--provider <name>` and `-u <url>` (a server for this run) also mean one model, alone.
 
-**Orchestrator** (the user's choice of **Orchestrator** over **Your order**, at the top of Your models in
-`heart settings`; `--model-choice fit` for one run): with `auto`, each message starts on one of the
-models the user chose as orchestrators, in their order (none chosen: their first that calls tools). It answers
-at once, streaming, when it can (a greeting, a question), and otherwise hands the work to the
-user's other models through its `agent` tool, one handoff at a time. It picks which one (the quickest
-that has done such jobs well), knowing what each can do, how quick it is, its skill scores (from the
-settings page's Test), its record on earlier jobs (`~/.heart/model-stats.json`) and its places in the
-public LMArena rankings; a model that fails or is out of quota is reported back, and it picks another.
-HeartCode leaves out, for now, the user's models that can't work (a key or model name refused, a
-limit smaller than the model's first request, an orchestrator that failed every scene of the last
-Test), whatever the user chose. Until the user has run Test once, an orchestrator picks by names and
-ranks alone: headless, nothing asks, so tell the user to run Test (`heart settings` → Your models)
-for better picks, or use `--model-choice order`. Each handoff can carry
-a `check` that HeartCode runs when the model is done: a command that must exit 0, or `page <file>`
-(the page opened in a headless browser: errors, a blank page, a click that breaks it fail it). A
-failed check goes back to the orchestrator with its output; every result goes into that model's record.
-`heartcode page <file|url>` runs the page check from a shell (exit 0 when it passes) and saves
-screenshots to `.heartcode/page-shots/`. It has no other tool:
-the models it picks do the work. If no
-orchestrator answers, the list goes on to the next model. With "in your order" (the default), the list
-is the user's order, as is.
+`heartcode page <file|url>` checks a web page in a headless browser (errors, a blank page, a click
+that breaks it, text too faint to read, content hidden at load, icons that don't draw: exit 0 when it
+passes) and saves screenshots to `.heartcode/page-shots/`.
 
 A run picks up settings the user changes meanwhile (`heart settings`, another HeartCode, or
 `~/.heart` by hand) without being restarted, from its next request: the model order, prompts,
@@ -187,11 +169,10 @@ nothing is sent to the model to find out. A model models.dev doesn't know works 
 assumptions, and the user can set it up on the settings page. Models that can't call tools still
 work, in a slower guided mode.
 
-The model in use knows the user's other models (what each can do, how often it failed this
-session, and with an orchestrator their ranks overall, for code, web apps and vision) and works with them through its `agent` tool: it asks a model that can for what it
+The model in use knows the user's other models (in the user's order, with what each can do) and works with them through its `agent` tool: it asks a model that can for what it
 can't do itself (a model that can't see asks one that can about a screenshot: "which tiles show a
 chair?"), several at once when there are many images or parts, and a helper that fails is handed to
-the next capable model until one does the job. A helper works until its job is done (no step
+the next capable model in the user's order until one does the job. A helper works until its job is done (no step
 limit; `--max-turns` applies to it too). Their tokens are in `usage`, and each model's in
 `modelUsage`.
 
@@ -214,8 +195,7 @@ HEART_API_KEY=… heart -u https://api.groq.com/openai/v1 -m openai/gpt-oss-120b
 A model server on this machine (Ollama on :11434, LM Studio on :1234, llama.cpp on :8080) is
 found on its own. The user can also set everything up in a browser: `heart settings` (its link has
 the machine's network address, so it opens from another device too, for HeartCode on a server), where
-**Test all** (or, with an orchestrator, **Test**) under *Your models* sends a model a short message to show it really
-answers. A run that fails with a wrong key or an unknown model: ask the user to test it there.
+**Test all** under *Your models* sends each model a short message to show it really answers, and how fast. A run that fails with a wrong key or an unknown model: ask the user to test it there.
 
 ## More context for the task
 
@@ -282,7 +262,7 @@ fallback, the one that took over, not the one the run started with (the `init` l
 `modelUsage` in the `result` has each model that answered.
 
 Not in the stream: HeartCode's own prompts (the system prompt, its nudges), the review's verdict
-and the wrap-up. An orchestrator's handoffs are in it: `agent` tool calls, with the helper's lines under them. Their tokens are in `usage` and
+and the wrap-up. Helpers' work is in it: `agent` tool calls, with the helper's lines under them. Their tokens are in `usage` and
 `modelUsage`. Retries and switches to another model go to stderr with `--verbose`.
 
 ## Don't

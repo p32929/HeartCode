@@ -548,9 +548,8 @@ class Guided {
 
   // Another of your models, one with tool calls, does the whole task; what it did goes in the notes.
   async delegate() {
-    // the model with tool calls that failed least this session (and sees images, if the task came with some)
-    const fails = (t) => this.s.failures?.[`${t.provider} ${t.model}`] ?? 0
-    const team = this.s.team().filter((t) => t.tools).sort((a, b) => (this.images ? b.images - a.images : 0) || fails(a) - fails(b))
+    // the first of yours with tool calls (that sees images, if the task came with some)
+    const team = this.s.team().filter((t) => t.tools && (!this.images || t.images))
     const t = team[0]
     const done = await this.s.subagent({ description: 'the task', prompt: this.task, model: `${t.provider} ${t.model}` }, this.signal)
     this.note('delegate', `what ${t.model} did for the task`, done)

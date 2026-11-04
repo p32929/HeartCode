@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { log } from './log.js'
 import { slug, fullSlug, keywords } from './memory.js'
-import { fillArgs } from './skills.js'
+import { fillArgs, skillFiles, readSkillFile } from './skills.js'
 import { prompt } from './prompts.js'
 import path from 'node:path'
 import os from 'node:os'
@@ -671,17 +671,16 @@ export function extraTools(s) {
       parameters: obj({ action: { type: 'string', enum: ['write', 'read', 'search', 'delete'] }, name: str, description: str, type: str, tags: str, scope: { type: 'string', enum: ['project', 'global'] }, content: str, query: str }, ['action']),
     })
   }
-  const forModel = [...(s.skills?.values() ?? [])].filter((k) => k.use === 'model' || k.use === 'both') // "use: me" skills cost nothing here; "always" ones are in the system prompt
+  const forModel = [...(s.skills?.values() ?? [])].filter((k) => k.use !== 'me') // "use: me" skills cost nothing here; "always" ones are in the system prompt, and listed so their files can be read
   if (forModel.length) {
     const skills = forModel.map((k) => `${k.name}: ${k.description}`).join('\n')
-    out.push({ name: 'skill', description: prompt('agent/tool-skill', { skills }), parameters: obj({ name: str }, ['name']) })
+    out.push({ name: 'skill', description: prompt('agent/tool-skill', { skills }), parameters: obj({ name: str, file: str }, ['name']) })
   }
   if (!s.isSub && s.subagent) {
     const team = s.team?.() ?? []
-    const model = { type: 'string', description: prompt(s.orchestrating ? 'agent/tool-hand-model' : 'agent/tool-agent-model') }
+    const model = { type: 'string', description: prompt('agent/tool-agent-model') }
     const images = { type: 'array', items: str, description: prompt('agent/tool-agent-images') }
-    const check = { type: 'string', description: prompt('agent/tool-hand-check') } // an orchestrator's: HeartCode runs it when the model is done
-    out.push({ name: 'agent', description: prompt(s.orchestrating ? 'agent/tool-hand' : 'agent/tool-agent'), parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }), ...(s.orchestrating && { check }) }, ['description', 'prompt', ...(s.orchestrating ? ['model'] : [])]) }) // an orchestrator always chooses
+    out.push({ name: 'agent', description: prompt('agent/tool-agent'), parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }) }, ['description', 'prompt']) })
   }
   return [...out, ...(s.director && !s.appendSystem ? s.director.toolDefs(s) : [])] // manage (director.js); not when a program gives the instructions (--append-system-prompt)
 }
@@ -1321,9 +1320,7 @@ function mcpTarget(s, name) {
 
 // Tools the caller allowed (--allowedTools) or took away (--disallowedTools); all by default. An
 // MCP tool goes by its own name, its server's (mcp__server, as in Claude Code) or "mcp" (all of them).
-// An orchestrator: only handing work out (and asking the user).
 export function allowed(s, name) {
-  if (s.orchestrating && name !== 'agent' && name !== 'ask_user') return false
   const names = name.startsWith('mcp__') ? [name, name.split('__').slice(0, 2).join('__'), 'mcp'] : [name]
   if (names.some((n) => s.denyTools?.has(n))) return false
   if (!s.allowTools) return true
@@ -1397,7 +1394,11 @@ async function tool(name, args, s, signal, id) {
         return await askUser(s, args)
       case 'skill': {
         const k = s.skills?.get(String(args.name ?? ''))
-        return k && k.use !== 'me' ? fillArgs(k.body, '') : `error: no skill "${args.name}". Skills: ${[...(s.skills?.values() ?? [])].filter((x) => x.use !== 'me').map((x) => x.name).join(', ') || 'none'}`
+        if (!k || k.use === 'me') return `error: no skill "${args.name}". Skills: ${[...(s.skills?.values() ?? [])].filter((x) => x.use !== 'me').map((x) => x.name).join(', ') || 'none'}`
+        if (args.file) return readSkillFile(k, String(args.file))
+        const files = skillFiles(k)
+        const loaded = (k.load ?? []).map((f) => `\n\n--- ${f} ---\n${readSkillFile(k, f)}`).join('')
+        return fillArgs(k.body, '') + loaded + (files.length ? `\n\n${prompt('agent/skill-files', { name: k.name, files: files.join('\n') })}` : '')
       }
       default: {
         const m = mcpTarget(s, name)

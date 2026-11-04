@@ -1,7 +1,7 @@
 # Design skill: components to write
 
 Only the common components, and the ones an AI tends to get wrong. Not every shadcn component.
-Each: `skills/design/components/<name>.md` (lean, sourced rules) + `<name>.html` (the same, shown).
+Each (now in the skills_tests repo, design/): `components/<name>.md` (lean, sourced rules) + `<name>.html` (the same, shown).
 Several related components share one guide where the real decision is choosing between them.
 
 - [x] General rules (skills/design/general.md + general.html): what every screen follows
