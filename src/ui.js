@@ -78,6 +78,9 @@ export const THEMES = {
 }
 export const c = { bold: sgr(1, 22), italic: sgr(3, 23) }
 export let background = '' // the theme's background, as an escape sequence ('' = the terminal's)
+let foreground = '' // and its text color, with it: the terminal's own may not show on it (light on a dark terminal)
+// A row painted in the theme's background (and text color, where a style ends its own)
+const paintBg = (t) => t.replace(/\x1b\[(0|39|49)?m/g, (m, n) => m + (n === '39' ? foreground : n === '49' ? background : background + foreground))
 // Each palette color's opening sequence, to recolor what's already on screen (UI.recolor).
 export const themeCodes = () => Object.fromEntries(Object.keys(THEMES.dark).filter((k) => k !== 'background').map((k) => [k, c[k]('\0').split('\0')[0]]))
 export function setTheme(name = 'dark') {
@@ -93,6 +96,7 @@ export function setTheme(name = 'dark') {
   const [bgHex, bgBasic] = t.background ?? [null]
   delete t.background
   background = color && bgHex ? bg(bgHex, bgBasic)('\0').split('\0')[0] : ''
+  foreground = background && t.text[0] ? fg(t.text[0], t.text[1])('\0').split('\0')[0] : ''
   for (const [k, [hex, basic]] of Object.entries(t)) {
     if (!hex) c[k] = k === 'select' ? sgr(7, 27) : basic === 1 ? sgr(1, 22) : basic === 2 ? sgr(2, 22) : (s) => String(s)
     else c[k] = (k === 'select' ? bg : fg)(hex, basic)
@@ -306,6 +310,8 @@ function sgrState(state = {}, text) {
 }
 const sgrPrefix = (st = {}) => [st.fg, st.bg, st.bold, st.italic].filter(Boolean).map((x) => `\x1b[${x}m`).join('')
 
+const plainOf = (t) => String(t ?? '').replace(/\x1b\[[0-9;]*m/g, '')
+
 // Cuts a colored line to `cols` cells.
 function fit(line, cols) {
   return wrapAnsi(line, cols)[0]
@@ -356,13 +362,14 @@ export function wrapAnsi(line, cols) {
   return rows
 }
 
-// wrapAnsi at spaces: a word moves to the next row whole (one longer than a row is still cut)
-export function wrapWords(line, cols) {
+// wrapAnsi at spaces: a word moves to the next row whole (one longer than a row is still cut);
+// hang: the rows after the first indented by that many cells
+export function wrapWords(line, cols, hang = 0) {
   const width = (x) => x.replace(/\x1b\[[0-9;]*m/g, '').length
   const rows = []
   let row = ''
   for (const word of line.split(/(?<= )/)) {
-    if (width(row.trim()) && width(row + word.trimEnd()) > cols) {
+    if (width(row.trim()) && width(row + word.trimEnd()) > (rows.length ? cols - hang : cols)) {
       const style = (row.match(/\x1b\[[0-9;]*m/g) ?? []).reduce((st, e) => (e === '\x1b[0m' ? '' : st + e), '') // colors still on: carried to the next row
       rows.push(row.trimEnd() + (style ? '\x1b[0m' : ''))
       row = style
@@ -370,7 +377,33 @@ export function wrapWords(line, cols) {
     row += word
   }
   rows.push(row)
-  return rows.flatMap((r) => wrapAnsi(r, cols))
+  const pad = ' '.repeat(hang)
+  return rows.flatMap((r, i) => {
+    const [head, ...more] = wrapAnsi(r, i ? cols - hang : cols)
+    return [i ? pad + head : head, ...(more.length ? wrapAnsi(more.join(''), cols - hang).map((x) => pad + x) : [])]
+  })
+}
+
+// wrapWords with a hanging indent: wrapped rows go under the text, not back to column 0 (after a
+// marker like "! ", "● ", "⎿ ", or a two-column line's description column)
+export function wrapHang(line, cols) {
+  const plain = line.replace(/\x1b\[[0-9;]*m/g, '')
+  if (width(plain) <= cols) return [line]
+  const m = /^\s*(?:[^\w\s]{1,2}|\d{1,3}[.)]) (?=\S)/.exec(plain) ?? /^\s*\S.*?\S {2,}(?=\S)/.exec(plain) ?? /^\s*/.exec(plain)
+  const hang = width(m[0])
+  return wrapWords(line, cols, hang < cols * 0.6 ? hang : 0)
+}
+
+// "a · b · c" on as many rows as it needs, broken between its parts (never inside one)
+export function wrapParts(line, cols, sep = ' · ') {
+  const vis = (x) => width(x.replace(/\x1b\[[0-9;]*m/g, ''))
+  return line.split(sep).reduce((rows, k) => (rows.length && vis(rows.at(-1) + sep + k) <= cols ? (rows[rows.length - 1] += sep + k) : rows.push(k), rows), [])
+}
+
+// 4000 → "4s", 75000 → "1m 15s", 2h 3m: a clock that fits on a busy line
+const short = (ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`
 }
 
 // Streams text as an indented, word-wrapped block: "<marker>first line\n  next line".
@@ -401,7 +434,7 @@ export class Block {
         out += '\n'.repeat(Math.min(this.newlines, 2)) + this.indent
         this.col = this.indent.length
         this.newlines = 0
-      } else if (this.col >= this.width || (ch === ' ' && this.col >= this.width - 12)) {
+      } else if (!this.nowrap && (this.col >= this.width || (ch === ' ' && this.col >= this.width - 12))) {
         out += '\n' + this.indent + this.hang
         this.col = this.indent.length + this.hang.length
         if (ch === ' ') continue
@@ -417,9 +450,10 @@ export class Block {
   }
 }
 
-// The model's Markdown, drawn as it streams in: headings, lists, quotes, code blocks, rules,
-// **bold**, *italic* and `code`. Into a Block (which wraps); held back only while a line's start
-// or a "*" could still be a marker. Tables and links stay as written.
+// The model's Markdown, drawn as it streams in: headings, lists, quotes, code blocks (with a gutter),
+// tables (in columns: held back until the table ends), rules, **bold**, *italic* and `code`. Into a
+// Block (which wraps); held back only while a line's start or a "*" could still be a marker. Links
+// stay as written.
 export class Markdown {
   constructor(block, base = (x) => x) {
     Object.assign(this, { block, base, buf: '', sol: true, fence: false, bold: false, ital: false, code: false, line: null, prev: ' ' })
@@ -455,7 +489,11 @@ export class Markdown {
       this.fence = !this.fence
       return nl < 0 ? s.length : nl + 1 // the fence line itself isn't shown
     }
-    if (this.fence) return 0
+    if (this.fence) {
+      b.hang = '  '
+      this.#out('│ ', c.ghost) // code, set apart from the prose
+      return 0
+    }
     if (whole && /^\s*([-*_])(\s*\1){2,}\s*$/.test(head)) {
       this.#out('─'.repeat(Math.min(40, b.width - b.indent.length)), c.ghost)
       return head.length
@@ -478,10 +516,55 @@ export class Markdown {
     if ((m = /^\s*>\s?/.exec(head))) {
       b.hang = '  '
       this.line = (x) => c.faint(c.italic(x))
-      this.#out('│ ', c.ghost)
+      this.#out('▎ ', c.accent) // a quote: not the code gutter's │
       return m[0].length
     }
     return 0
+  }
+  // A table ("| a | b |" rows, "|---|" under the head): once it has ended (false: not yet), drawn
+  // in columns fitted to the width, the head bold, a rule under it. Returns how much of s it took.
+  #table(s, final) {
+    const lines = []
+    let at = 0
+    for (;;) {
+      const nl = s.indexOf('\n', at)
+      if (nl < 0) {
+        const rest = s.slice(at)
+        if (/^[ \t]*[^ \t|]/.test(rest)) break // the next line isn't a row: the table is over
+        if (!final) return false // a row still coming, or the table may go on
+        if (rest.trim()) lines.push(rest), (at = s.length)
+        break
+      }
+      const line = s.slice(at, nl)
+      if (!/^[ \t]*\|/.test(line)) break
+      lines.push(line)
+      at = nl + 1
+    }
+    const sep = (l) => /^[ \t]*\|?[ \t]*:?-{2,}:?[ \t]*(\|[ \t]*:?-{2,}:?[ \t]*)*\|?[ \t]*$/.test(l)
+    const b = this.block
+    if (!lines.some(sep)) {
+      for (const l of lines) this.#out(l + '\n', this.base) // not a table after all: as written
+      return at
+    }
+    const strip = (t) => t.replace(/\*\*|__|`/g, '').trim()
+    const rows = lines.filter((l) => !sep(l)).map((l) => l.trim().replace(/^\||\|$/g, '').split('|').map(strip))
+    const n = Math.max(...rows.map((r) => r.length))
+    const wide = [...Array(n)].map((_, k) => Math.max(1, ...rows.map((r) => width(r[k] ?? ''))))
+    const room = b.width - b.indent.length - 3 * (n - 1)
+    while (wide.reduce((x, y) => x + y, 0) > room && Math.max(...wide) > 3) wide[wide.indexOf(Math.max(...wide))]-- // too wide: the widest columns give way
+    const cell = (t, w) => (width(t) > w ? `${sliceCols(t, 0, w - 1)}…` : t + ' '.repeat(w - width(t)))
+    b.nowrap = true
+    rows.forEach((r, i) => {
+      wide.forEach((w, k) => {
+        if (k) this.#out(' │ ', c.ghost)
+        const t = k === n - 1 ? cell(r[k] ?? '', w).trimEnd() : cell(r[k] ?? '', w)
+        this.#out(t || ' ', i ? this.base : (x) => c.bold(c.bright(x)))
+      })
+      this.#out('\n')
+      if (!i) this.#out(wide.map((w) => '─'.repeat(w)).join('─┼─') + '\n', c.ghost)
+    })
+    b.nowrap = false
+    return at
   }
   #run(final) {
     let s = this.buf
@@ -489,10 +572,16 @@ export class Markdown {
     const flush = () => (this.#out(text), (text = ''))
     let i = 0
     while (i < s.length) {
+      if (this.sol && !this.fence && /^[ \t]*\|/.test(s.slice(i, i + 40))) {
+        const n = this.#table(s.slice(i), final)
+        if (n === false) break
+        i += n
+        continue
+      }
       if (this.sol) {
         const n = this.#lineStart(s.slice(i), final)
         if (n === false) break
-        this.sol = false
+        this.sol = n > 0 && s[i + n - 1] === '\n' // a fence line, taken whole: the next line starts next
         i += n
         continue
       }
@@ -688,6 +777,8 @@ export class UI {
     this.asking = false
     this.frame = 0
     this.dialog = null // a box over the screen (the background commands' logs)
+    this.waitingFor = null // () → the model a request waits on (the app's), for "waiting for <model>"
+    this.helpers = new Map() // helpers at work (agent.js): label → what it's doing now, shown under the spinner
   }
 
   // A dialog: a box in the middle, 70% of the screen each way, the conversation going on around it;
@@ -704,8 +795,9 @@ export class UI {
     this.render()
   }
   // Text to read (a command's answer: /help, /context, /diff…) in a dialog: ↑/↓, PgUp/PgDn, Home/End
-  // and the wheel scroll it, Esc closes it. Without the full screen: printed.
-  showText(title, text) {
+  // and the wheel scroll it, Esc closes it (and toggle: a key's action, as the key that opened it).
+  // Without the full screen: printed.
+  showText(title, text, toggle) {
     if (!this.full) return this.print(text)
     const all = String(text).split('\n')
     let top = 0
@@ -713,26 +805,27 @@ export class UI {
     let total = 0
     this.setDialog({
       title,
+      toggle,
       key: (key) => {
         const by = { up: key.wheel ? -3 : -1, down: key.wheel ? 3 : 1, pageup: -page, pagedown: page, home: -1e9, end: 1e9 }[key.name]
         if (by) top = Math.max(0, Math.min(top + by, total - page))
       },
       draw: (w, h) => {
-        const rows = all.flatMap((l) => wrapWords(l, w))
+        const rows = all.flatMap((l) => wrapHang(l, w)) // a two-column line's description wraps under itself
         total = rows.length
-        page = h - 2
+        const foot = (p) => wrapParts(`${total > p ? `${top + 1}–${Math.min(total, top + p)} of ${total} lines · ↑/↓ PgUp/PgDn scroll · ` : ''}Esc close`, w)
+        page = h - 1 - foot(h - 2).length
         top = Math.max(0, Math.min(top, total - page))
-        const shown = rows.slice(top, top + page)
-        const where = total > page ? `${top + 1}–${Math.min(total, top + page)} of ${total} lines · ↑/↓ PgUp/PgDn scroll · ` : ''
-        return [...shown, '', c.faint(`${where}Esc close`)]
+        return [...rows.slice(top, top + page), '', ...foot(page).map((r) => c.faint(r))]
       },
     })
   }
 
-  // where it is: { x, y, w, h } (screen cells, from 0; the inside, without the border)
+  // where it is: { x, y, w, h } (screen cells, from 0; the inside, without the border); 70% of the
+  // screen, 90% of a small one (a narrow one: long names on fewer rows)
   #dialogBox(cols, rows) {
-    const w = Math.max(30, Math.floor(cols * 0.7))
-    const h = Math.max(8, Math.floor(rows * 0.7))
+    const w = Math.max(30, Math.floor(cols * (cols < 100 ? 0.9 : 0.7)))
+    const h = Math.max(8, Math.floor(rows * (rows < 40 ? 0.9 : 0.7)))
     return { x: Math.floor((cols - w) / 2) + 1, y: Math.floor((rows - h) / 2) + 1, w: Math.min(w, cols) - 2, h: Math.min(h, rows) - 2 }
   }
   // d: { title, lines(w, h) → lines (at most h), fill?: always 70% tall too (a log), cursor?(w) →
@@ -751,14 +844,14 @@ export class UI {
     const x = Math.floor((cols - W - 2) / 2) + 1
     const y = Math.floor((rows - h - 2 * PY - 2) / 2) + 1
     this.dialogAt = { x, y, W, H: h + 2 * PY, cx: x + 1 + PX, cy: y + 1 + PY } // for the mouse (screen cells, from 1)
-    const paint = (t) => (background ? `${background}${t.replace(/\x1b\[(0|49)?m/g, (m) => m + background)}\x1b[0m` : `${t}\x1b[0m`)
+    const paint = (t) => (background ? `${background}${foreground}${paintBg(t)}\x1b[0m` : `${t}\x1b[0m`)
     const pad = (t, n) => {
       const cut = fit(t, n)
       return cut + ' '.repeat(Math.max(0, n - width(cut.replace(/\x1b\[[0-9;]*m/g, ''))))
     }
     const title = name ? ` ${width(name) > W - 6 ? `${fit(name, W - 7)}…` : name} ` : '' // too long: cut (a question shows all of it inside)
     const row = (i, t) => `\x1b[${y + i};${x}H${paint(t)}`
-    let out = row(0, c.brand('╭─') + c.bold(title) + c.brand('─'.repeat(Math.max(0, W - width(title) - 1)) + '╮'))
+    let out = row(0, c.brand('╭─') + c.bright(c.bold(title)) + c.brand('─'.repeat(Math.max(0, W - width(title) - 1)) + '╮'))
     const blank = c.brand('│') + ' '.repeat(W) + c.brand('│')
     for (let i = 0; i < PY; i++) out += row(1 + i, blank)
     for (let i = 0; i < h; i++) out += row(1 + PY + i, c.brand('│') + ' '.repeat(PX) + pad(lines[i] ?? '', w) + ' '.repeat(PX) + c.brand('│'))
@@ -771,11 +864,17 @@ export class UI {
     return [out, cur ? `\x1b[${y + 1 + PY + cur.row};${x + 1 + PX + Math.min(cur.col, w - 1)}H\x1b[?25h` : '\x1b[?25l']
   }
 
+  // A pick shown as cards: one to choose from a few, in no groups (no filter to type into)
+  #cards(pick) {
+    return Boolean(pick && !pick.multi && pick.items.length <= 6 && !pick.items.some((x) => x.group))
+  }
+
   // The question being asked, as a dialog: its title; what's typed (the filter, or the answer) with the
   // cursor; a picker's choices. A short list (a few, one to choose) is shown as cards: the name, its
   // description under it. A permission (confirm) shows what just happened (the change or command it
   // asks about) above the choices. A picker's body (pick's option): a few lines saying what's going on.
-  #question() {
+  // Too little room: the keys and the countdown stay; the text, the choices, what it's about give way.
+  #question(cols, rows) {
     const rl = this.rl
     const m = this.menu
     const plain = (t) => String(t ?? '').replace(/\x1b\[[0-9;]*m/g, '')
@@ -789,55 +888,125 @@ export class UI {
     const padTo = (t, n) => t + ' '.repeat(Math.max(0, n - width(plain(t))))
     const pick = m.pick
     const choices = pick ? m.items.filter((x) => !x.header) : []
-    const cards = pick && !pick.multi && pick.items.length <= 6 && !m.items.some((x) => x.header)
+    const cards = this.#cards(pick)
+    const own = pick?.items.some((x) => x.own) // typing goes into "Something else", not a filter
+    const typingOwn = m.items[m.sel]?.item?.own && m.items[m.sel].item.text // ←/→ move in what's typed; Tab goes on
     const body = pick?.body ? String(pick.body).split('\n') : []
-    const hint = (pick ? (pick.fixed ? '↑↓ move · Enter choose · Esc close' : pick.multi ? '↑↓ move · Space tick · Alt+A all · Alt+N none · Enter take · Esc cancel · type to filter' : `↑↓ move · Enter choose · Esc cancel${cards ? '' : ' · type to filter'}`) : 'Enter send · Esc cancel') + this.autoHint()
+    const hint = (pick?.nav ? (typingOwn ? 'Tab questions · ' : '←→ questions · ') : '') + (pick ? (pick.fixed ? '↑↓ move · Enter choose · Esc close' : pick.multi ? `↑↓ move · Space tick · Alt+A/N all/none · Enter take · Esc cancel · ${own ? 'type your own' : 'type to filter'}` : `↑↓ move · Enter choose · Esc cancel${own ? ' · type your own' : cards ? '' : ' · type to filter'}`) : 'Enter send · Esc cancel')
+    const timer = this.autoLine() // on its own line, so it's seen (and not cut off with the keys)
+    const long = width(title) > this.#dialogBox(cols, rows).w - 6 // too long for the border: inside instead, said once
+    // at most n rows; the rest said to be there
+    const clip = (lines, n) => (lines.length <= n ? lines : [...lines.slice(0, Math.max(0, n - 1)), c.faint(`↓ ${lines.length - n + 1} more lines`)])
+    // text on at most n rows of w, the last ending in "…" when there's more
+    const rowsOf = (t, w, n) => {
+      const r = wrapWords(t, w)
+      return r.length <= n ? r : [...r.slice(0, n - 1), `${fit(r[n - 1], w - 1)}…`]
+    }
     let at = 0
-    const long = (w) => width(title) > w // too long for the border: all of it inside too
     return {
-      title: title.length > 200 ? title.slice(0, 200) : title,
-      cursor: (w) => (pick?.fixed || (cards && pick) ? null : { row: at, col: field(w).col }),
+      title: long || title.length > 200 ? '' : title,
+      cursor: (w) => (pick?.fixed || (cards && pick) || own ? null : { row: at, col: field(w).col }),
       lines: (w, h) => {
-        const head = long(w) ? [...wrapAnsi(c.bold(title), w).map((l) => l), ''] : []
-        const text = body.flatMap((l) => wrapAnsi(/^https?:\/\/\S+$/.test(l.trim()) ? c.info(l) : c.muted(l), w)) // an address in its link color
-        const intro = [...head, ...text, ...(text.length ? [''] : [])]
+        const rule = c.ghost('─'.repeat(w))
+        const head = long ? [...wrapWords(c.bright(c.bold(title.slice(0, 1000))), w), ''] : []
+        const text = body.flatMap((l) => wrapHang(/^https?:\/\/\S+$/.test(l.trim()) ? c.info(l) : c.muted(l), w)) // an address in its link color
+        const intro = [...(pick?.tabs ? [...wrapAnsi(c.text(pick.tabs), w), ''] : []), ...head, ...text, ...(text.length ? [''] : [])]
+        const keys = wrapParts(hint, w).map((r) => c.faint(r))
         if (!pick) {
-          const recent = this.askAbout ? this.#recent(w, Math.min(8, h - intro.length - 5)) : []
-          const top = [...recent, ...(recent.length ? [c.ghost('─'.repeat(w)), ''] : []), ...intro]
+          const shown = clip(intro, h - 2 - keys.length)
+          const recent = this.askAbout ? this.#recent(w, Math.min(8, h - shown.length - 4 - keys.length), title) : []
+          const top = [...recent, ...(recent.length ? [rule, ''] : []), ...shown]
           at = top.length
-          return [...top, field(w).text, '', c.faint(hint)]
+          return [...top, field(w).text, '', ...keys]
         }
+        const filter = pick.fixed || cards || own ? [] : [field(w).text, rule]
+        const tail = ['', ...(timer ? wrapParts(timer, w).map((r) => c.warn(r)) : []), ...keys]
+        // the cards: each its rows (a long name on two, a description on up to three), a gap between
+        const blocks = !cards
+          ? []
+          : choices.map((x, i) => {
+              const on = m.items[m.sel] === x
+              const name = rowsOf(x.item.label, w - 2, 2).map((r, k) => (k ? '  ' : on ? `${c.brand('❯')} ` : '  ') + (on ? c.bright(c.bold(r)) : c.text(r)))
+              const desc = x.item.desc ? rowsOf(String(x.item.desc), w - 2, 3).map((r) => `  ${on ? c.muted(r) : c.faint(r)}`) : []
+              const rows = [...name, ...desc].map((r) => (on ? c.select(padTo(r, w)) : r))
+              return i < choices.length - 1 && choices.some((y) => y.item.desc) ? [...rows, ''] : rows
+            })
+        const want = cards ? blocks.flat().length : Math.max(1, m.items.length)
+        const least = Math.min(want, cards ? Math.max(...blocks.map((b) => b.length)) + 2 : 3) // the choices give way first, down to this
+        const top0 = clip(intro, Math.max(3, h - tail.length - filter.length - least))
+        const room = Math.max(1, h - tail.length - filter.length - top0.length)
         let list
-        if (cards) {
-          list = choices.length
-            ? choices.flatMap((x, i) => {
-                const on = m.items[m.sel] === x
-                const name = on ? `${c.brand('❯')} ${c.bright(c.bold(x.item.label))}` : `  ${c.text(x.item.label)}`
-                const desc = x.item.desc ? (on ? `  ${c.muted(x.item.desc)}` : `  ${c.faint(x.item.desc)}`) : null
-                const rows = [name, ...(desc ? [desc] : [])].map((r) => (on ? c.select(padTo(r, w)) : r))
-                return i < choices.length - 1 && choices.some((y) => y.item.desc) ? [...rows, ''] : rows // a gap between cards that have two lines
-              })
-            : [c.faint(`nothing matches "${rl.line}"`)]
+        if (!choices.length) list = [c.faint(`nothing matches "${rl.line}"`)]
+        else if (!cards) list = this.#menuLines(w, Math.max(1, Math.min(room - (m.items.length > room ? 1 : 0), m.items.length))).slice(1)
+        else if (blocks.flat().length <= room) list = blocks.flat()
+        else {
+          // not all of them fit: the chosen one and those around it, with how many more above and below
+          let [a, b] = [Math.max(0, choices.findIndex((x) => m.items[m.sel] === x)), 0]
+          b = a + 1
+          const size = (a, b) => blocks.slice(a, b).flat().length + (a > 0) + (b < blocks.length)
+          for (;;) {
+            if (b < blocks.length && size(a, b + 1) <= room) b++
+            else if (a > 0 && size(a - 1, b) <= room) a--
+            else break
+          }
+          const up = a ? [c.faint(`↑ ${a} more`)] : []
+          const down = b < blocks.length ? [c.faint(`↓ ${blocks.length - b} more`)] : []
+          list = [...up, ...blocks.slice(a, b).flat().slice(0, Math.max(1, room - up.length - down.length)), ...down]
         }
-        const filter = pick.fixed || cards ? [] : [field(w).text, c.ghost('─'.repeat(w))]
-        const room = h - intro.length - filter.length - 2
-        if (!cards) list = m.items.length ? this.#menuLines(w, Math.max(1, Math.min(room - (m.items.length > room ? 1 : 0), m.items.length))).slice(1) : [c.faint(`nothing matches "${rl.line}"`)]
-        const recent = this.askAbout ? this.#recent(w, Math.min(8, room - list.length - 1)) : []
-        const top = [...recent, ...(recent.length ? [c.ghost('─'.repeat(w)), ''] : []), ...intro]
+        const recent = this.askAbout ? this.#recent(w, Math.min(8, h - tail.length - filter.length - top0.length - list.length - 2), title) : []
+        const top = [...recent, ...(recent.length ? [rule, ''] : []), ...top0]
         at = top.length
-        return [...top, ...filter, ...list, '', c.faint(hint)]
+        return [...top, ...filter, ...list, ...tail]
       },
     }
   }
 
-  // The last `n` rows of this task's output at width w (what a question in the middle of the work is about).
-  #recent(w, n) {
+  // The plan (todo list) while it works, kept in sight under the spinner: how much is done, what's
+  // being done, what's left. Long ones: the finished folded into a count, the open ones up to 8.
+  #todoLines(cols) {
+    const todos = this.todos?.() ?? []
+    const open = todos.filter((t) => t.status !== 'completed')
+    if (!open.length) return []
+    const done = todos.length - open.length
+    const mark = { pending: c.muted('☐'), in_progress: c.info('◐'), completed: c.faint('☑') }
+    const line = (t) => fit(`    ${mark[t.status]} ${t.status === 'in_progress' ? c.info(c.bold(t.content)) : t.status === 'completed' ? c.faint(t.content) : c.muted(t.content)}`, cols)
+    const shown = todos.length <= 8 ? todos : open.slice(0, 7)
+    return [
+      fit(`  ${c.muted('Plan')} ${c.faint(`· ${done} of ${todos.length} done`)}`, cols),
+      ...(todos.length > 8 && done ? [fit(`    ${c.faint(`☑ ${done} done`)}`, cols)] : []),
+      ...shown.map(line),
+      ...(open.length > shown.filter((t) => t.status !== 'completed').length ? [fit(`    ${c.faint(`… ${open.length - 7} more`)}`, cols)] : []),
+    ]
+  }
+
+  // The last lines of this task's output, at most n rows of w (what a question in the middle of the work
+  // is about): whole lines, from the start of a block (not mid-sentence), without what the question
+  // itself says (about: its text, e.g. the command it asks to run).
+  #recent(w, n, about = '') {
     if (n <= 0) return []
-    const out = []
+    const flat = (t) => t.replace(/\x1b\[[0-9;]*m/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+    const said = flat(about)
     const from = Math.max(0, (this.inputMark ?? 0) + 1) // this task's: from after your message
-    for (let i = this.log.length - 1; i >= from && out.length < n; i--) out.unshift(...wrapAnsi(this.log[i], w))
-    while (out.length && !out[0].trim()) out.shift()
-    return out.slice(-n)
+    const got = [] // [{ i, rows }]
+    let used = 0
+    let cut = false
+    for (let i = this.log.length - 1; i >= from; i--) {
+      const t = flat(this.log[i]).replace(/^[^\w\s]{1,2} /, '')
+      if (t.length >= 8 && said.includes(t)) continue // already in the question
+      const rows = wrapHang(this.log[i], w)
+      if (used + rows.length > n) {
+        cut = true
+        break
+      }
+      got.unshift({ i, rows })
+      used += rows.length
+    }
+    // cut short: from the first line that starts a block (after a blank line, or not indented)
+    const start = cut ? got.findIndex((g) => !flat(this.log[g.i - 1] ?? '') || /^\S/.test(plainOf(this.log[g.i]))) : 0
+    const out = got.slice(Math.max(0, start)).flatMap((g) => g.rows)
+    while (out.length && !plainOf(out[0]).trim()) out.shift()
+    while (out.length && !plainOf(out.at(-1)).trim()) out.pop()
+    return out
   }
 
   // One model reply: thinking (dim, its own block) kept apart from the answer.
@@ -862,10 +1031,11 @@ export class UI {
     return {
       think: (t) => {
         if (!t || text) return
+        this.tokenAt = Date.now() // it answers: no longer "waiting for" it
         thought += t
         if (!this.showThinking && !think) {
           this.thinkTail = thought.slice(-4000) // its last two lines, live (render)
-          return this.spinner(`thinking · ${secs()}`)
+          return this.spinner('thinking') // the time: in the line under it (and "thought for" after)
         }
         if (!think) {
           this.thinkTail = ''
@@ -880,7 +1050,9 @@ export class UI {
       },
       text: (t) => {
         if (!t) return
+        this.tokenAt = Date.now()
         if (!text) {
+          if (this.label === 'thinking') this.label = 'answering'
           think?.end()
           this.gap()
           summary()
@@ -1156,7 +1328,7 @@ export class UI {
     const out = []
     this.log.forEach((line, i) => {
       const w = this.wrapped[i]
-      if (!w || w.src !== line) this.wrapped[i] = { src: line, rows: wrapAnsi(line, cols) }
+      if (!w || w.src !== line) this.wrapped[i] = { src: line, rows: wrapHang(line, cols) } // at spaces, wrapped rows under the text
       out.push(...this.wrapped[i].rows)
     })
     return out
@@ -1184,23 +1356,33 @@ export class UI {
     const below = [hiddenBelow ? note(hiddenBelow, '↓') : rule, ...(statusText ? statusText.split('\n').map((l) => fit(' ' + l, cols)) : [])]
     const bottom = []
     if (this.timer && !this.asking) {
-      // the spinner on its own line; the timer (and Esc) on the next, so neither line is crammed
+      // the spinner on its own line, one status: the model not answering yet (since this request went),
+      // else what's being done; the time in all (and Esc) on the next, on more lines when it doesn't fit
       const request = this.requestSince?.()
-      const timer = this.busySince ? `responding ${duration(this.worked())}${request ? ` · waiting for model ${duration(Date.now() - request)}` : ''} · Esc to stop${this.thinkTail ? ' · Alt+O shows all thinking' : ''}` : ''
+      const label = this.#label()
+      const waiting = request && !(this.tokenAt >= request) && this.beforeRetry === undefined
+      const status = waiting ? `${/^(working|thinking|answering)$/.test(plainOf(label)) ? '' : `${label} · `}waiting for ${this.waitingFor?.() || 'the model'} ${short(Date.now() - request)}` : label
+      const timer = this.busySince ? [this.beforeRetry !== undefined && 'no answer yet', `${short(this.worked())} in all`, 'Esc to stop', this.thinkTail && 'Alt+O shows all thinking'].filter(Boolean).join(' · ') : ''
       if (this.thinkTail) {
         // the thinking's last two lines (long ones wrapped), dim, changing as it comes
         const w = Math.max(20, cols - 6)
         const lines = this.thinkTail.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).flatMap((l) => l.match(new RegExp(`.{1,${w}}(\\s|$)|.{${w}}`, 'g')) ?? [l]).map((l) => l.trim()).filter(Boolean)
         for (const l of lines.slice(-2)) bottom.push(fit(`  ${c.think(c.italic(l))}`, cols))
       }
-      bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(this.#label())}`, cols))
-      if (timer) bottom.push(fit(`  ${c.faint(timer)}`, cols))
+      bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(status)}`, cols))
+      if (timer) bottom.push(...wrapParts(timer, cols - 2).map((r) => fit(`  ${c.faint(r)}`, cols)))
+      // helpers at work (agent.js keeps them in this.helpers: label → what it's doing), then the plan
+      const helpers = [...this.helpers]
+      for (const [name, what] of helpers.slice(0, helpers.length > 6 ? 5 : 6)) bottom.push(fit(`  ${c.faint('◦')} ${c.muted(name)}${what ? c.faint(` · ${what}`) : ''}`, cols))
+      if (helpers.length > 6) bottom.push(c.faint(`  … ${helpers.length - 5} more`))
+      bottom.push(...this.#todoLines(cols))
     }
     if (this.scroll) bottom.push(c.dim(`  ↓ ${Number.isFinite(this.scroll) ? this.scroll : 'more'} lines below · held here while you read · Alt+Shift+↓ to the bottom`))
     if (this.ahead.length) {
       const key = (k, d) => `${c.muted(k)} ${c.faint(d)}`
       const sep = c.ghost(' · ')
-      bottom.push(fit(`  ${c.bright(`queued ${this.ahead.length}`)}${sep}${c.faint(`when done: ${this.queueMode === 'one' ? 'one by one' : 'all together'}`)}${sep}${[key('Alt+S', 'send first now'), key('Alt+A', 'send all now'), key('Alt+M', 'change when done')].join(sep)}`, cols))
+      const queued = `${c.bright(`queued ${this.ahead.length}`)}${sep}${c.faint(`when done: ${this.queueMode === 'one' ? 'one by one' : 'all together'}`)}${sep}${[key('Alt+S', 'send first now'), key('Alt+A', 'send all now'), key('Alt+M', 'change when done')].join(sep)}`
+      bottom.push(...wrapParts(queued, cols - 2, sep).map((r) => fit(`  ${r}`, cols))) // on more lines, not cut
       for (const [i, l] of this.ahead.slice(0, 5).entries()) bottom.push(fit(`  ${c.accent(`${i + 1}.`)} ${c.muted(l.replace(/\s+/g, ' '))}`, cols))
       if (this.ahead.length > 5) bottom.push(c.faint(`  … ${this.ahead.length - 5} more`))
     }
@@ -1223,7 +1405,7 @@ export class UI {
       for (let i = Math.max(0, s.row - top); i <= Math.min(view.length - 1, e.row - top); i++) view[i] = highlight(view[i], top + i === s.row ? s.col : 0, top + i === e.row ? e.col + 1 : Infinity)
     }
     // a theme with a background: every row painted with it (a style ending its own background goes back to it)
-    let row = background ? (line) => `${background}${line.replace(/\x1b\[(0|49)?m/g, (m) => m + background)}\x1b[K\x1b[0m` : (line) => `${line}\x1b[0m\x1b[K`
+    let row = background ? (line) => `${background}${foreground}${paintBg(line)}\x1b[K\x1b[0m` : (line) => `${line}\x1b[0m\x1b[K`
     let s = '\x1b[?25l'
     // a dialog open: everything behind it dimmed
     if (this.dialog || asked) {
@@ -1260,7 +1442,7 @@ export class UI {
     let cursor
     if (this.dialog || asked) {
       this.regions = new Map()
-      const [box, cur] = this.#drawDialog(cols, rows, this.dialog ? { title: this.dialog.title, fill: this.dialog.fill, lines: (w, h) => this.dialog.draw(w, h) } : this.#question())
+      const [box, cur] = this.#drawDialog(cols, rows, this.dialog ? { title: this.dialog.title, fill: this.dialog.fill, lines: (w, h) => this.dialog.draw(w, h) } : this.#question(cols, rows))
       s += box
       cursor = cur // a question: its cursor in the box; else hidden
     } else {
@@ -1328,7 +1510,8 @@ export class UI {
       // and not in a menu or a mid-task yes/no question, where Space types a space as usual)
       if (key.name === 'space' && !this.rl.line && !this.menu.pick && !(this.asking && !this.histOn) && this.voiceReady()) return this.#action('voice', write)
       if (!this.asking && !(key.ctrl && key.name === 'c')) return this.#typeAhead(s, key, write)
-      if (key.name === 'tab' && key.shift) return this.cyclePermission()
+      // Shift+Tab: the mode at the prompt only; never while a question is open (between questions: the one before)
+      if (key.name === 'tab' && key.shift && !this.menu.pick?.nav) return this.histOn ? this.cyclePermission() : undefined
       // A new line instead of sending: Shift/Ctrl/Alt/Cmd+Enter (arrive as "\n" or ESC+Enter),
       // Ctrl+J, "\" right before Enter, and line breaks inside a paste.
       if (key.name === 'paste-start' || key.name === 'paste-end') {
@@ -1361,6 +1544,7 @@ export class UI {
         const twice = key.sequence === '\x1b\x1b' || Date.now() - (this.lastEscape ?? 0) < 800 // a lone Esc also comes with meta set
         this.lastEscape = twice ? 0 : Date.now()
         if (twice) {
+          this.remember(rl.line) // wiped, not lost: ↑ brings it back
           this.clearInput()
           return this.refreshMenu()
         }
@@ -1378,6 +1562,25 @@ export class UI {
         return
       }
       if (m.pick) {
+        // an answer of their own (ask_user's "Something else"): what's typed goes into it, right there
+        const own = m.pick.items.find((x) => x.own)
+        const onOwn = own && it?.item === own
+        const typing = own && !key.ctrl && !key.meta && ((key.name === 'backspace' && onOwn) || (/^[^\x00-\x1f\x7f]+$/.test(s ?? '') && !(key.name === 'space' && m.pick.multi && !onOwn)))
+        if (typing) {
+          own.hint ??= own.text ? 'type your own answer' : own.desc // what it says before anything's typed
+          own.text = key.name === 'backspace' ? (own.text ?? '').slice(0, -1) : (own.text ?? '') + s
+          own.desc = own.text ? `› ${own.text}▏` : own.hint
+          if (m.pick.multi) own.checked = Boolean(own.text)
+          m.sel = m.items.findIndex((x) => x.item === own)
+          return this.refreshMenu()
+        }
+        if (onOwn && own.text && (key.name === 'left' || key.name === 'right')) return // typing: not to another question (Tab still goes)
+        if (onOwn && key.name === 'return' && !own.text?.trim() && !m.pick.multi) return // nothing typed yet: type it here
+        // between questions (ask_user with several): what's ticked stays ticked
+        if (m.pick.nav && !rl.line && (key.name === 'left' || key.name === 'right' || key.name === 'tab')) {
+          m.pick.chosen = { nav: key.name === 'left' || (key.name === 'tab' && key.shift) ? -1 : 1 }
+          return write('\r', { name: 'return' })
+        }
         if (key.name === 'up' || key.name === 'down') return this.#move(key.name === 'up' ? -1 : 1)
         if (key.name === 'tab') return
         if (m.pick.multi && key.name === 'space' && it && !it.item.only) {
@@ -1392,6 +1595,7 @@ export class UI {
           return write('\r', { name: 'return' })
         }
         if (key.name === 'return') return // nothing matches the filter
+        if (!own && this.#cards(m.pick)) return // cards have no filter: typing into one nobody sees would hide them all
         write(s, key)
         return this.refreshMenu()
       }
@@ -1513,7 +1717,7 @@ export class UI {
       case 'stop':
         return this.asking ? undefined : this.onEscape?.()
       case 'cycle_permissions':
-        return this.cyclePermission()
+        return this.asking && !this.histOn ? undefined : this.cyclePermission() // not while a question is open
       case 'newline':
         rl.line = rl.line.slice(0, rl.cursor) + '\n' + rl.line.slice(rl.cursor)
         rl.cursor++
@@ -1734,7 +1938,9 @@ export class UI {
     const w = Math.min(Math.max(0, ...shown.filter((x) => !x.header).map((x) => x.value.length)), 48)
     const lines = shown.map((x, i) => {
       if (x.header) return c.accent(c.bold(x.value.slice(0, width)))
-      const plain = `${x.value.padEnd(w)}  ${x.desc ?? ''}`.slice(0, width - 2 - pad.length)
+      const full = `${x.value.padEnd(w)}  ${x.desc ?? ''}`.trimEnd()
+      const room = width - 2 - pad.length
+      const plain = full.length > room ? `${full.slice(0, room - 1)}…` : full // cut: said so
       const name = plain.slice(0, w)
       if (first + i !== m.sel) return `${pad}  ${c.text(name)}${c.faint(plain.slice(w))}`
       const row = `${c.brand('❯')} ${c.bright(c.bold(name))}${c.muted(plain.slice(w))}`
@@ -1892,11 +2098,12 @@ export class UI {
           const pick = this.menu.pick
           const echo = prompt.replace(/^ /, '') // the input's margin isn't part of the conversation
           this.inputMark = this.log.length - 1 // where this message starts, for /rewind
-          const picked = Array.isArray(pick?.chosen) ? pick.chosen.map((x) => x.label).join(', ') : pick?.chosen?.label
+          const said = (x) => (x.own && x.text?.trim() ? x.text.trim() : x.label) // their own answer: what they typed
+          const picked = Array.isArray(pick?.chosen) ? pick.chosen.map(said).join(', ') : pick?.chosen && said(pick.chosen)
           if (pick?.quiet) this.render()
-          else if (pick) this.write(echo + (picked ?? c.dim(pick.closedAs ?? 'cancelled')) + (pick.auto?.fired ? c.dim(` · no answer in ${pick.auto.secs}s: ${pick.auto.fired === 'ticked' ? 'what you ticked' : 'the recommended one'}`) : '') + '\n')
+          else if (pick) this.write(echo + (picked ?? c.dim(pick.closedAs ?? 'cancelled')) + (pick.auto?.fired ? c.dim(` · no answer in ${pick.auto.secs}s: ${pick.auto.fired === 'theirs' ? 'yours' : 'the recommended one'}`) : '') + '\n')
           else if (l !== null && history && this.isCommand(l.trim()) && !/^\s*\/skill:/.test(l)) this.notice(/^\S+/.exec(l.trim())[0], 3000, '›') // a command isn't part of the conversation: its name for a moment (not its arguments: maybe a key)
-          else if (l !== null) this.write(echo + c.bright(l.replace(/\n/g, '\n' + ' '.repeat(width(echo.replace(/\x1b\[[0-9;]*m/g, ''))))) + '\n')
+          else if (l?.trim()) this.write(echo + c.bright(l.replace(/\n/g, '\n' + ' '.repeat(width(echo.replace(/\x1b\[[0-9;]*m/g, ''))))) + '\n')
           else this.render()
         }
         if (draft) [rl.line, rl.cursor] = [draft, draft.length]
@@ -1918,7 +2125,8 @@ export class UI {
   // quiet: the question and answer aren't left in the conversation (a question before it starts).
   // fixed: a dialog: no typing to filter, no other keys meanwhile.
   // auto: { item, secs }: nobody answers for secs seconds (each key starts the wait again) → item is chosen.
-  async pick(title, items, { filter = '', multi = false, quiet = false, fixed = false, body = '', auto = null } = {}) {
+  // tabs: a row of tabs above it (several questions); nav: ←/→ (Tab, Shift+Tab) close it with { nav: -1 | 1 }.
+  async pick(title, items, { filter = '', multi = false, quiet = false, fixed = false, body = '', auto = null, tabs = '', nav = false } = {}) {
     if (!this.full) {
       items.forEach((it, i) => this.print(`  ${i + 1}. ${it.group ? `${it.group} · ` : ''}${it.label}${it.desc ? '  ' + c.dim(it.desc) : ''}`))
       const a = await this.ask(`${title} ${c.dim(multi ? '(numbers, like 1,3)' : '(number)')}: `)
@@ -1930,7 +2138,7 @@ export class UI {
     }
     await this.#free()
     if (multi) for (const it of items) if (!it.only) it.checked ??= false
-    this.menu.pick = { items, chosen: null, multi, quiet, fixed, body, auto: auto && { ...auto } }
+    this.menu.pick = { items, chosen: null, multi, quiet, fixed, body, tabs, nav, auto: auto && { ...auto } }
     this.autoPicked = false // chosen for the user (nobody answered in time), for the caller to say so
     if (auto) {
       this.#armAuto()
@@ -1956,8 +2164,9 @@ export class UI {
       if (pick?.auto !== a) return
       if (this.out.hidden) return this.#armAuto() // a tab in the background: you haven't seen it yet
       const ticked = pick.items.filter((x) => x.checked)
-      a.fired = this.autoPicked = ticked.length && pick.multi ? 'ticked' : true
-      pick.chosen = pick.multi ? (ticked.length ? ticked : [a.item]) : a.item
+      const typed = pick.items.find((x) => x.own && x.text?.trim()) // their own answer, typed but not sent
+      a.fired = this.autoPicked = (pick.multi ? ticked.length : typed) ? 'theirs' : true
+      pick.chosen = pick.multi ? (ticked.length ? ticked : [a.item]) : (typed ?? a.item)
       this.rl.line = ''
       this.rl.cursor = 0
       this.ttyWrite('\r', { name: 'return' })
@@ -1973,6 +2182,15 @@ export class UI {
   autoHint() {
     const a = this.menu.pick?.auto
     return a ? ` · recommended in ${Math.max(0, Math.ceil((a.until - Date.now()) / 1000))}s` : ''
+  }
+
+  // A pick that chooses by itself (auto): how long until it does, and what it will do then.
+  autoLine() {
+    const pick = this.menu.pick
+    const a = pick?.auto
+    if (!a) return ''
+    const theirs = pick.items.some((x) => x.checked || (x.own && x.text?.trim())) // ticked or typed: that's what goes
+    return `◷ ${Math.max(0, Math.ceil((a.until - Date.now()) / 1000))}s · then ${theirs ? 'yours is sent' : (a.say ?? 'the recommended answer is chosen')} · a key restarts it`
   }
 
   setPermission(mode) {
@@ -2019,12 +2237,13 @@ export class UI {
       { label: 'Yes', value: true },
       { label: "Yes, and don't ask again", value: 'all' },
       { label: 'No', value: false },
-      { label: 'No, and tell the model what to do instead', value: 'why' },
+      { label: 'No, and tell the model what to do instead', desc: 'type it here', value: 'why', own: true }, // typed in its row, as ask_user's "Something else"
     ]
-    const a = (await this.pick(`${c.yellow('?')} ${question}`, opts))?.value ?? false
+    const got = await this.pick(`${c.yellow('?')} ${question}`, opts)
+    const a = got?.value ?? false
     if (a === 'all') this.permission === 'plan' ? (this.beforePlan = 'all') : this.setPermission('all') // plan mode stays: it goes on to 'all' afterwards
     if (a !== 'why') return Boolean(a)
-    return (await this.ask(`${c.bold('What should it do instead?')} `))?.trim() || false
+    return got.text?.trim() || false
   }
 
   write(s) {
@@ -2062,7 +2281,7 @@ export class UI {
     Object.assign(this, { tail: m.tail, sgr: m.sgr })
     const lines = text ? text.split('\n') : []
     if (lines.length === 1 || (lines.length && this.dialog)) this.notice(lines[0], 4000, '›')
-    else if (lines.length) this.showText(title, text)
+    else if (lines.length) this.showText(title === '/toggle_thinking' ? 'Thinking' : title, text, title) // its key (Alt+O) closes it again
     else this.render()
   }
   // A blank line before a new block, unless there already is one.
@@ -2087,6 +2306,7 @@ export class UI {
 
   spinner(label) {
     this.label = label
+    if (this.requestSince?.()) this.tokenAt = Date.now() // changed during a request: something came (a tool call being written)
     if (!this.out.isTTY || this.timer) return
     let i = 0
     const tick = () => {
@@ -2112,10 +2332,12 @@ export class UI {
     }
     this.beforeRetry ??= typeof this.label === 'function' ? 'thinking' : this.label || 'thinking'
     const until = Date.now() + ms
-    const why = shortError(err)
+    // why first, short: "cannot reach http://127.0.0.1:47329/v1/chat/completions (ECONNREFUSED)" → "can't reach 127.0.0.1:47329"
+    let why = shortError(err).replace(/^cannot reach (\S+)(?: \([^)]*\))?/, (m, u) => `can't reach ${URL.canParse(u) ? new URL(u).host : u}`)
+    if (why.length > 50) why = `${why.slice(0, 49)}…`
     const left = () => Math.max(0, Math.ceil((until - Date.now()) / 1000)) * 1000
-    if (next) return this.spinner(() => `${c.yellow('⚠')} ${why} · trying ${next.provider} · ${next.model}${left() ? ` in ${duration(left())} (all failed once)` : ''} (attempt ${attempt})`)
-    this.spinner(() => `${c.yellow('⚠')} retrying in ${duration(left())} (attempt ${attempt}) · ${why}`)
+    if (next) return this.spinner(() => `${c.yellow('⚠')} ${why} · trying ${next.provider} · ${next.model}${left() ? ` in ${short(left())} (all failed once)` : ''} (try ${attempt})`)
+    this.spinner(() => `${c.yellow('⚠')} ${why} · retrying in ${short(left())} (try ${attempt})`)
   }
 
   stopSpin() {

@@ -2,6 +2,30 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.56 (2026-11-05)
+
+- **Questions as tabs**: several questions come in one dialog, a tab each; go back and forth with
+  ←/→ or Tab, and send all answers from the Send tab, which lists each question and its answer.
+  "Something else" is typed right in the row (kept when you switch tabs); a timer line shows when
+  the recommended answer will be taken; afterwards each question is shown with its answer.
+- **The plan stays in sight**: while working, the todo list is pinned under the spinner; updates
+  print only what changed. Each running helper gets its own line, named by its job.
+- **Clearer while it works**: one clock ("waiting for m1", then "Ns in all"); a running command's
+  latest line shows in the spinner, then `exit N · M lines`, and a failed one shows its error line;
+  refusals and retries say why; "↻ … rate-limited (429) → …" says why the model changed; the
+  review comes before the final answer, so the answer is last.
+- **Dialogs**: Shift+Tab never changes the mode inside one; typing doesn't vanish into hidden
+  filters; "what to do instead" is typed in the permission dialog; on small terminals dialogs are
+  90% wide and keep their timer and keys, with "↑/↓ n more".
+- **Text**: words wrap whole with indented continuation lines, hint lines wrap instead of being
+  cut, Markdown tables line up, code blocks get a `│` gutter and quotes a `▎`; the light theme is
+  readable on a dark terminal.
+- **Input and the rest**: Esc puts queued messages back into the input; a draft cleared with
+  Esc Esc is in ↑ history; empty Enter adds nothing; the header keeps the project folder's name;
+  the context size is right after resuming; tokens/s resets on clear; the setup help shows on first
+  run; a task over 10 seconds rings the bell, notifies the desktop and sets the terminal title;
+  `/help`, Alt+B, `/select_model`, `/context` and Alt+O ("Thinking") tidied.
+
 ## 0.1.55 (2026-11-05)
 
 - **Helpers never ask you anything**: a helper's question no longer pops up as your dialog (in

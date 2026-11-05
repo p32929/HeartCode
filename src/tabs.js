@@ -138,8 +138,11 @@ export class Tabs {
       mid += line('│') + label + line('│') + ' '
       bottom += (on ? c.brand(`╯${' '.repeat(w)}╰`) : c.ghost(`┴${'─'.repeat(w)}┴`)) + c.ghost('─')
     })
-    const hint = this.list.length > 1 ? 'Alt+T open a tab · Alt+W close this one · Alt+N/P switch tabs' : 'Alt+T open a new tab'
-    mid += ` ${c.faint(hint)}`
+    // the keys that fit whole, the rest left out (never one cut in the middle)
+    const hints = this.list.length > 1 ? ['Alt+T open a tab', 'Alt+W close this one', 'Alt+N/P switch tabs'] : ['Alt+T open a new tab']
+    let hint = ''
+    for (const h of hints) if (width(mid.replace(/\x1b\[[0-9;]*m/g, '')) + 1 + width(hint ? `${hint} · ${h}` : h) <= cols - 1) hint = hint ? `${hint} · ${h}` : h
+    if (hint) mid += ` ${c.faint(hint)}`
     bottom += c.ghost('─'.repeat(Math.max(0, cols - width(bottom.replace(/\x1b\[[0-9;]*m/g, '')))))
     return [top, mid, bottom]
   }

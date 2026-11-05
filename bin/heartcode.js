@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import path from 'node:path'
 import { parseArgs } from 'node:util'
-import { Client, limitSaid } from '../src/client.js'
+import { Client, limitSaid, estMessages } from '../src/client.js'
 import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, TEMP, AUTO_MODEL, isAuto, parseModel, takeIn, whatOf, VERSION, speedOf } from '../src/config.js'
 import { loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
 import { learnFromUsage, LIMIT_MS, RATE_CAP_MS } from '../src/context.js'
@@ -9,7 +9,7 @@ import { Session, transcript, contextReport } from '../src/agent.js'
 import { listJobs, getJob, stopJob, removeJob, runningJobs, tailLines, ago as ranFor } from '../src/background.js'
 import { checkUpdate, installKind, UPDATE_COMMANDS, packageDir, whatsNew } from '../src/update.js'
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
-import { UI, c, PERMISSIONS, duration, copyText, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width } from '../src/ui.js'
+import { UI, c, PERMISSIONS, duration, copyText, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width, shortError, wrapWords } from '../src/ui.js'
 import { listFiles, runCommand, clip } from '../src/tools.js'
 import { notify } from '../src/telegram.js'
 import { log, LOG_FILE, LOG_DIR, requestLog, useRequestLog, useLogs, pruneLogs, logDays } from '../src/log.js'
@@ -144,7 +144,7 @@ const COMMANDS = SECTIONS.flatMap(([, list]) => list).sort(byName)
 // Typed while a task works, these run at once, beside it: they leave the conversation alone. The
 // others (/compact, /rewind, /resume, /init…) wait in the queue until it's done.
 const RIGHT_AWAY = new Set(['help', 'cost', 'context', 'background', 'model_info', 'diff', 'copy', 'mcp', 'doctor', 'toggle_thinking', 'btw', 'rename', 'export', 'tab', 'close_tab', 'exit', 'quit', 'settings', 'login_mcp', 'install_skill', 'import', 'voice', 'select_model'])
-const helpText = (sections) => sections.map(([title, list]) => `  ${c.bold(title)}\n` + list.map(([n, d]) => `  ${c.cyan(n.padEnd(18))} ${d}`).join('\n')).join('\n\n')
+const helpText = (sections) => sections.map(([title, list]) => `  ${c.bold(title)}\n` + list.map(([n, d]) => `  ${c.cyan(n.padEnd(17))}  ${d}`).join('\n')).join('\n\n')
 const SLASH = helpText(SECTIONS)
 
 // The keyboard shortcuts, as [keys, what] rows, read from the effective keybindings (keybindings.json
@@ -332,11 +332,21 @@ class App {
     let price = null
     // tokens and cost, into the chat (also a helper's, the probe's, compaction's)
     client.price = () => price
-    client.onSpend = (u) => addUsage((this.chat.usage ??= {}), u, price)
+    let failed = null // { t, e }: the failure that made the model list move on (said with the model that answered)
+    let ok = false // a reply came since it
+    const spend = (u) => addUsage((this.chat.usage ??= {}), u, price)
+    // serverCount: the conversation's last request size (lastTokens) is the server's, not HeartCode's estimate (/context)
+    client.onSpend = function (u) {
+      if ((this.purpose ?? 'chat') === 'chat') this.serverCount = Boolean(u.total_tokens)
+      ok = true
+      spend(u)
+    }
     client.onRetry = (err, ms, attempt, next) => ui.retrying(err, ms, attempt, next) // keep trying until Esc (also while probing)
     // a failed request: what it says about the model's limits is learned
     client.onFail = (e, t) => {
       if (e.name === 'AbortError') return
+      if (ok) [failed, ok] = [null, false] // the first failure since a reply: why the list moves on (onSwitch)
+      failed ??= { t, e }
       // "too large" with the limit stated (Groq: "Limit 2000 … tokens per minute"): kept in its profile,
       // so it isn't sent what it can't take
       const said = limitSaid(e)
@@ -356,7 +366,10 @@ class App {
     client.announceSwitch = () => switched && (ui.print(switched), (switched = null))
     client.onSwitch = (t) => {
       const i = client.rotation.list.indexOf(t)
-      switched = c.dim(`↻ ${t.provider} · ${t.model} answered${i ? ` (#${i + 1} in your model list)` : ' (#1 again)'}`)
+      const f = failed?.e
+      const why = f ? `${failed.t.model} ${f.status === 429 ? 'rate-limited (429)' : `failed (${clip(shortError(f), 50)})`} → ` : ''
+      failed = null
+      switched = c.dim(`↻ ${why}${t.provider} · ${t.model} answered${i ? ` (#${i + 1} in your model list)` : ' (#1 again)'}`)
       setImmediate(client.announceSwitch)
     }
     if (cfg.maxRetries !== undefined) client.retryIf = (e, attempt) => attempt < cfg.maxRetries // headless: then give up
@@ -685,22 +698,21 @@ class App {
     const rot = this.s?.client.rotation
     const now = this.inUse() // the model list's one in use; never one of a provider that's off
     if (!now) return c.dim('the providers of all your models are off · /settings to switch one on')
-    const on = Object.values(cfg.providers).filter((p) => !p.off).length
     const count = this.sessionModels().length
     // the model answering now; a yellow "↻" before it when it's a fallback (rotated to after one failed)
     const rotated = rot && rot.at > 0
     const name = rotated ? c.yellow('↻ ' + now.model) : c.info(now.model)
     const model =
-      count === 1 ? name : cfg.session ? `${name} ${c.faint(`(${count} chosen)`)}` : `${c.muted('auto')} ${c.faint('(')}${name}${c.faint(')')} ${c.faint(`(${count})`)}`
+      count === 1 ? name : cfg.session ? `${name} ${c.faint(`(${count} chosen)`)}` : `${c.muted('auto')} ${c.faint('(')}${name}${c.faint(')')} ${c.faint(`(${count} models)`)}`
     const key = `${now.provider}/${now.model}`
     if (this.profileKey !== key) [this.profileKey, this.profile] = [key, this.s?.profile ?? loadProfile(this.client(now.provider, now.model))]
     const profile = this.s?.profile ?? this.profile
     const strat = profile && (this.s?.strat ?? strategy(profile, cfg))
     // each item, rendered (or null when it doesn't apply)
     const parts = {
-      provider: `${c.brand('●')} ${c.muted(now.provider)} ${c.faint(`(${on})`)}`,
+      provider: `${c.brand('●')} ${c.muted(now.provider)}`,
       model,
-      mode: strat ? c.muted(strat.actions === 'tools' ? 'tools' : 'guided') : c.dim('not loaded yet'),
+      mode: strat ? (strat.actions === 'tools' ? null : c.muted('no tool calls (guided)')) : c.faint('checked at your first message'), // what it can do: known once it's been asked
       thinking: strat?.thinking ? c.think(`thinking · ${effortOf(cfg)}`) + (ui.showThinking ? c.faint(' (all)') : '') : null,
       images: strat?.vision ? c.muted('images') : null,
       ctx: null,
@@ -713,7 +725,7 @@ class App {
       permissions: { all: c.green('⏵⏵ all allowed'), commands: c.yellow('ask before commands'), ask: c.yellow('ask before changes'), plan: c.info('⏸ plan mode') }[ui.permission],
     }
     if (strat) {
-      const used = this.s?.client.lastTokens ?? 0
+      const used = this.s?.client.lastTokens || Math.round(estMessages(this.chat?.messages ?? []) * (strat.ratio ?? 1)) // a resumed chat before its first request: estimated
       const pct = Math.round((used / strat.context) * 100)
       const paint = pct >= 80 ? c.red : pct >= 50 ? c.yellow : c.green
       const guess = strat.contextSure ? '' : '~' // not said by the server: assumed, and growing as bigger requests work
@@ -855,7 +867,7 @@ class App {
   // "tools · images · thinking · 1M", for the model lists.
   canText(t) {
     const a = this.abilities(t)
-    return [a.tools ? 'tools' : 'no tools', a.images && 'images', a.thinking && 'thinking', kTokens(a.context) + (a.guessed ? '?' : '')].filter(Boolean).join(' · ')
+    return [a.tools ? 'tools' : 'no tools', a.images && 'images', a.thinking && 'thinking', (a.guessed ? '~' : '') + kTokens(a.context)].filter(Boolean).join(' · ')
   }
 
   // Your models, in order: this one (#1), then the fallbacks (chosen on /settings, where every
@@ -946,7 +958,7 @@ class App {
       },
       draw: (w, h) => {
         const all = jobs()
-        if (!all.length) return ['', `  ${c.faint('Nothing runs in the background. The model starts servers and watchers there.')}`, '', `  ${c.faint('Esc close')}`]
+        if (!all.length) return ['', ...wrapWords('Nothing runs in the background. The model starts servers and watchers there.', w - 2).map((l) => `  ${c.faint(l.trim())}`), '', `  ${c.faint('Esc close')}`]
         const job = current()
         this.jobTab = job.id
         // the tabs, scrolled so the one shown is on screen
@@ -974,7 +986,7 @@ class App {
         return [
           bar + (hidden ? c.faint(` +${hidden} more`) : ''),
           c.ghost('─'.repeat(w)),
-          ` ${c.bold(clip(job.command, w - 40))} ${c.faint('·')} ${state} ${c.faint(`· ${ranFor(job)}`)}${where}`,
+          ` ${c.bold(clip(job.command, Math.max(10, w - 2 - width(`  · ${state} · ${ranFor(job)}${where}`.replace(/\x1b\[[0-9;]*m/g, '')))))} ${c.faint('·')} ${state} ${c.faint(`· ${ranFor(job)}`)}${where}`, // the command, as much as the rest leaves room for
           ...Array.from({ length: n }, (_, i) => (shown.length ? (shown[i] === undefined ? '' : ` ${ERROR.test(shown[i]) ? c.red(shown[i]) : c.muted(shown[i])}`) : i ? '' : ` ${c.faint('(no output yet)')}`)),
           c.ghost('─'.repeat(w)),
           ` ${said ? c.yellow(said) : c.faint(`${all.length > 1 ? '←/→ another one · ' : ''}↑/↓ PgUp/PgDn scroll · K ${job.exited ? 'close' : 'stop'} it · Esc close`)}`,
@@ -1009,7 +1021,8 @@ class App {
       this.saveProjectModels()
       this.s = null
     }
-    const msg = `${c.green('using')} ${c.dim('auto')} ${c.cyan(`(${this.myModels().length} models)`)}`
+    const n = this.myModels().length
+    const msg = `${c.green('using')} ${c.dim('auto')} ${c.cyan(`(${n} model${n === 1 ? '' : 's'})`)}`
     if (later) return this.later.push(apply), this.ui.print(`${msg} ${c.dim('· from your next message')}`)
     apply()
     this.ui.print(msg)
@@ -1029,8 +1042,9 @@ class App {
     const chosen = new Set((cfg.session ?? mine).map(key)) // pre-ticked: this session's set, or all (auto)
     const items = mine.map((t) => ({ label: t.model, t, checked: chosen.has(key(t)), desc: this.modelDesc(t, mine.indexOf(t)) }))
     // first, standing alone: back to auto (Enter on it, whatever is ticked)
-    const auto = { label: 'auto', only: true, auto: true, desc: `your whole list, in its order (${mine.length} models)${cfg.session ? ' · forgets what this folder picked' : ' · in use'}` }
-    const picked = await ui.pick('Models for this session — tick several to rotate, one to pin, or auto', [auto, ...items], { filter, multi: true })
+    const auto = { label: 'auto', only: true, auto: true, desc: `your whole list, in its order (${mine.length} model${mine.length === 1 ? '' : 's'})${cfg.session ? ' · forgets what this folder picked' : ' · in use'}` }
+    const guessed = mine.some((t) => this.abilities(t).guessed) ? "\n~128k and the like: the window's size is a guess (models.dev doesn't list the model)" : ''
+    const picked = await ui.pick('Models for this session', [auto, ...items], { filter, multi: true, body: `Tick several to rotate among them, one to pin it, or choose auto.${guessed}` })
     if (!picked) return
     if (picked.some((it) => it.auto)) return cfg.session ? this.auto(later) : ui.print(c.dim('already on auto'))
     const list = picked.map((it) => it.t)
@@ -1152,7 +1166,7 @@ async function continueTabs(app, saved) {
   const go = await ui.pick(many ? `Continue where you left off? ${open.length} tabs` : 'Continue your last session here?', [
     { label: many ? `Yes, with its ${open.length} tabs` : 'Yes', desc: `${open.map((t) => `"${t.chat.title}"`).join(', ')} · ${ago(newest)}`, yes: true },
     { label: 'No, start a new session', desc: '/resume finds it later' },
-  ], { quiet: true })
+  ], { quiet: true, fixed: true })
   if (!go?.yes) return
   // this tab takes the first one in this folder; the rest (and worktree ones) open as tabs
   const here = open.find((t) => !t.worktree) ?? null
@@ -1565,7 +1579,7 @@ async function slash(app, line, working = false) {
       ui.showText(
         'Context',
         [
-          `${c.muted(`~${kTokens(r.total)} of ${kTokens(r.window)} (${share(r.total)}) · ${s.client.model}`)}${r.counted ? c.faint(` · the last request, as the server counted it: ${kTokens(r.counted)}`) : ''}`,
+          `${c.muted(`~${kTokens(r.total)} of ${kTokens(r.window)} (${share(r.total)}) · ${s.client.model}`)}${r.counted ? c.faint(` · the last request, ${s.client.serverCount ? 'as the server counted it' : 'estimated (the server sent no count)'}: ${kTokens(r.counted)}`) : ''}`,
           ...r.parts.filter((p) => p.tokens).map((p) => row(p.name, p.tokens, p.note)),
           `  ${'room left'.padEnd(20)} ${kTokens(free).padStart(6)} ${c.faint(share(free).padStart(4))}  ${c.faint(`before it summarizes, at 85% (${kTokens(r.compactAt)}) — or moves to a model with more room`)}`,
           '',
@@ -1591,7 +1605,7 @@ async function slash(app, line, working = false) {
     case 'clear_chat': // a new session; the old one stays in /resume
       ui.clear()
       app.setChat(newChat(app.root))
-      if (app.s) app.s.client.lastTokens = 0
+      if (app.s) Object.assign(app.s.client, { lastTokens: 0, speed: { tokens: 0, ms: 0 } }) // the status bar starts over too
       return
     case 'resume':
       return app.resume()
@@ -1693,7 +1707,7 @@ async function slash(app, line, working = false) {
     }
     case 'toggle_thinking':
       ui.showThinking = !ui.showThinking
-      ui.print(c.dim(ui.showThinking ? 'thinking: all of it, as it comes (Alt+O: its last two lines)' : 'thinking: its last two lines while it thinks (Alt+O: all of it)'))
+      ui.print(c.dim(ui.showThinking ? 'thinking shown: all of it (Alt+O: last two lines)' : 'thinking shown: its last two lines (Alt+O: all of it)'))
       if (ui.showThinking && !ui.thinkTail) ui.showLastThought() // the one just over: all of it now
       return
   }
@@ -1723,11 +1737,12 @@ async function slash(app, line, working = false) {
   }
 }
 
+// true: done; false: stopped or failed; null: no model to run it
 async function runTask(app, task, ctl) {
   const { ui } = app
   try {
     const s = await app.session()
-    if (!s) return false
+    if (!s) return null
     let answer
     try {
       answer = await s.run(task, ctl?.signal)
@@ -1753,7 +1768,15 @@ async function repl(app, f = {}) {
   ui.fullscreen({ mouse: cfg.mouse !== false }) // HeartCode's wheel and selection ("mouse": false: the terminal's own: then its wheel scrolls the whole screen)
   ui.onDoubleEscape = () => '/rewind'
   let ctl = null
-  ui.onEscape = () => ctl?.abort()
+  // stopped by you (Esc, Ctrl+C; not Alt+S/Alt+A, which stop to send it): the queue isn't sent, it's
+  // back in the input (with what's typed there), to edit or drop
+  const stop = () => {
+    if (!ctl) return
+    ui.notice('') // "Press Esc again to stop" is done with
+    if (!ui.sendNow && ui.ahead.length) app.nextInput = [...ui.ahead.splice(0), ui.rl?.line].filter(Boolean).join('\n')
+    ctl.abort()
+  }
+  ui.onEscape = stop
   // a command typed while it works: run now, beside the task, if it leaves the conversation alone
   ui.onPanel = () => app.toggleJobs() // Alt+B: the background commands' logs, side by side, live
   ui.onNow = (line) => {
@@ -1809,7 +1832,7 @@ async function repl(app, f = {}) {
     lastInterrupt = Date.now()
     if (ctl) {
       if (again) return quit()
-      ctl.abort()
+      stop()
       ui.cancelAsk()
       return ui.warn(`stopping… (Ctrl+C again to quit${others() ? ` HeartCode, all ${others() + 1} tabs` : ''})`)
     }
@@ -1824,12 +1847,26 @@ async function repl(app, f = {}) {
   const home = process.env.HOME
   const where = home && app.root.startsWith(home) ? '~' + app.root.slice(home.length) : app.root
   ui.folder = app.root // what a double click on the header's folder copies
-  ui.header = (cols = 100) => [
-    `${c.brand('♥')} ${c.bright(c.bold('HeartCode'))} ${c.faint(VERSION)}  ${c.muted(where.length > cols - 16 ? '…' + where.slice(-(cols - 17)) : where)}`,
-    [['/', 'run a command'], ['@', 'attach a file'], ...(ui.voiceReady?.() ? [['Space', 'talk (voice)']] : []), [NEWLINE_KEY, 'add a new line'], ['Esc', 'stop'], ['Shift+Tab', 'change permissions']].map(([k, d]) => `${c.muted(k)} ${c.faint(d)}`).join(c.ghost(' · ')),
-    '',
-  ]
+  ui.header = (cols = 100) => {
+    const room = cols - 2 - width(`♥ HeartCode ${VERSION}  `) // the folder's own name (its end) stays in sight
+    const keys = [['/', 'run a command'], ['@', 'attach a file'], ...(ui.voiceReady?.() ? [['Space', 'talk (voice)']] : []), [NEWLINE_KEY, 'add a new line'], ['Esc', 'stop'], ['Shift+Tab', 'change permissions']]
+    // the keys: on a second line when they don't fit one, broken between keys (never inside one)
+    const rows = []
+    for (const kd of keys) {
+      const row = rows.at(-1)
+      if (row && width([...row, kd].map((x) => x.join(' ')).join(' · ')) <= cols - 2) row.push(kd)
+      else rows.push([kd])
+    }
+    return [
+      `${c.brand('♥')} ${c.bright(c.bold('HeartCode'))} ${c.faint(VERSION)}  ${c.muted(width(where) > room ? '…' + where.slice(-(room - 1)) : where)}`,
+      ...rows.map((row) => row.map(([k, d]) => `${c.muted(k)} ${c.faint(d)}`).join(c.ghost(' · '))),
+      '',
+    ]
+  }
   if (!ui.full) ui.print(ui.header().join('\n'))
+  // nothing set up yet: how to, at once (not only after a first message); a local server is looked for first
+  if (!Object.keys(cfg.providers).length) app.detectLocal().then((found) => (found ? ui.render?.() : ui.print(HOWTO)))
+  else if (!cfg.providers[cfg.provider] || !cfg.model) ui.print(NO_MODELS)
   if (f.onStart) await f.onStart(app)
   if (f.continue) {
     const last = listChats(app.root)[0]
@@ -1877,6 +1914,7 @@ async function repl(app, f = {}) {
       }
       if (mark) ui.unmark(mark, /^\S+/.exec(t)[0])
     } else {
+      if (process.stdout.isTTY) process.stdout.write(`\x1b]0;● ${path.basename(app.root)} · HeartCode\x07`)
       let ok = await runTask(app, t, ctl)
       // plan mode: the plan is done; go ahead with it?
       while (ok && ui.permission === 'plan' && !ctl.signal.aborted) {
@@ -1890,7 +1928,9 @@ async function repl(app, f = {}) {
         ui.setPermission(go.mode)
         ok = await runTask(app, prompt('agent/plan-approved'), ctl)
       }
-      if (ui.busySince) ui.print(c.faint(c.italic(`✻ took ${duration(ui.worked())}`))) // fixed once the reply is in
+      if (ui.busySince && ok !== null) ui.print(c.faint(c.italic(`✻ took ${duration(ui.worked())}`))) // fixed once the reply is in (not when no model ran)
+      // done, said by the terminal too: its title, and after a long task a bell and a notification (OSC 9)
+      if (process.stdout.isTTY) process.stdout.write(`\x1b]0;${ok === null ? '♥' : '✓'} ${path.basename(app.root)} · HeartCode\x07` + (ok !== null && !ctl.signal.aborted && ui.worked() > 10_000 ? '\x07\x1b]9;HeartCode: done\x07' : ''))
     }
     ui.idle()
     ctl = null
@@ -2044,7 +2084,9 @@ async function main() {
     usePromptsFrom(app.root) // its .heartcode/prompts override the built-in sections
     ui.suggest = (line, cursor) => app.suggest(line, cursor)
     ui.status = (cols) => app.status(cols)
+    ui.todos = () => app.chat?.todos // the plan, kept in sight while it works
     ui.requestSince = () => app.s?.client.inFlight // the spinner shows how long the model has been answering
+    ui.waitingFor = () => app.s?.client.model // the spinner: "waiting for <model>"
     return app
   }
   let root = path.resolve(f.cwd ?? process.cwd())

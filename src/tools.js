@@ -17,7 +17,7 @@ import { runHooks } from './hooks.js'
 import { parsePatch, applyChunks } from './patch.js'
 import { formatFile } from './format.js'
 import { diagnose, lspTool, findCommand } from './lsp.js'
-import { startJob, waitFor, newOutput, listJobs, getJob, stopJob, removeJob, keepLeftovers, jobLine } from './background.js'
+import { startJob, waitFor, newOutput, tailLines, listJobs, getJob, stopJob, removeJob, keepLeftovers, jobLine } from './background.js'
 
 const IGNORE = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage', '.venv', 'venv', '__pycache__', 'target', '.cache', '.DS_Store'])
 
@@ -477,11 +477,20 @@ export async function runConfirmed(s, cmd, signal, background = false, wait) {
     return prompt('agent/outside-project', { root: s.root, wide: true })
   }
   const ok = s.ui.permission === 'plan' ? true : await s.ui.confirm(`Run ${c.bold(cmd)}?`, 'command') // plan mode: only read-only ones get here
-  if (ok !== true) return declined(s, ok, 'The user declined to run this command.')
+  if (ok !== true) {
+    s.ui.result('declined')
+    return declined(s, ok, 'The user declined to run this command.')
+  }
   const secs = Number(wait) > 0 ? Number(wait) : background ? 3 : 30
   const before = snapshot(s)
-  s.ui.spinner(`running ${cmd}`)
   const job = startJob(s.root, cmd)
+  // its latest output line beside it, read a few times a second (the label is re-read every frame)
+  let last = ''
+  let readAt = 0
+  s.ui.spinner(() => {
+    if (Date.now() - readAt > 250) [readAt, last] = [Date.now(), tailLines(job, 3).filter((l) => l.trim()).at(-1)?.trim() ?? '']
+    return `running ${clip(cmd, 50)}${last ? ` › ${clip(last, 60)}` : ''}`
+  })
   await waitFor(job, secs * 1000, signal)
   s.ui.stopSpin()
   if (!job.exited) {
@@ -497,7 +506,16 @@ export async function runConfirmed(s, cmd, signal, background = false, wait) {
   const left = keepLeftovers(job) // `server &`: kept running, as a background command
   if (!left) removeJob(job) // done: not one of the background list
   log('command', `${cmd} → exit ${job.code} in ${job.ended - job.started}ms\n${output}`)
-  s.ui.result(`exit ${job.code}`)
+  let lines = 0
+  try {
+    lines = fs.readFileSync(job.file, 'utf8').split(/\r?\n|\r/).filter((l) => l.trim()).length
+  } catch {}
+  s.ui.result(`exit ${job.code}${lines ? ` · ${lines} line${lines === 1 ? '' : 's'}` : ''}`)
+  // failed: its last lines under it (what went wrong, usually), aligned with the result's text
+  // why it failed: the last error line and what follows it (a stack's end says nothing), else the last lines
+  const tail = job.code !== 0 ? tailLines(job, 40).filter((x) => x.trim()) : []
+  const at = tail.findLastIndex((l) => /\b(error|exception|failed|fail|assert\w*|cannot|not found|denied)\b/i.test(l))
+  if (job.code !== 0) for (const l of at === -1 ? tail.slice(-3) : tail.slice(at, at + 3)) s.ui.print(`${s.isSub ? '      ' : '    '}${c.faint(clip(l.trimEnd(), 120))}`)
   const changed = changesSince(s, before)
   return `exit code ${left ? 0 : job.code}\n${output.trim() || '(no output)'}${changed ? `\nFiles this command changed: ${changed}` : ''}${left ? `\n${prompt('agent/left-running', { id: job.id })}` : ''}`
 }
@@ -606,7 +624,7 @@ export const TOOL_DEFS = [
   { name: 'todo', description: prompt('agent/tool-todo'), parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] }, parallel: { type: 'boolean' }, model: str, files: { type: 'array', items: str } }, ['content', 'status']) } }, ['todos']) },
   { name: 'web_search', description: prompt('agent/tool-web_search'), parameters: obj({ query: str, fresh: { type: 'boolean' } }, ['query']) },
   { name: 'web_fetch', description: prompt('agent/tool-web_fetch'), parameters: obj({ url: str, look_for: str, start: int }, ['url']) },
-  { name: 'ask_user', description: prompt('agent/tool-ask_user'), parameters: obj({ question: str, options: { type: 'array', items: str }, multiple: { type: 'boolean' }, emphasis: { type: 'boolean' } }, ['question']) },
+  { name: 'ask_user', description: prompt('agent/tool-ask_user'), parameters: obj({ question: str, header: str, options: { type: 'array', items: str }, multiple: { type: 'boolean' }, emphasis: { type: 'boolean' } }, ['question', 'options']) }, // one question a call (small models manage that); several calls in one reply are one dialog (agent.js)
 ]
 
 // Plan mode (permission "plan"): looking around is fine, changing things isn't. Edits are refused,
@@ -689,6 +707,16 @@ export function extraTools(s) {
 // todo: the model's checklist for this message, shown to the user each time it changes.
 // Lenient: the list as JSON text, plain strings for items, "done" for completed.
 const MARK = { pending: '☐', in_progress: '◐', completed: '☑' }
+// In the conversation: the whole plan when it's new (or its steps changed), else only the steps whose
+// status changed, on one line; the whole of it stays in sight under the spinner (full screen).
+function showTodos(s, before, todos) {
+  const paint = { pending: c.muted, in_progress: (x) => c.info(c.bold(x)), completed: (x) => c.faint(x) }
+  const item = (t) => paint[t.status](`${MARK[t.status]} ${t.content}`)
+  const same = s.ui.full && before?.length === todos.length && before.every((t, i) => t.content === todos[i].content)
+  if (!same) return s.ui.print(todos.map((t) => `  ${item(t)}`).join('\n') || c.faint('  (todo list cleared)'))
+  const moved = todos.filter((t, i) => t.status !== before[i].status)
+  if (moved.length) s.ui.print(`  ${moved.map(item).join(c.faint(' · '))}`)
+}
 async function todoTool(s, args, signal, id) {
   let list = args.todos ?? args.items ?? args
   if (typeof list === 'string') {
@@ -703,10 +731,9 @@ async function todoTool(s, args, signal, id) {
     .map((t) => (typeof t === 'string' ? { content: t, status: 'pending' } : { content: String(t?.content ?? t?.task ?? t?.title ?? ''), status: String(t?.status ?? 'pending'), ...(t?.model && { model: String(t.model) }), ...((t?.parallel === true || t?.parallel === 'true') && { parallel: true }), ...([t?.files ?? []].flat().filter(Boolean).length && { files: [t.files].flat().map(String) }) }))
     .filter((t) => t.content.trim())
     .map((t) => ({ ...t, status: /done|complete/i.test(t.status) ? 'completed' : /progress|doing|active/i.test(t.status) ? 'in_progress' : 'pending' }))
+  showTodos(s, s.chat.todos, todos)
   s.chat.todos = todos
   s.todoTouched = true
-  const paint = { pending: c.muted, in_progress: (x) => c.info(c.bold(x)), completed: (x) => c.faint(x) }
-  s.ui.print(todos.map((t) => `  ${paint[t.status](`${MARK[t.status]} ${t.content}`)}`).join('\n') || c.faint('  (todo list cleared)'))
   const parts = await runParts(s, todos, signal, id)
   const done = todos.filter((t) => t.status === 'completed').length
   const next = todos.find((t) => t.status !== 'completed')
@@ -732,6 +759,7 @@ async function runParts(s, todos, signal, id) {
   const known = (m) => yours.some((y) => `${y.provider} ${y.model}` === m || y.model === m || m.endsWith(` ${y.model}`))
   const unknown = [...new Set(parts.filter((t) => t.model && !known(t.model)).map((t) => t.model))]
   for (const t of parts) if (t.model && !known(t.model)) delete t.model
+  const shown = todos.map((t) => ({ ...t })) // as printed: after the parts, what they changed
   for (const t of parts) t.status = 'in_progress'
   log('parts', parts.map((t) => `${t.content}${t.model ? ` (${t.model})` : ''}${t.files ? ` [${t.files.join(', ')}]` : ''}`))
   s.ui.step('parts', `${parts.length} part${parts.length > 1 ? 's' : ''} at once: ${parts.map((t) => `${clip(t.content, 40)}${t.model ? ` (${t.model})` : ''}`).join(' · ')}`)
@@ -752,48 +780,108 @@ async function runParts(s, todos, signal, id) {
     }),
   )
   s.chat.todos = todos
-  const paint = { pending: c.muted, in_progress: (x) => c.info(c.bold(x)), completed: (x) => c.faint(x) }
-  s.ui.print(todos.map((t) => `  ${paint[t.status](`${MARK[t.status]} ${t.content}`)}`).join('\n'))
+  showTodos(s, shown, todos)
   return prompt('agent/parts-done', { reports: reports.join('\n\n'), unknown: unknown.join(', '), models: yours.map((y) => `${y.provider} ${y.model}`).join(', ') })
 }
 
-// ask_user: a question for the user mid-task, with choices (and their own answer). Nobody answers for
-// ASK_WAIT seconds (each key starts the wait again): the recommended one, the first, is taken.
+// ask_user: questions for the user mid-task, each with choices (and their own answer); several are
+// tabs in one dialog (←/→ between them, then Send). Nobody answers for ASK_WAIT seconds (each key
+// starts the wait again): the recommended ones, the first of each, are taken for what's unanswered.
 const ASK_WAIT = 30
-async function askUser(s, args) {
-  const question = String(args.question ?? '').trim()
-  if (!question) return 'error: ask_user needs "question"'
-  if (s.ui.noUser || s.isSub) return prompt('agent/no-answer')
-  s.askedUser = true // asked through the dialog this message (not as text: see askedInText)
-  let options = args.options ?? []
-  if (typeof options === 'string') {
-    try {
-      options = JSON.parse(options)
-    } catch {
-      options = options.split('\n')
-    }
+const listOf = (v) => {
+  if (typeof v !== 'string') return [v ?? []].flat()
+  try {
+    return [JSON.parse(v)].flat()
+  } catch {
+    return v.split('\n')
   }
-  const items = [options].flat().map((o) => (typeof o === 'string' ? { label: o.trim() } : { label: String(o?.label ?? o?.value ?? '').trim(), desc: o?.description })).filter((o) => o.label)
+}
+async function askUser(s, args) {
+  const qs = listOf(args.questions ?? [args]).map((q) => ({
+    question: String(q?.question ?? '').trim(),
+    header: String(q?.header ?? '').trim(),
+    multi: q?.multiple === true || q?.multiple === 'true',
+    emphasis: q?.emphasis === true || q?.emphasis === 'true',
+    items: listOf(q?.options).map((o) => (typeof o === 'string' ? { label: o.trim() } : { label: String(o?.label ?? o?.value ?? '').trim(), desc: o?.description })).filter((o) => o.label),
+  }))
+  if (!qs.length || qs.some((q) => !q.question)) return 'error: ask_user needs "question" (or "questions", each with its "question")'
+  if (s.ui.noUser || s.isSub) return prompt('agent/no-answer')
   // always a recommended answer (the first option): taken when nobody answers (ASK_WAIT seconds without a key)
-  if (!items.length) return 'error: ask_user needs options: 2-4 short answers, your recommended one first (the user can still type their own)'
-  items[0].desc = ['recommended', items[0].desc].filter(Boolean).join(' · ')
+  if (qs.some((q) => !q.items.length)) return 'error: ask_user needs options for every question: 2-4 short answers, your recommended one first (the user can still type their own)'
+  s.askedUser = true // asked through the dialog this message (not as text: see askedInText)
+  for (const q of qs) {
+    q.items[0].desc = ['recommended', q.items[0].desc].filter(Boolean).join(' · ')
+    q.own = { label: 'Something else', desc: 'type your own answer', own: true }
+  }
   s.ui.stopSpin()
-  const got = [await s.ui.pick(question, [...items, { label: 'Something else', desc: 'type your own answer', own: true }], { multi: Boolean(args.multiple), auto: { item: items[0], secs: ASK_WAIT } })].flat().filter(Boolean)
-  const own = got.some((x) => x.own) ? await s.ui.ask(`${c.bold('Your answer')} ${c.dim('›')} `) : ''
-  const answer = [...got.filter((x) => !x.own).map((x) => x.label), own?.trim()].filter(Boolean).join(', ')
-  log('ask', question, answer)
+  const tabbed = qs.length > 1 && s.ui.full
+  const said = qs.map(() => null) // each: { got: [items], text: own answer, auto }
+  const answerOf = (a) => (a ? [...a.got.filter((x) => !x.own).map((x) => x.label), a.text].filter(Boolean).join(', ') : '')
+  const tabs = (at) =>
+    [...qs.map((q, i) => `${said[i] ? '✓' : '○'} ${q.header || clip(q.question, 18)}`), '  Send']
+      .map((t, i) => (i === at ? c.select(c.bright(c.bold(` ${t} `))) : said[i] ? c.text(` ${t} `) : c.faint(` ${t} `))) // its own color on the highlight: the terminal's may not show on it (light theme, dark terminal)
+      .join(c.ghost('│'))
+  let auto = false
+  for (let i = 0; i < qs.length || tabbed; ) {
+    if (i === qs.length) {
+      // the last tab: every answer, sent with Enter (or after ASK_WAIT seconds)
+      const body = qs.map((q, j) => `${q.question} ${c.faint('›')} ${answerOf(said[j]) || `${q.items[0].label} ${c.faint('(recommended)')}`}`).join('\n')
+      const send = { label: 'Send answers', desc: 'or ← to change one' }
+      const got = await s.ui.pick('Send these answers?', [send], { body, tabs: tabs(i), nav: true, quiet: true, auto: { item: send, secs: ASK_WAIT, say: 'your answers are sent' } })
+      if (got?.nav) {
+        i = Math.min(qs.length, Math.max(0, i + got.nav)) // → on Send: stays there
+        continue
+      }
+      if (!got) return prompt('agent/no-answer')
+      auto = s.ui.autoPicked
+      break
+    }
+    const q = qs[i]
+    const items = [...q.items, q.own]
+    const typed = Boolean(q.own.text?.trim()) // typed in its row, then off to another tab without Enter: that row again
+    for (const x of items) x.current = typed ? x === q.own : Boolean(said[i]?.got.includes(x)) // back on a tab: its answer selected
+    const got = await s.ui.pick(q.question, items, { multi: q.multi, tabs: tabbed ? tabs(i) : '', nav: tabbed, quiet: s.ui.full, auto: { item: q.items[0], secs: ASK_WAIT, say: tabbed ? 'the recommended answers are sent' : 'the recommended answer is chosen' } })
+    if (got?.nav) {
+      i = Math.min(qs.length, Math.max(0, i + got.nav))
+      continue
+    }
+    if (!got) return prompt('agent/no-answer') // Esc: the whole dialog
+    const list = [got].flat().filter(Boolean)
+    let text = ''
+    if (list.some((x) => x.own)) {
+      // typed in its row (full screen); without full screen, asked for now
+      text = q.own.text?.trim() || ((await s.ui.ask(`${c.bold('Your answer')} ${c.dim('›')} `, { initial: said[i]?.text ?? '' }))?.trim() ?? '')
+      Object.assign(q.own, { text, desc: text ? `› ${text}` : 'type your own answer' })
+      if (!text && list.length === 1) continue // nothing typed: the same question again
+    }
+    if (s.ui.autoPicked) {
+      auto = s.ui.autoPicked
+      if (auto === 'theirs' || !said[i]) said[i] = { got: list, text, auto: auto !== 'theirs' } // what's ticked or typed is theirs; answered before (back on its tab): theirs stays
+      break
+    }
+    said[i] = { got: list, text }
+    i++
+  }
+  // nobody there: what's unanswered gets the recommended one
+  for (const [i, q] of qs.entries()) if (!answerOf(said[i])) said[i] = { got: [q.items[0]], text: '', auto: true }
+  const answers = qs.map((q, i) => answerOf(said[i]))
+  for (const [i, q] of qs.entries()) log('ask', q.question, answers[i])
+  if (s.ui.full) s.ui.print(qs.map((q, i) => `  ${c.dim(q.question)} ${c.dim('›')} ${c.bright(answers[i])}${said[i].auto ? c.faint(' (recommended, no answer in time)') : ''}`).join('\n')) // each question with its answer
   // how the user wants the work done: kept with the conversation (a "continue" later still knows), the
   // first such question of a new message starts them afresh; steers the checks and reviews
-  if (args.emphasis && answer && s.chat) {
+  for (const [i, q] of qs.entries()) {
+    if (!q.emphasis || !answers[i] || !s.chat) continue
     if (!s.choicesFresh) s.chat.choices = []
     s.choicesFresh = true
-    s.chat.choices.push(`${question} → ${answer}`)
+    s.chat.choices.push(`${q.question} → ${answers[i]}`)
   }
-  const auto = s.ui.autoPicked
-  if (auto === 'nobody') return `Nobody can answer (the input isn't a terminal), so your recommended one was taken: ${answer}`
-  if (auto === 'ticked') return `No answer in ${ASK_WAIT} seconds, so what the user had ticked was taken: ${answer}`
-  if (auto) return `No answer in ${ASK_WAIT} seconds, so your recommended one was taken: ${answer}`
-  return answer ? `The user answered: ${answer}` : prompt('agent/no-answer')
+  const why = auto === 'nobody' ? "nobody can answer (the input isn't a terminal)" : `no answer in ${ASK_WAIT} seconds`
+  if (qs.length === 1) {
+    if (auto === 'theirs') return `Not sent within ${ASK_WAIT} seconds, so what the user had chosen was taken: ${answers[0]}`
+    if (auto) return `${why[0].toUpperCase()}${why.slice(1)}, so your recommended one was taken: ${answers[0]}`
+    return `The user answered: ${answers[0]}`
+  }
+  return `The user answered:\n${qs.map((q, i) => `- ${q.question} → ${answers[i]}${said[i].auto ? ` (${why}: your recommended one)` : ''}`).join('\n')}`
 }
 
 async function webTool(s, name, args, signal) {
@@ -1283,6 +1371,25 @@ export const runningCall = new AsyncLocalStorage()
 // A tool's result that is HeartCode's error, not the tool's output (command output starts with
 // "exit code", a file's with line numbers).
 export const failed = (out) => /^error: /.test(String(out))
+// A call that wasn't done (held for a plan, plan mode, a hook, another part's file, declined, already
+// made): why, in a few words, for the ⎿ line under it; '' when it ran. Matched on the built-in prompts' starts.
+const REFUSALS = [
+  [/^NOT DONE: nothing was written/, 'not done: no plan yet'],
+  [/^Not done: plan mode/, 'not done: plan mode'],
+  [/^Not run: in plan mode/, 'not run: plan mode'],
+  [/^Not run: it searches/, 'not run: searches outside the project'],
+  [/^Not done: the user's hook blocked it: (.*)/, (m) => `blocked by a hook: ${clip(m[1], 80)}`],
+  [/^Not changed: \S+ belongs to another part/, "not changed: another part's file"],
+  [/^The user (declined|rejected)/, 'declined'],
+  [/^\(Already done, and nothing changed/, 'not run again: nothing changed since'],
+]
+export function refusal(out) {
+  for (const [re, why] of REFUSALS) {
+    const m = re.exec(String(out))
+    if (m) return typeof why === 'function' ? why(m) : why
+  }
+  return ''
+}
 
 // id: the tool call's (a helper's steps are sent as its, for other apps to show under it)
 export async function runTool(name, args, s, signal, id) {
@@ -1293,9 +1400,13 @@ async function toolRun(name, args, s, signal, id) {
   // hooks see an MCP tool by its own name (mcp__server__tool), also when called through "mcp"
   const hookName = name === 'mcp' && args?.server && args?.tool ? mcpName(String(args.server), String(args.tool)) : name
   const pre = await runHooks(s, 'PreToolUse', { tool_name: hookName, tool_input: args }, signal)
-  if (pre.block) return prompt('agent/hook', { reason: pre.block, blocked: true })
-  const notMine = s.ownFiles && partPaths(name, args).find((f) => !s.ownFiles.includes(path.resolve(s.root, f)))
-  if (notMine) return prompt('agent/part-files', { file: notMine, files: s.ownFiles.map((f) => path.relative(s.root, f)).join(', ') })
+  const notMine = !pre.block && s.ownFiles && partPaths(name, args).find((f) => !s.ownFiles.includes(path.resolve(s.root, f)))
+  const stop = pre.block ? prompt('agent/hook', { reason: pre.block, blocked: true }) : notMine ? prompt('agent/part-files', { file: notMine, files: s.ownFiles.map((f) => path.relative(s.root, f)).join(', ') }) : null
+  if (stop && name === 'run_command') {
+    s.ui.step('run', String(args?.command ?? '')) // a command's lines are shown where it runs, which this one never reaches
+    s.ui.result(refusal(stop))
+  }
+  if (stop) return stop
   let out = await tool(name, args, s, signal, id)
   const post = await runHooks(s, 'PostToolUse', { tool_name: hookName, tool_input: args, tool_response: out }, signal)
   if (post.block) out += `\n\n${prompt('agent/hook', { reason: post.block, after: true })}`

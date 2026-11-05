@@ -8,7 +8,7 @@ import path from 'node:path'
 import { est, estMessages, Client, tokensOf, COMPACT_SHARE } from './client.js'
 import { runGuided } from './guided.js'
 import { markUsed, removeResearch, findResearch } from './research.js'
-import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, searchesOutside, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, noteNamedPaths } from './tools.js'
+import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, searchesOutside, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, refusal, noteNamedPaths } from './tools.js'
 import { serversNote } from './lsp.js'
 import { newlyEnded, jobLine } from './background.js'
 import { loadHooks, runHooks } from './hooks.js'
@@ -73,6 +73,17 @@ export function extractImages(task, root) {
 export class Session {
   constructor({ client, profile, strat, root, ui, chat }) {
     Object.assign(this, { client, profile, strat, root, ui, chat: chat ?? newChat(root) })
+  }
+
+  // A conversation with messages already (resumed, forked, another tab's): its size estimated until
+  // the server counts it with the first request (the status bar's ctx)
+  #chat
+  get chat() {
+    return this.#chat
+  }
+  set chat(v) {
+    this.#chat = v
+    if (v?.messages?.length && this.client) this.client.lastTokens = Math.round(estMessages(v.messages) * (this.strat?.ratio ?? 1))
   }
 
   get messages() {
@@ -274,7 +285,7 @@ export class Session {
       const was = client.retryIf
       client.retryIf = (e, attempt) => attempt < 3 && e.name !== 'TimeoutError' && e.status !== 429 && e.status !== 413 && (!was || was(e, attempt)) // silent (not starting, or stopping midway: each try would wait as long again), rate-limited or too large: the next model, not another try
     }
-    const label = clip(`${client.model}: ${String(description ?? '').trim() || task.split('\n')[0]}`, 60)
+    const label = clip(String(description ?? '').trim() || task.split('\n')[0], 60) // its model is named on the agent line
     const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
     helper.chat.turns = this.chat.turns.slice(-1) // this message's turn: its file changes go there (track), the changes tool reads them
     if (ownFiles?.length) helper.ownFiles = ownFiles.map((f) => path.resolve(this.root, f)) // a part of the plan: changes only its own files
@@ -283,11 +294,13 @@ export class Session {
     helper.mcpGate = async () => (await this.#gate(helper), () => {})
     if (this.onEvent) helper.onEvent = (e) => this.onEvent({ ...e, parent: id, helper: label })
     log('agent', `helper "${label}" (${images.length} image(s)): ${task}`)
+    this.ui.helpers?.set(label, 'starting') // a line under the spinner while it works (helperUI keeps it up to date)
     try {
       const answer = await (strat.actions === 'tools' ? runNative : runGuided)(helper, task, images, signal)
       log('agent', `helper "${label}" done`, answer)
       return answer
     } finally {
+      if (this.ui.helpers?.delete(label)) this.ui.render?.()
       this.#release(helper)
       // its changes are this message's: the not-done checks and the review see them
       if (helper.changed?.size && this.changed) {
@@ -893,7 +906,20 @@ async function runNative(s, task, images, signal) {
     if (s.messages[0]?.content !== now && s.messages[0]?.role === 'system') s.messages[0] = { ...s.messages[0], content: now }
     pairTools(s.messages)
     ui.spinner('thinking')
-    const out = ui.response(client.model) // named: helpers think too (theirs are named in helperUI)
+    // named by the model that answers: opened at its first word (a failed one moves the list on
+    // before that, mid-request); helpers are named in helperUI
+    let live = null
+    const reply = () => (live ??= ui.response(client.model))
+    // a reply that may be the answer, with a review to come (files changed since the last one): its
+    // text is held and shown after the review's line, so the answer is what's last on screen
+    const hold = sinceNudge && !s.isSub && s.changed?.size > 0 && s.lastChangeAt > (s.reviewedAt ?? 0) && ui.permission !== 'plan'
+    const out = { think: (t) => reply().think(t), text: hold ? (t) => t?.trim() && ui.spinner('writing the answer') : (t) => reply().text(t), end: () => reply().end() }
+    const showHeld = (text) => {
+      if (!hold || !text?.trim()) return
+      const r = ui.response(client.model)
+      r.text(text)
+      r.end()
+    }
     const stream = strat.stream
     // A long tool call (a whole file) streams in silently: say what's being written.
     const onToolDelta = (name, args) => ui.spinner(`${name === 'run_command' ? 'preparing a command' : `writing ${/"path"\s*:\s*"([^"]+)"/.exec(args)?.[1] ?? name}`} · ${args.length >= 1000 ? `${(args.length / 1000).toFixed(1)}k` : args.length} chars`)
@@ -975,7 +1001,10 @@ async function runNative(s, task, images, signal) {
       res.content = res.content.slice(0, markup.index).trim()
       s.messages[s.messages.length - 1] = { ...s.messages.at(-1), content: res.content }
     }
-    if (res.toolCalls.length) s.acted = sinceNudge = true // did real work this message, for the premature-stop check
+    if (res.toolCalls.length) {
+      showHeld(res.content) // not the answer: shown now, before its calls
+      s.acted = sinceNudge = true // did real work this message, for the premature-stop check
+    }
     s.onEvent?.({ type: 'assistant', model: `${client.provider}/${client.model}`, content: res.content, reasoning: res.reasoning, toolCalls: res.toolCalls }) // headless output
     if (!res.toolCalls.length && !res.content?.trim()) {
       // Nothing at all (seen after a failed tool call): not an answer. The same request again
@@ -999,6 +1028,7 @@ async function runNative(s, task, images, signal) {
     empty = 0
     if (!res.toolCalls.length) {
       const more = sinceNudge && ((await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal)))
+      showHeld(res.content) // after the review's line
       if (!more) {
         s.wrapUpLater?.(task, res.content) // after the answer, beside what comes next
         return res.content
@@ -1018,13 +1048,26 @@ async function runNative(s, task, images, signal) {
         return null
       }
     }
+    // a helper's line: its job, and the model doing it (named once here; its steps go by its job)
+    const helperLine = (a) => `${clip(String(a.description ?? '').trim() || 'helper', 70)} ${c.faint(`· ${a.model || client.model}`)}`
     const together = new Map()
     for (const call of res.toolCalls) {
       const args = argsOf(call)
       if (call.function.name !== 'agent' || !args || !allowed(s, 'agent') || res.toolCalls.filter((x) => x.function.name === 'agent').length < 2) continue
-      ui.step('agent', clip([args.model && `${args.model}:`, args.description].filter(Boolean).join(' '), 80))
+      ui.step('agent', helperLine(args))
       together.set(call.id, runTool('agent', args, s, signal, call.id))
     }
+    // several ask_user calls in one reply: one dialog, a tab each (the first call asks them all)
+    const questionsOf = (a) => {
+      try {
+        return typeof a.questions === 'string' ? JSON.parse(a.questions) : (a.questions ?? a)
+      } catch {
+        return a
+      }
+    }
+    const asks = res.toolCalls.filter((call) => call.function.name === 'ask_user' && argsOf(call))
+    const askedWith = new Set(asks.length > 1 ? asks.slice(1).map((call) => call.id) : [])
+    if (askedWith.size) asks[0].function.arguments = JSON.stringify({ questions: asks.flatMap((call) => [questionsOf(argsOf(call))].flat()) })
     // lookups in one reply (searches, pages, files) run at the same time; the same one twice, once
     const early = new Map() // call id → { refused } or { running }
     const bySig = new Map()
@@ -1049,11 +1092,11 @@ async function runNative(s, task, images, signal) {
             : name === 'manage' || name === 'background'
               ? [args.action, args.kind, args.name, args.id && `#${args.id}`].filter(Boolean).join(' ')
               : name === 'agent'
-                ? [args.model && `${args.model}:`, args.description].filter(Boolean).join(' ')
+                ? ''
                 : name === 'todo' || name === 'ask_user'
                   ? ''
                   : (args.path ?? args.url ?? args.query ?? args.filter ?? args.name ?? '')
-      if (name !== 'run_command' && !together.has(call.id)) ui.step(name, clip(detail, 80))
+      if (name !== 'run_command' && !together.has(call.id) && !askedWith.has(call.id)) ui.step(name, name === 'agent' && args ? helperLine(args) : clip(detail, 80)) // asked together: shown once, with the first
       const pre = early.get(call.id)
       // the first changes to the files with no plan yet (this message, or still open from an earlier one):
       // not made — the plan first, then the changes again. Every change in that reply (one made beside a
@@ -1061,7 +1104,7 @@ async function runNative(s, task, images, signal) {
       const planFirst = !s.isSub && (!s.planAsked || s.planHeldIn === res) && EDITS.has(name) && args && allowed(s, name) && ui.permission !== 'plan' && !s.todoTouched && !(s.chat.todos ?? []).some((t) => t.status !== 'completed')
       if (planFirst) Object.assign(s, { planAsked: true, planHeldIn: res })
       const refused = planFirst ? prompt('agent/plan-first', { file: String(args.path ?? args.file ?? 'the file') }) : pre ? (pre.refused ?? null) : !together.has(call.id) && args && allowed(s, name) ? guard.before(name, args) : null
-      let out = refused ?? (pre ? await pre.running : together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal, call.id) : 'error: the tool arguments were not valid JSON')
+      let out = refused ?? (askedWith.has(call.id) ? 'Asked together with the first ask_user call of this reply: its result has this answer too.' : pre ? await pre.running : together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal, call.id) : 'error: the tool arguments were not valid JSON')
       if (!refused && args) out += guard.after(name, args, out)
       if (guard.stuck) stuck ??= guard.stuck
       if (args && !refused) {
@@ -1093,8 +1136,12 @@ async function runNative(s, task, images, signal) {
       lastCall = sig
       if (inRow >= 3) out += `\n\n${prompt('agent/repeating', { n: inRow, failed: false })}`
       if (inRow >= 5) stuck = `made the same ${name} call five times in a row`
-      if (name === 'read_file' || name === 'search' || name === 'list_files' || name === 'web_fetch' || name === 'web_search' || name === 'changes') ui.result(`${out.split('\n').length} lines`)
-      else if (name === 'agent' && !failed(out)) ui.result(`${s.ui.permission === 'plan' ? 'planned' : 'done'}: ${clip(out.split('\n').find((l) => l.trim()) ?? '', 100)}`)
+      const no = refusal(out) // refused, held, declined: said so, not left looking done
+      if (no) {
+        if (name === 'run_command' && refused) ui.step('run', clip(String(args.command ?? ''), 80)) // a command shows itself where it runs, which this one never reached
+        if (name !== 'run_command' || refused) ui.result(no) // a command's own refusals are shown there too
+      } else if (name === 'read_file' || name === 'search' || name === 'list_files' || name === 'web_fetch' || name === 'web_search' || name === 'changes') ui.result(lineCount(out))
+      else if (name === 'agent' && !failed(out)) ui.result(s.ui.permission === 'plan' ? 'planned' : 'done') // its reply is shown above, under its name
       else if (failed(out)) ui.result(clip(out, 120))
       client.refresh?.() // a setting changed while the tool ran (the window): its result is cut by the new one
       // every sizable result is saved as it comes (a web page already is, in research): later it can
@@ -1421,6 +1468,12 @@ export async function review(s, task, answer, signal) {
   return null
 }
 
+// "3 lines" for a result; an empty last line isn't one (a file ends with a newline, and read_file numbers the empty line after it)
+const lineCount = (out) => {
+  const n = String(out).replace(/\n\s*(\d+\|)?\s*$/, '').split('\n').length
+  return `${n} line${n === 1 ? '' : 's'}`
+}
+
 // A helper agent's view of the screen: its steps are labelled, and its replies (which go to the
 // main agent) aren't shown as answers. Everything else is the main UI's.
 // Its thinking is shown whole when its reply is in (helpers working at once don't mix), named.
@@ -1459,11 +1512,26 @@ function helperUI(ui, label) {
     asking.set(ui, next.catch(() => {}))
     return next
   }
+  // what it's doing, for the line per helper under the spinner (ui.helpers: full screen only)
+  const status = (text) => {
+    if (!ui.helpers?.has(label)) return
+    ui.helpers.set(label, clip(String(text), 60))
+    ui.render?.()
+  }
   const own = {
-    step: (name, detail) => ui.step(`  ${label} › ${name}`, detail),
-    result: (text) => ui.result(`  ${text}`),
+    // its steps one level in, under the agent line
+    step: (name, detail = '') => {
+      if (ui.afterBlock) ui.gap()
+      ui.afterBlock = false
+      ui.print(`  ${c.accent('●')} ${c.accent(c.bold(`${label} › ${name}`))} ${c.info(detail)}`)
+      status(`${name} ${detail}`)
+    },
+    result: (text) => ui.print(`    ${c.ghost('⎿')} ${c.faint(text)}`),
     response,
-    spinner: (text) => ui.spinner(`${label} · ${text}`),
+    spinner: (text) => {
+      status(typeof text === 'function' ? text() : text)
+      ui.spinner(typeof text === 'function' ? () => `${label} · ${text()}` : `${label} · ${text}`) // a function: re-read every frame
+    },
     confirm: inTurn('confirm'),
     pick: inTurn('pick'),
     ask: inTurn('ask'),
@@ -1563,7 +1631,7 @@ function attachNamed(s, task) {
     replaceCopy(s, f, msg)
     results.push(msg)
     s.ui.step('read_file', f)
-    s.ui.result(`${body.split('\n').length} lines`)
+    s.ui.result(lineCount(body))
   }
   if (calls.length) s.messages.push({ role: 'assistant', content: '', tool_calls: calls }, ...results)
 }

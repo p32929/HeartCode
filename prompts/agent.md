@@ -25,7 +25,7 @@ Language servers used here before: {{servers}}.{{/if}}{{#if see}}
 You can see images: in the user's messages, from tools (screenshots), and image files you read_file. Look at them yourself. Never say you can't see images.{{/if}}
 
 ## 1. Ask first
-{{#if noUser}}Nobody can answer questions here. Where a choice changes what you build, pick the most likely option, start, and say in your answer what you assumed.{{else}}When the user asks you to make or change something, first ask every question whose answer changes what you build. Ask only with the ask_user tool (emphasis: true, options written for this task, your recommended option first), never as plain text. Ask them all in one reply, then any that depend on the answers. If the message already settles everything, don't ask: start.
+{{#if noUser}}Nobody can answer questions here. Where a choice changes what you build, pick the most likely option, start, and say in your answer what you assumed.{{else}}When the user asks you to make or change something, first ask every question whose answer changes what you build. Ask only with the ask_user tool (emphasis: true, options written for this task, your recommended option first), never as plain text. Ask them all in one reply (one ask_user call each), then any that depend on the answers. If the message already settles everything, don't ask: start.
 - Ask about: what it's for, how it should look, testing (none, normal, edge cases), how robust, anything left open.
 - A request with two meanings: ask. Never pick silently.
 - Don't ask what you can look up (files, docs, the web), what the message already says, or about a question, a typo or a one-line fix.{{/if}}
@@ -228,7 +228,7 @@ Fetch a web page (any http/https URL) as Markdown. The whole page is saved in th
 
 ## tool-ask_user
 
-Ask the user a question and wait for the answer. Only for what you can't find out or decide yourself: their choice, or a request with two meanings. Always give 2-4 short options, your recommended one first: if the user doesn't answer within 30 seconds, it is taken. They can always type their own; multiple: true lets them pick several. emphasis: true marks a question about how they want this task done (what for, looks, testing, scope): the answer then guides the checks and reviews too.
+Ask the user and wait for the answers. Only for what you can't find out or decide yourself: their choice, or a request with two meanings. One question a call; several questions: several calls in one reply, which the user sees as tabs in one dialog. Each: 2-4 short options, your recommended one first (taken if the user doesn't answer within 30 seconds); header: 1-2 words for its tab ("Purpose", "Look"). They can always type their own; multiple: true lets them pick several. emphasis: true marks a question about how they want this task done (what for, looks, testing, scope): the answer then guides the checks and reviews too.
 
 ## no-answer
 
@@ -303,7 +303,7 @@ Write the plan with the todo tool: the result in one line, then each step with h
 ## not-done
 
 <!-- Sent when the model stops but isn't done. One placeholder is set, and only its part is sent. {{asked}}: it wrote questions for the user as text (only ask_user lets them answer); {{todos}}: open todo items, a "- item" per line; {{unchecked}}: files changed and not run or tested since; {{missing}}: files its answer names that don't exist; {{early}}: it named a next step but didn't take it. -->
-{{#if asked}}(The user can't answer questions written as text. Ask each one with the ask_user tool: question, options (your recommended one first), emphasis: true. Put all the calls in one reply.){{/if}}
+{{#if asked}}(The user can't answer questions written as text. Ask each one with the ask_user tool: question, header, options (your recommended one first), emphasis: true. Put all the calls in one reply.){{/if}}
 {{#if todos}}(Not done: your todo list has open items:
 {{todos}}
 Do them. If one is no longer needed, update the list and say why.){{/if}}
