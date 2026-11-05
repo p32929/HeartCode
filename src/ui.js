@@ -936,7 +936,7 @@ export class UI {
   // mouse: HeartCode takes the mouse (the wheel scrolls the conversation, dragging copies); off,
   // the terminal keeps it, so text is selected and copied the terminal's own way (over SSH too).
   fullscreen({ mouse = false } = {}) {
-    if (this.full || !(this.input.isTTY && this.out.isTTY)) return
+    if (this.full || !(this.input.isTTY && this.out.isTTY) || process.env.TERM === 'dumb') return
     this.full = true
     this.mouseOn = mouse ? MOUSE_ON : ''
     // alternate screen · kitty keyboard protocol (Shift/Cmd+Enter are told apart) · bracketed paste
@@ -1328,7 +1328,7 @@ export class UI {
       // and not in a menu or a mid-task yes/no question, where Space types a space as usual)
       if (key.name === 'space' && !this.rl.line && !this.menu.pick && !(this.asking && !this.histOn) && this.voiceReady()) return this.#action('voice', write)
       if (!this.asking && !(key.ctrl && key.name === 'c')) return this.#typeAhead(s, key, write)
-      if (key.name === 'tab' && key.shift) return this.setPermission(PERMISSIONS[(PERMISSIONS.findIndex(([p]) => p === this.permission) + 1) % PERMISSIONS.length][0])
+      if (key.name === 'tab' && key.shift) return this.cyclePermission()
       // A new line instead of sending: Shift/Ctrl/Alt/Cmd+Enter (arrive as "\n" or ESC+Enter),
       // Ctrl+J, "\" right before Enter, and line breaks inside a paste.
       if (key.name === 'paste-start' || key.name === 'paste-end') {
@@ -1451,7 +1451,7 @@ export class UI {
       if (m.on) return (m.off = rl.line), this.#suggestWhileWorking() // first Esc just closes the suggestions
       return this.escStop()
     }
-    if (key.name === 'tab' && key.shift) return this.setPermission(PERMISSIONS[(PERMISSIONS.findIndex(([p]) => p === this.permission) + 1) % PERMISSIONS.length][0])
+    if (key.name === 'tab' && key.shift) return this.cyclePermission()
     if (key.name === 'pageup' || key.name === 'pagedown') return this.scrollBy(key.name === 'pageup' ? this.page() : -this.page())
     if (it && (key.name === 'up' || key.name === 'down')) {
       m.sel = (m.sel + (key.name === 'up' ? m.items.length - 1 : 1)) % m.items.length
@@ -1513,7 +1513,7 @@ export class UI {
       case 'stop':
         return this.asking ? undefined : this.onEscape?.()
       case 'cycle_permissions':
-        return this.setPermission(PERMISSIONS[(PERMISSIONS.findIndex(([p]) => p === this.permission) + 1) % PERMISSIONS.length][0])
+        return this.cyclePermission()
       case 'newline':
         rl.line = rl.line.slice(0, rl.cursor) + '\n' + rl.line.slice(rl.cursor)
         rl.cursor++
@@ -1824,13 +1824,14 @@ export class UI {
 
   // history: this prompt's messages go into ↑/↓ history (only the main prompt, never answers like keys).
   // One question on screen at a time: a command run beside a task (onNow) and the task can both ask.
+  // A question also waits for voice being recorded to end (its words go where they were going).
   async #free() {
-    while (this.full && this.asking) await new Promise((r) => this.freed.push(r))
+    while ((this.full && this.asking) || this.recording) await new Promise((r) => (this.recording ? setTimeout(r, 200) : this.freed.push(r)))
   }
 
   ask(prompt, { initial = '', suggest = false, history = false } = {}) {
     if (this.dialog && !history) this.setDialog(null) // a question (a permission, a picker) needs you: the dialog makes way
-    if (this.full && this.asking) return this.#free().then(() => this.ask(prompt, { initial, suggest, history }))
+    if (this.full && (this.asking || (this.recording && !history))) return this.#free().then(() => this.ask(prompt, { initial, suggest, history }))
     if (history && this.kept) [initial, this.kept] = [initial || this.kept, ''] // typed before a submit()
     this.stopSpin()
     const rl = this.#rl()
@@ -1849,6 +1850,8 @@ export class UI {
     }
     // a question in the middle of work: what's being typed for later waits until it's answered
     const draft = !history && rl.line ? [rl.line, (rl.line = ''), (rl.cursor = 0)][0] : ''
+    // piped input: its lines are messages, not answers; nobody's there to answer
+    if (!history && !rl.terminal) return this.write(prompt + c.dim('(no answer: the input is not a terminal)') + '\n'), Promise.resolve(null)
     if (this.queue.length) {
       const l = this.queue.shift()
       log('input', `${prompt.trim()} ${/api key/i.test(prompt) && l ? `${l.slice(0, 4)}…(${l.length} chars)` : l}`) // never log keys
@@ -1891,7 +1894,7 @@ export class UI {
           this.inputMark = this.log.length - 1 // where this message starts, for /rewind
           const picked = Array.isArray(pick?.chosen) ? pick.chosen.map((x) => x.label).join(', ') : pick?.chosen?.label
           if (pick?.quiet) this.render()
-          else if (pick) this.write(echo + (picked ?? c.dim(pick.closedAs ?? 'cancelled')) + (pick.auto?.fired ? c.dim(` · no answer in ${pick.auto.secs}s: the recommended one`) : '') + '\n')
+          else if (pick) this.write(echo + (picked ?? c.dim(pick.closedAs ?? 'cancelled')) + (pick.auto?.fired ? c.dim(` · no answer in ${pick.auto.secs}s: ${pick.auto.fired === 'ticked' ? 'what you ticked' : 'the recommended one'}`) : '') + '\n')
           else if (l !== null && history && this.isCommand(l.trim()) && !/^\s*\/skill:/.test(l)) this.notice(/^\S+/.exec(l.trim())[0], 3000, '›') // a command isn't part of the conversation: its name for a moment (not its arguments: maybe a key)
           else if (l !== null) this.write(echo + c.bright(l.replace(/\n/g, '\n' + ' '.repeat(width(echo.replace(/\x1b\[[0-9;]*m/g, ''))))) + '\n')
           else this.render()
@@ -1919,6 +1922,8 @@ export class UI {
     if (!this.full) {
       items.forEach((it, i) => this.print(`  ${i + 1}. ${it.group ? `${it.group} · ` : ''}${it.label}${it.desc ? '  ' + c.dim(it.desc) : ''}`))
       const a = await this.ask(`${title} ${c.dim(multi ? '(numbers, like 1,3)' : '(number)')}: `)
+      this.autoPicked = a === null && Boolean(auto) && !this.rl.terminal && 'nobody' // piped input: nobody's there to answer, so the recommended one (Esc stays no answer)
+      if (this.autoPicked) return multi ? [auto.item] : auto.item
       if (!multi) return items[Number(a) - 1] ?? null
       const chosen = String(a ?? '').split(/[\s,]+/).map((n) => items[Number(n) - 1]).filter(Boolean)
       return chosen.length ? chosen : null
@@ -1949,13 +1954,20 @@ export class UI {
     a.timer = setTimeout(() => {
       const pick = this.menu.pick
       if (pick?.auto !== a) return
-      a.fired = this.autoPicked = true
-      pick.chosen = pick.multi ? [a.item] : a.item
+      if (this.out.hidden) return this.#armAuto() // a tab in the background: you haven't seen it yet
+      const ticked = pick.items.filter((x) => x.checked)
+      a.fired = this.autoPicked = ticked.length && pick.multi ? 'ticked' : true
+      pick.chosen = pick.multi ? (ticked.length ? ticked : [a.item]) : a.item
       this.rl.line = ''
       this.rl.cursor = 0
       this.ttyWrite('\r', { name: 'return' })
     }, a.secs * 1000)
     this.render()
+  }
+
+  // A tab comes on screen: its question's wait starts now.
+  resumeAuto() {
+    if (this.menu.pick?.auto) this.#armAuto()
   }
 
   autoHint() {
@@ -1966,9 +1978,17 @@ export class UI {
   setPermission(mode) {
     log('permissions', mode)
     if (mode === 'plan' && this.permission !== 'plan') this.beforePlan = this.permission // what plan mode asks like, and goes back to
+    this.leftPlan = null
     this.permission = mode
     this.onPermission?.(mode)
     this.render()
+  }
+
+  // Shift+Tab: the next mode; plan goes back to the mode before it, and the next press goes on after plan.
+  cyclePermission() {
+    if (this.permission === 'plan' && this.beforePlan && this.beforePlan !== 'plan') return this.setPermission(this.beforePlan), (this.leftPlan = this.beforePlan)
+    const at = this.leftPlan === this.permission ? 'plan' : this.permission
+    this.setPermission(PERMISSIONS[(PERMISSIONS.findIndex(([p]) => p === at) + 1) % PERMISSIONS.length][0])
   }
 
   // kind: 'edit', 'command' or 'read'. true = yes, false = no, string = "no, and here is why"
@@ -1987,6 +2007,7 @@ export class UI {
       }
     }
     const a = await this.ask(`${c.yellow('?')} ${question} ${c.dim('[Y/n or type feedback]')} `)
+    if (a === null && !this.rl.terminal) return `Not allowed: HeartCode's input is not a terminal, so nobody can approve this. Don't retry it; say in your reply what you would have done.`
     if (a === null) return false
     const t = a.trim()
     if (/^(y|yes)?$/i.test(t)) return true
@@ -2001,7 +2022,7 @@ export class UI {
       { label: 'No, and tell the model what to do instead', value: 'why' },
     ]
     const a = (await this.pick(`${c.yellow('?')} ${question}`, opts))?.value ?? false
-    if (a === 'all') this.setPermission('all')
+    if (a === 'all') this.permission === 'plan' ? (this.beforePlan = 'all') : this.setPermission('all') // plan mode stays: it goes on to 'all' afterwards
     if (a !== 'why') return Boolean(a)
     return (await this.ask(`${c.bold('What should it do instead?')} `))?.trim() || false
   }

@@ -5,7 +5,7 @@ import { prompt, userInstructions } from './prompts.js'
 import { newChat } from './sessions.js'
 import { skillFiles, readSkillFile } from './skills.js'
 import path from 'node:path'
-import { est, estMessages, Client, writtenBy, tokensOf, COMPACT_SHARE } from './client.js'
+import { est, estMessages, Client, tokensOf, COMPACT_SHARE } from './client.js'
 import { runGuided } from './guided.js'
 import { markUsed, removeResearch, findResearch } from './research.js'
 import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, searchesOutside, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, noteNamedPaths } from './tools.js'
@@ -104,8 +104,8 @@ export class Session {
   // why: what the spinner says the compacting is for ("context 85% full (650k/768k)").
   async compact({ signal, focus = '', midTask = false, task = '', why = '' } = {}) {
     const { chat, client, strat, ui } = this
-    const native = Boolean(chat.messages?.length)
-    const head = native ? chat.messages.slice(0, chat.messages[0].role === 'system' ? 1 : 2) : [] // the system prompt stays
+    const native = strat.actions === 'tools' && Boolean(chat.messages?.length) // guided mode: from chat.history, which has every turn
+    const head = chat.messages?.length ? chat.messages.slice(0, chat.messages[0].role === 'system' ? 1 : 2) : [] // the system prompt stays
     const body = native ? chat.messages.slice(head.length) : []
     const conversation = native ? transcript(body) : chat.history.map((h) => `User: ${h.task}\nAssistant: ${h.answer}`).join('\n\n')
     if (!conversation.trim()) return null
@@ -132,8 +132,8 @@ export class Session {
     chat.sentNotes = [] // the summary replaces the messages the notes came with
     chat.epoch = epoch + 1
     const recap = prompt('compact/summary', { summary, findings, requests: requestsOf(chat) })
-    if (native) {
-      chat.messages = midTask
+    if (chat.messages?.length) {
+      chat.messages = midTask && native
         ? [...head, { role: 'user', content: `${recap}\n\n${prompt('compact/continue', { task })}` }]
         : [...head, { role: 'user', content: recap }, { role: 'assistant', content: prompt('compact/acknowledged') }]
     }
@@ -209,7 +209,9 @@ export class Session {
     }
     if (!this.isSub) log('rotate', `this message starts on ${this.client.provider ?? ''} · ${this.client.model}${this.client.rotation ? ` (#${this.client.rotation.at + 1} of ${this.client.rotation.list.length})` : ''}`)
     log('task', `${text} (${this.strat.actions} mode, ${images.length} image(s))`)
-    const answer = this.strat.actions === 'tools' ? await runNative(this, text, images, signal) : await runGuided(this, text, images, signal)
+    const native = this.strat.actions === 'tools'
+    const answer = native ? await runNative(this, text, images, signal) : await runGuided(this, text, images, signal)
+    if (!native && chat.messages?.length) chat.messages.push({ role: 'user', content: text }, { role: 'assistant', content: answer ?? '' }) // a model with tool calls later reads only chat.messages
     log('answer', answer) // the conversation's log
     log('task', `answered (${String(answer ?? '').length} characters)`)
     this.history.push({ task: text, answer })
@@ -252,6 +254,7 @@ export class Session {
         answer = (await this.#helper(t, task, images, args.description, id, signal, args.ownFiles))?.trim()
       } catch (e) {
         if (e.name === 'AbortError' || signal?.aborted) throw e
+        if (e.maxTurns) return `error: the helper ${e.message}` // the caller's limit: every other model would stop there too
         failed.push(`${t.model}: ${clip(e.message, 150)}`)
       }
       if (answer) return t === first ? answer : `(Answered by ${name(t)}, not ${name(first)}${failed.length ? `: ${failed.join('; ')}` : ''})\n\n${answer}`
@@ -273,6 +276,7 @@ export class Session {
     }
     const label = clip(`${client.model}: ${String(description ?? '').trim() || task.split('\n')[0]}`, 60)
     const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label), chat: newChat(this.root) })
+    helper.chat.turns = this.chat.turns.slice(-1) // this message's turn: its file changes go there (track), the changes tool reads them
     if (ownFiles?.length) helper.ownFiles = ownFiles.map((f) => path.resolve(this.root, f)) // a part of the plan: changes only its own files
     Object.assign(helper, { isSub: true, research: this.research, ran: this.ran, noResearch: this.noResearch, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
     helper.track = (rel, before) => this.track(rel, before)
@@ -285,6 +289,12 @@ export class Session {
       return answer
     } finally {
       this.#release(helper)
+      // its changes are this message's: the not-done checks and the review see them
+      if (helper.changed?.size && this.changed) {
+        for (const f of helper.changed) this.changed.add(f)
+        this.lastChangeAt = ++this.seq
+        this.checksSince = 0
+      }
     }
   }
 
@@ -545,7 +555,7 @@ const alwaysSkill = (k) => {
 const SYSTEM = (s) => {
   const instructions = userInstructions(s.root)
   return [
-    prompt('agent/system', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), rootList: rootList(s.root), servers: serversNote(s.root), files: '', more: '', caller: Boolean(s.appendSystem), see: Boolean(s.strat.vision) }), // models that can see often say they can't: told they can
+    prompt('agent/system', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), rootList: rootList(s.root), servers: serversNote(s.root), files: '', more: '', caller: Boolean(s.appendSystem), see: Boolean(s.strat.vision), noUser: Boolean(s.ui.noUser || s.isSub) }), // models that can see often say they can't: told they can
     instructions && prompt('agent/instructions', { instructions }),
     ...[...(s.skills?.values() ?? [])].filter((k) => k.use === 'always').map(alwaysSkill), // skills that say how to work (use: always), with the files they bring
     !s.isSub && teamPrompt(s),
@@ -741,7 +751,8 @@ async function runNative(s, task, images, signal) {
   // Unchanged, it stays the same text, so a provider's prompt cache still holds.
   const sys = SYSTEM(s)
   if (!s.messages) {
-    s.messages = [{ role: 'system', content: sys }]
+    // the chat so far was in guided mode (chat.history only; this message's entry isn't in it yet)
+    s.messages = [{ role: 'system', content: sys }, ...s.history.flatMap((h) => [{ role: 'user', content: h.task }, { role: 'assistant', content: h.answer ?? '' }])]
   } else if (s.messages[0]?.content !== sys && s.messages[0]?.role === 'system') {
     s.messages[0] = { ...s.messages[0], content: sys }
   }
@@ -764,7 +775,10 @@ async function runNative(s, task, images, signal) {
     if (!k?.tokens || k.upTo > s.messages.length) return all
     return Math.max(all, k.tokens + tokensOf(s.messages.slice(k.upTo), null, Math.max(1, ratio)))
   }
-  const nearlyFull = () => s.autoCompact && strat.context > 0 && used() >= strat.context * COMPACT_SHARE && used() >= (s.compactFailedAt ?? 0)
+  const nearlyFull = () => {
+    if (s.compactModel !== client.model) Object.assign(s, { compactModel: client.model, compactFailedAt: 0 }) // a failed try was for another model's window
+    return s.autoCompact && strat.context > 0 && used() >= strat.context * COMPACT_SHARE && used() >= (s.compactFailedAt ?? 0)
+  }
   const fullness = () => `context ${Math.round((used() / strat.context) * 100)}% full (~${kTokens(used())} of ${kTokens(strat.context)})`
   // Still that full after compacting (what every request carries, the system prompt and the tools'
   // schemas, takes most of the window): compacting again won't free anything, so not until it has
@@ -806,14 +820,13 @@ async function runNative(s, task, images, signal) {
   const known = notes.length || pages.length ? prompt('agent/known', { notes: notes.map((n) => `[[${n.name}]] — ${n.description}`).join('\n'), pages: pages.map((r) => `- ${r.title} — ${r.url} (read ${r.fetched}) → ${r.file}`).join('\n') }).trim() : ''
   const text = known ? `${task}\n\n${known}` : task
   if (!s.isSub) Object.assign(s, { research: [], ran: [], lastQuery: '', dirsBefore: foldersOf(s.root), noResearch: !s.memory }) // this message's pages and commands (helpers add theirs), and the folders there were, for the wrap-up
-  const planning = ui.permission === 'plan'
-  const said = planning && !s.isSub ? `${text}\n\n${prompt('agent/plan-mode')}` : text
+  const said = ui.permission === 'plan' && !s.isSub ? `${text}\n\n${prompt('agent/plan-mode')}` : text
   const content = images.length ? [{ type: 'text', text: said }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))] : said
   s.messages.push({ role: 'user', content })
   attachNamed(s, task) // files the message names: as if already read (saves a round trip each)
   // the tools: built again each step (the model answering may change; client.js leaves them out for
-  // one that can't call tools)
-  const toolList = () => [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name) && !(planning && PLAN_HIDDEN.has(f.name)) && !(f.name === 'ask_user' && ui.noUser)).map((f) => ({ type: 'function', function: f }))
+  // one that can't call tools; plan mode may be left mid-message)
+  const toolList = () => [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name) && !(ui.permission === 'plan' && PLAN_HIDDEN.has(f.name)) && !(f.name === 'ask_user' && (ui.noUser || s.isSub))).map((f) => ({ type: 'function', function: f })) // ask_user: not headless, nor a helper (it reports to the main agent, which asks)
   const guard = newGuard() // calls made again with nothing changed: the earlier result instead
   let lastCall = '' // the last call (tool and arguments), and how many times in a row
   let inRow = 0
@@ -859,7 +872,7 @@ async function runNative(s, task, images, signal) {
     const tools = toolList()
     s.lastTools = tools // what the requests carry: the findings note before compacting sends the same (compact)
     if (s.maxTurns && step >= s.maxTurns) {
-      ui.warn(`stopped after ${s.maxTurns} steps (--max-turns); say "continue" to go on`)
+      if (!s.isSub) ui.warn(`stopped after ${s.maxTurns} steps (--max-turns); say "continue" to go on`)
       throw Object.assign(new Error(`stopped after ${s.maxTurns} steps (--max-turns)`), { maxTurns: true })
     }
     // after a failed compaction, the next try waits until the conversation has grown by 5% of the window
@@ -889,7 +902,7 @@ async function runNative(s, task, images, signal) {
     s.refreshSystem = false
     let res
     try {
-      res = await client.chat({ messages: s.messages, tools, stream }, { signal, onToken: out.text, onReasoning: out.think, onToolDelta, fit: !refitted })
+      res = await client.chat({ messages: s.messages, tools, stream }, { signal, onToken: out.text, onReasoning: out.think, onToolDelta, fit: s.autoCompact && !refitted })
     } catch (e) {
       if (!e.tooBig) {
         ui.stopSpin()
@@ -912,6 +925,15 @@ async function runNative(s, task, images, signal) {
     }
     refitted = false
     ui.stopSpin()
+    // the model list moved on to a model without tool calls: it can't act here, so guided mode does
+    // the rest of this message (its reply to a request it couldn't take part in is dropped)
+    if (strat.actions !== 'tools') {
+      out.end()
+      log('rotate', `${client.model} has no tool calls; guided mode carries on with this message`)
+      const answer = await runGuided(s, task, images, signal)
+      s.messages.push({ role: 'assistant', content: answer ?? '' })
+      return answer
+    }
     if (!stream) {
       out.think(res.reasoning)
       out.text(res.content)
@@ -930,7 +952,7 @@ async function runNative(s, task, images, signal) {
     }
     s.messages.push({ role: 'assistant', content: res.content || '', ...(res.toolCalls.length && { tool_calls: res.toolCalls }), ...(res.reasoning && res.toolCalls.length && { reasoning_content: res.reasoning }) }) // client.js sends it by the name the provider uses, or not at all
     s.counted = { tokens: client.lastTokens, upTo: s.messages.length } // the server's count: up to this reply (auto-compact)
-    writtenBy.set(s.messages.at(-1), client.model) // its thinking goes back to this model only
+    s.messages.at(-1).writer = client.model // its thinking goes back to this model only (client.js; the field isn't sent)
     // a tool call written out as text instead of made (some models do, after a long conversation): made
     const leak = !res.toolCalls.length && leakedCall(res.content)
     if (leak && tools.some((t) => t.function.name === leak.name)) {
@@ -976,7 +998,7 @@ async function runNative(s, task, images, signal) {
     }
     empty = 0
     if (!res.toolCalls.length) {
-      const more = sinceNudge && !s.isSub && ((await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal)))
+      const more = sinceNudge && ((await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal)))
       if (!more) {
         s.wrapUpLater?.(task, res.content) // after the answer, beside what comes next
         return res.content
@@ -1302,7 +1324,7 @@ export function missingFiles(root, reply) {
 
 // Every folder in the project (relative paths), the ignored ones (.git, node_modules…) and
 // HeartCode's own left out: to tell the folders a task made.
-function foldersOf(root) {
+export function foldersOf(root) {
   const out = new Set()
   const walk = (rel, depth) => {
     if (out.size > 20_000 || depth > 12) return

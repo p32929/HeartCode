@@ -2,6 +2,33 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.55 (2026-11-05)
+
+- **Helpers never ask you anything**: a helper's question no longer pops up as your dialog (in
+  tool and guided mode); it decides and says what it assumed, and the main model asks if needed.
+  Helpers can't start helpers, get the "not done yet" checks, write only their own files (patches
+  through commands too), and their changes go to the review.
+- **Plan mode only reads**: commands like `ls & node x`, a line break, `git diff --output`,
+  `find -fprint` or `rg --pre` aren't taken as reading; MCP tools that may change something are
+  refused; an unknown language server isn't started; "don't ask again" keeps plan mode on;
+  Shift+Tab out of plan goes back to the mode before it.
+- **Headless and editors**: no crash when the theme or mouse setting changes; another session's
+  permission change doesn't change theirs; told to decide instead of asking; `/skill:name` works;
+  editors use the project's prompt overrides; a helper's thinking isn't shown as the agent's.
+- **Models**: a stated rate or size limit moves on to the next model (it crashed); guided and
+  tool-calling turns see each other's conversation; a move to a model without tool calls mid-message
+  goes on in guided mode; a Gemini chat resumed or forked onto another provider isn't refused;
+  auto-compact off stays off after a move; a resumed chat doesn't keep the last one's token count.
+- **Guided mode**: your hooks and allowed tools apply, steps show in stream-json and editors,
+  memory notes after a task, no endless "Apply this change?" after a no.
+- **Full screen**: the 30-second pick waits while its tab is in the background, and a question waits
+  for dictation to end; piped input doesn't answer questions; ticked options are kept; no full
+  screen on `TERM=dumb`.
+- **After a review says no**, the answer is written to you (what was made, how to use it), not as a
+  reply to the reviewer.
+- `--resume <id>` from another folder runs in that session's project, so /rewind can't touch the
+  wrong folder.
+
 ## 0.1.54 (2026-11-04)
 
 - **Questions always come with a recommended answer**: ask_user needs options, the first one marked

@@ -10,6 +10,8 @@ import { spawn } from 'node:child_process'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { log } from './log.js'
 import { HOME, readJson, writeJson } from './config.js'
+import { prompt } from './prompts.js'
+import { allowed, declined } from './tools.js'
 
 const SERVERS_FILE = path.join(HOME, 'lsp.json') // { [project root]: { [".ts"]: { server, language } } }
 
@@ -256,6 +258,14 @@ export async function lspTool(s, args, signal) {
   if (!args.file) return 'error: lsp needs "file"'
   const abs = path.resolve(root, String(args.file))
   if (!fs.existsSync(abs)) return `error: no file ${args.file}`
+  // a server this project hasn't used runs a command the model chose: asked like run_command
+  if (!Object.values(knownServers(root)).some((k) => k.server === server) && !s.lspAllowed?.has(server)) {
+    if (!allowed(s, 'run_command')) return `error: ${server} isn't a language server this project uses, and running commands isn't allowed here. Use search and read_file instead.`
+    if (s.ui.permission === 'plan') return prompt('agent/plan-refused', { command: true })
+    const ok = await s.ui.confirm(`Start the language server ${server}?`, 'command')
+    if (ok !== true) return declined(s, ok, 'The user declined to start this language server.')
+    ;(s.lspAllowed ??= new Set()).add(server)
+  }
   const sv = serverFor(root, server, language)
   if (typeof sv === 'string') return `error: ${sv}. Check with find_command; install it, or use search and read_file instead.`
   const first = !sv.used

@@ -388,6 +388,7 @@ const PLACEHOLDER = /(\.\.\.|…)\s*(rest|existing|remaining|unchanged|other)|re
 export async function proposeWrite(s, rel, old, next) {
   if (old === next) return { status: 'unchanged' }
   if (s.ui.permission === 'plan') return { status: 'rejected', feedback: prompt('agent/plan-refused', { command: false }) } // both modes write through here
+  if (s.ownFiles && !s.ownFiles.includes(path.resolve(s.root, rel))) return { status: 'rejected', feedback: prompt('agent/part-files', { file: rel, files: s.ownFiles.map((f) => path.relative(s.root, f)).join(', ') }) } // a part's helper: every way of writing (a patch in run_command, guided mode)
   const ops = diffLines(old, next ?? '')
   s.ui.print(renderDiff(ops, rel))
   if (next !== null && PLACEHOLDER.test(next) && !PLACEHOLDER.test(old)) s.ui.warn('the new content seems to contain a placeholder like "rest of code unchanged"')
@@ -622,8 +623,8 @@ function outsideNote(root, cmd) {
 
 export function readOnlyCommand(cmd) {
   const c = String(cmd).trim()
-  if (/[>`]|\$\(|\b(sudo|rm|mv|cp|tee|chmod|chown|dd|truncate|mkdir|touch|ln)\b|-delete\b|-exec|-ok\b|sed\s+-i|\bsort\b.*\s-o/.test(c)) return false // writes, or runs something else
-  return c.split(/\s*(?:&&|\|\||;|\|)\s*/).every((part) => READ_ONLY.test(part))
+  if (/[>`]|\$\(|<\(|\b(sudo|rm|mv|cp|tee|chmod|chown|dd|truncate|mkdir|touch|ln)\b|-delete\b|-exec|-ok\b|-fprint|-fls\b|--output\b|--pre\b|sed\s+-i|\bsort\b.*\s-o/.test(c)) return false // writes, or runs something else (git's --output, find's -fprint/-fls, rg's --pre)
+  return c.split(/\s*(?:&&|\|\||[;|&\n])\s*/).every((part) => READ_ONLY.test(part)) // `a & b`, a new line: each its own command
 }
 
 // MCP servers' tools as the model sees them: one tool, mcp, whose description lists every server's
@@ -714,7 +715,7 @@ async function todoTool(s, args, signal, id) {
   const askSplit = !parts && !s.isSub && !s.splitAsked && open.length >= 3 && !todos.some((t) => t.parallel || t.model) && s.subagent && s.team?.().length && s.ui.permission !== 'plan'
   if (askSplit) s.splitAsked = true
   // a plan of a few steps made without looking anything up: asked once a message whether it uses something to read up on
-  const askResearch = !parts && !s.isSub && !s.researchAsked && !s.lookedUp && open.length >= 2
+  const askResearch = !parts && !s.isSub && !s.researchAsked && !s.lookedUp && !s.research?.lookedUp && open.length >= 2
   if (askResearch) s.researchAsked = true
   const check = askSplit || askResearch ? `\n\n${prompt('agent/plan-check', { split: askSplit, research: askResearch })}` : ''
   return `Todo list saved: ${done} of ${todos.length} done.${next ? ` Next: ${next.content}` : ''}${parts ? `\n\n${parts}` : ''}${check}`
@@ -762,7 +763,7 @@ const ASK_WAIT = 30
 async function askUser(s, args) {
   const question = String(args.question ?? '').trim()
   if (!question) return 'error: ask_user needs "question"'
-  if (s.ui.noUser) return prompt('agent/no-answer')
+  if (s.ui.noUser || s.isSub) return prompt('agent/no-answer')
   s.askedUser = true // asked through the dialog this message (not as text: see askedInText)
   let options = args.options ?? []
   if (typeof options === 'string') {
@@ -788,7 +789,10 @@ async function askUser(s, args) {
     s.choicesFresh = true
     s.chat.choices.push(`${question} → ${answer}`)
   }
-  if (s.ui.autoPicked) return `No answer in ${ASK_WAIT} seconds, so your recommended one was taken: ${answer}`
+  const auto = s.ui.autoPicked
+  if (auto === 'nobody') return `Nobody can answer (the input isn't a terminal), so your recommended one was taken: ${answer}`
+  if (auto === 'ticked') return `No answer in ${ASK_WAIT} seconds, so what the user had ticked was taken: ${answer}`
+  if (auto) return `No answer in ${ASK_WAIT} seconds, so your recommended one was taken: ${answer}`
   return answer ? `The user answered: ${answer}` : prompt('agent/no-answer')
 }
 
@@ -796,6 +800,7 @@ async function webTool(s, name, args, signal) {
   const what = name === 'web_search' ? String(args.query ?? '') : String(args.url ?? '')
   if (!what.trim()) return `error: ${name} needs ${name === 'web_search' ? '"query"' : '"url"'}`
   s.lookedUp = true // looked something up this message (the plan check doesn't ask then)
+  if (s.research) s.research.lookedUp = true // this message's research, shared with its helpers: theirs count too
   const ok = await s.ui.confirm(name === 'web_search' ? `Search the web for ${c.bold(what)}?` : `Fetch ${c.bold(what)}?`, 'read')
   if (ok !== true) return declined(s, ok, 'The user declined this.')
   // what this message's research is for: the page's look_for, else the last search, else the task
@@ -1008,6 +1013,7 @@ async function callMcp(s, server, tool, a, signal) {
   // a tool its server marks read-only isn't asked about (reading isn't, in any mode; headless
   // declines what it would ask, so a browser's snapshot must not be); any other like a command
   if (!def?.annotations?.readOnlyHint) {
+    if (s.ui.permission === 'plan') return prompt('agent/plan-refused', { command: false }) // might change something
     const ok = await s.ui.confirm(`Use ${server.name} → ${tool}?`, 'command')
     if (ok !== true) return declined(s, ok, 'The user declined this call.')
   }
@@ -1382,7 +1388,7 @@ async function tool(name, args, s, signal, id) {
         return writeResult(rel, res) + (res.formatted ? `\nNow:\n${excerpt(res.text, res.ops)}` : '') // what it wrote isn't what's there now
       }
       case 'run_command':
-        if (/^\s*apply_patch\b[\s\S]*\*\*\* Begin Patch/.test(String(args.command ?? ''))) return await applyPatch(s, args.command) // apply_patch <<'EOF' … as Codex runs it
+        if (/^\s*apply_patch\b[\s\S]*\*\*\* Begin Patch/.test(String(args.command ?? ''))) return !allowed(s, 'apply_patch') ? 'error: the tool apply_patch is not allowed here' : await applyPatch(s, args.command) // apply_patch <<'EOF' … as Codex runs it
         return (await runConfirmed(s, String(args.command ?? ''), signal, args.background === true || args.background === 'true', args.wait)) + outsideNote(root, String(args.command ?? ''))
       case 'background':
         return await backgroundTool(s, args, signal)
@@ -1398,6 +1404,7 @@ async function tool(name, args, s, signal, id) {
       case 'web_fetch':
         return await webTool(s, name, args, signal)
       case 'agent':
+        if (s.isSub) return 'error: a helper can\'t start helpers. Do the job yourself.' // hidden from helpers; a call anyway would nest without end
         return await s.subagent(args, signal, id)
       case 'ask_user':
         return await askUser(s, args)

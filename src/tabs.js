@@ -74,6 +74,7 @@ export class Tabs {
     this.onShow?.(tab)
     this.onChange?.()
     tab.ui.wrapped = []
+    tab.ui.resumeAuto()
     tab.ui.render()
   }
 

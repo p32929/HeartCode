@@ -26,16 +26,21 @@ class AcpUI extends HeadlessUI {
   update(u) {
     this.conn.notify('session/update', { sessionId: this.sessionId, update: u })
   }
-  response() {
+  // a helper's reply isn't the agent's own thoughts or message: its steps come as tool calls, named
+  response(who, { helper = false } = {}) {
+    if (helper) return { text() {}, think() {}, end() {} }
     const chunk = (sessionUpdate) => (text) => text && this.update({ sessionUpdate, content: { type: 'text', text } })
     return { text: chunk('agent_message_chunk'), think: chunk('agent_thought_chunk'), end() {} }
   }
   setPermission(mode) {
+    if (mode === 'plan' && this.permission !== 'plan') this.beforePlan = this.permission // what plan mode asks like
     super.setPermission(mode)
     if (this.sessionId) this.update({ sessionUpdate: 'current_mode_update', currentModeId: mode })
   }
   async confirm(question, kind = 'edit') {
-    if ((this.permission === 'all' || (this.permission === 'commands' && kind === 'edit') || (this.permission === 'plan' && kind === 'read'))) return true
+    if (kind === 'read' && this.permission === 'plan') return true
+    const mode = this.permission === 'plan' ? (this.beforePlan ?? 'ask') : this.permission // plan mode asks as the mode before it did (as the full screen's)
+    if (mode === 'all' || (mode === 'commands' && kind === 'edit')) return true
     const toolCallId = runningCall.getStore() ?? this.calls[0] ?? `ask_${Date.now()}` // the call asking
     const r = await this.conn
       .request('session/request_permission', {
@@ -49,7 +54,7 @@ class AcpUI extends HeadlessUI {
       })
       .catch(() => null)
     const id = r?.outcome?.outcome === 'selected' ? r.outcome.optionId : null
-    if (id === 'all') this.setPermission('all')
+    if (id === 'all') this.permission === 'plan' ? (this.beforePlan = 'all') : this.setPermission('all') // in plan mode: still planning, everything allowed after it
     return id === 'allow' || id === 'all'
   }
 }
@@ -132,7 +137,7 @@ export async function runAcp({ makeApp, version, permission = 'ask', input = pro
         if (!s) throw Object.assign(new Error(app.allOff() ? 'the providers of all your models are switched off: switch one on in heart settings' : 'no model set up: run heart settings to add a provider and choose a model'), { code: -32000 })
         s.onEvent ??= (e) => events(it.ui, s, e)
         const k = /^\/(\S+)\s*([\s\S]*)$/.exec(text)
-        const skill = k && app.skills.get(k[1])
+        const skill = k && app.skills.get(k[1].replace(/^skill:/, '')) // /name or /skill:name, as in the full screen
         await s.run(skill && skill.use !== 'model' ? await app.expandSkill(skill, k[2]) : text, it.ctl.signal, images)
         return { stopReason: 'end_turn' }
       } catch (e) {

@@ -346,7 +346,7 @@ class App {
         if (said.rate) p.rateCap = { tokens: said.tokens, until: Date.now() + RATE_CAP_MS }
         else Object.assign(p, { inputLimit: said.tokens, inputLimitAt: Date.now() })
         writeJson(profilePath(cl), p)
-        log('context', `${k}: ${said.rate ? 'a per-minute cap' : 'a request limit'} of ${said.tokens} tokens, from its provider`)
+        log('context', `${t.provider}/${t.model}: ${said.rate ? 'a per-minute cap' : 'a request limit'} of ${said.tokens} tokens, from its provider`)
       }
     }
     // the model list (settings page): another model answered
@@ -446,7 +446,7 @@ class App {
 
   setChat(chat) {
     this.chat = chat
-    if (this.s) this.s.chat = chat
+    if (this.s) Object.assign(this.s, { chat, counted: null, compactFailedAt: 0 }) // the last chat's token count and failed compaction aren't this one's
   }
 
   save() {
@@ -1226,7 +1226,7 @@ function applySettings(apps, cfg, what) {
       if (is !== was) ui.print(c.dim(`settings: ${is} now`))
     }
     if (what === 'provider') app.lists = {} // its list switched on or off, a model added by name
-    if (what === 'setting:permissions') ui.setPermission(cfg.permissions)
+    if (what === 'setting:permissions' && !ui.noUser) ui.setPermission(cfg.permissions) // -p and ACP keep the mode they were given (--permission-mode, the editor's)
     if (what === 'setting:mouse') ui.setMouse(cfg.mouse !== false)
     if (what === 'setting:statusBar') ui.render?.() // the status bar's layout changed: redraw it now
     if (what === 'setting:effort' && app.s?.strat.thinking) app.s.client.effort = effortOf(cfg)
@@ -2011,7 +2011,11 @@ async function main() {
     cfg.maxRetries ??= 10
     // each editor session its own settings (one choosing a model doesn't change the others')
     const apps = []
-    const makeApp = (root, ui, mcp) => apps[apps.push(new App({ ...structuredClone(cfg), ...(mcp && { mcp: { extra: [mcp] } }) }, ui, root)) - 1]
+    const makeApp = (root, ui, mcp) => {
+      const app = new App({ ...structuredClone(cfg), ...(mcp && { mcp: { extra: [mcp] } }) }, ui, root)
+      usePromptsFrom(app.root) // its .heartcode/prompts override the built-in sections (as newApp's)
+      return apps[apps.push(app) - 1]
+    }
     watchSettings(() => apps, cfg) // the settings page's changes, into every editor session
     process.exit(await runAcp({ makeApp, version: VERSION, permission: f['permission-mode'] ? PERMISSION_MODES[f['permission-mode']] : (cfg.permissions ?? 'ask') }))
   }
@@ -2044,6 +2048,13 @@ async function main() {
     return app
   }
   let root = path.resolve(f.cwd ?? process.cwd())
+  // a session of another folder (--resume <id> from anywhere): run in its project, where its files
+  // are (what it changed is kept relative to it, and /rewind puts files back there)
+  const other = (f['resume-id'] || f['session-id']) && loadChat(f['resume-id'] || f['session-id'], root)
+  if (other?.root && path.resolve(other.root) !== root) {
+    if (!fs.existsSync(other.root)) throw new Error(`session ${other.id} was in ${other.root}, which is gone`)
+    root = path.resolve(other.root)
+  }
   const wt = f.worktree !== undefined ? createWorktree(root, f.worktree) : null
   if (wt) {
     root = wt.cwd

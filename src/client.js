@@ -140,7 +140,8 @@ export function thinkOf(full) {
 // calls only for one that calls tools (else as text), tool call ids in one form every provider
 // takes (9 letters and digits), tool arguments always JSON, and only its own thinking sent back.
 // can: { vision, actions } (the model's abilities); the saved conversation stays as it is.
-export const writtenBy = new WeakMap() // an assistant message → the model that wrote it
+// writer: the model that wrote an assistant message (agent.js), kept on it so a resumed or forked
+// chat still knows; never sent (providers refuse unknown fields).
 const IMAGE_NOTE = "(an image is here, but you can't see images: to know what's in it, ask a model that can, with the agent tool's images)"
 const callId = (id) => (/^[A-Za-z0-9]{9}$/.test(id) ? id : createHash('sha256').update(String(id)).digest('hex').slice(0, 9))
 const asJson = (a) => {
@@ -153,16 +154,16 @@ const asJson = (a) => {
 }
 export function fitFor(messages, can, model) {
   const tools = can.actions !== 'guided'
-  return messages.map((m) => {
-    let x = { ...m }
-    if (x.reasoning_content && writtenBy.has(m) && writtenBy.get(m) !== model) delete x.reasoning_content
+  return messages.map(({ writer, ...m }) => {
+    let x = m
+    if (x.reasoning_content && writer && writer !== model) delete x.reasoning_content
     if (Array.isArray(x.content) && !can.vision) x.content = x.content.map((p) => (p.type === 'image_url' ? IMAGE_NOTE : (p.text ?? ''))).join('\n')
     if (!tools && x.role === 'tool') return { role: 'user', content: `(the result of your earlier tool call)\n${x.content}` }
     if (!tools && x.tool_calls) {
       const { tool_calls, ...rest } = x
       return { ...rest, content: [x.content, ...tool_calls.map((c) => `(called ${c.function.name} ${c.function.arguments || '{}'})`)].filter(Boolean).join('\n') }
     }
-    const own = !writtenBy.has(m) || writtenBy.get(m) === model // extra_content (Gemini's thought_signature) only back to its writer: others refuse it (Mistral: 422 extra_forbidden)
+    const own = !writer || writer === model // extra_content (Gemini's thought_signature) only back to its writer: others refuse it (Mistral: 422 extra_forbidden)
     if (x.tool_calls) x.tool_calls = x.tool_calls.map(({ extra_content, ...c }) => ({ ...c, ...(own && extra_content && { extra_content }), id: callId(c.id), function: { ...c.function, arguments: asJson(c.function.arguments) } }))
     if (x.role === 'tool') x.tool_call_id = callId(x.tool_call_id)
     return x
@@ -530,7 +531,7 @@ export class Client {
     // a model that goes silent is then given up on after idleMs, not after the whole timeout
     if (body.stream === undefined && !body.tools?.length && !this.quirks.noStream) req.stream = true
     const can = this.can && { ...this.can, vision: this.can.vision && !this.quirks.noImages }
-    if (can && req.messages) req.messages = fitFor(req.messages, can, this.model)
+    if (req.messages) req.messages = can ? fitFor(req.messages, can, this.model) : req.messages.map(({ writer, ...m }) => m)
     if (can?.actions === 'guided') delete req.tools
     const thinks = Boolean(this.can?.thinking)
     // The model's thinking on its earlier steps (agent.js keeps it as reasoning_content): sent by the

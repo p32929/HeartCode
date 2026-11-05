@@ -99,6 +99,8 @@ export class HeadlessUI {
   setLog() {}
   close() {}
   leaveFullscreen() {}
+  recolor() {}
+  setMouse() {}
 }
 
 // Runs the messages (prompt, or stdin) and writes the output. Returns the exit code.
@@ -186,7 +188,7 @@ export async function runHeadless(app, opts) {
     let error = null
     try {
       const k = /^\/(\S+)\s*([\s\S]*)$/.exec(text)
-      const skill = k && app.skills.get(k[1])
+      const skill = k && app.skills.get(k[1].replace(/^skill:/, '')) // /name or /skill:name, as in the full screen
       answer = await s.run(skill && skill.use !== 'model' ? await app.expandSkill(skill, k[2]) : text, current.ctl.signal, images)
     } catch (e) {
       error = current.ctl.signal.aborted ? 'interrupted' : e.message
