@@ -140,11 +140,13 @@ export function loadKeys(file = path.join(HOME, 'keybindings.json')) {
 const MOUSE_ON = '\x1b[?1000h\x1b[?1002h\x1b[?1006h'
 const MOUSE_OFF = '\x1b[?1006l\x1b[?1002l\x1b[?1000l'
 
+export const overSsh = Boolean(process.env.SSH_CONNECTION || process.env.SSH_TTY || process.env.SSH_CLIENT)
+
 // The system clipboard (pbcopy, clip, wl-copy, xclip, xsel); else the terminal's (OSC 52). Over SSH,
-// the terminal's only: the system's would be the remote machine's, not the one you're at.
+// the terminal's only: the system's would be the remote machine's, not the one you're at. OSC 52 has
+// no answer and some terminals drop it (macOS Terminal), so 'osc' doesn't mean it got there.
 export function copyText(text) {
-  const remote = Boolean(process.env.SSH_CONNECTION || process.env.SSH_TTY || process.env.SSH_CLIENT)
-  const tools = remote ? [] : process.platform === 'darwin' ? [['pbcopy']] : process.platform === 'win32' ? [['clip']] : [['wl-copy'], ['xclip', '-selection', 'clipboard'], ['xsel', '-b', '-i']]
+  const tools = overSsh ? [] : process.platform === 'darwin' ? [['pbcopy']] : process.platform === 'win32' ? [['clip']] : [['wl-copy'], ['xclip', '-selection', 'clipboard'], ['xsel', '-b', '-i']]
   for (const [cmd, ...args] of tools) if (spawnSync(cmd, args, { input: text, stdio: ['pipe', 'ignore', 'ignore'] }).status === 0) return 'system'
   process.stdout.write(`\x1b]52;c;${Buffer.from(text).toString('base64')}\x07`)
   return 'osc'
@@ -892,7 +894,7 @@ export class UI {
     const own = pick?.items.some((x) => x.own) // typing goes into "Something else", not a filter
     const typingOwn = m.items[m.sel]?.item?.own && m.items[m.sel].item.text // ←/→ move in what's typed; Tab goes on
     const body = pick?.body ? String(pick.body).split('\n') : []
-    const hint = (pick?.nav ? (typingOwn ? 'Tab questions · ' : '←→ questions · ') : '') + (pick ? (pick.fixed ? '↑↓ move · Enter choose · Esc close' : pick.multi ? `↑↓ move · Space tick · Alt+A/N all/none · Enter take · Esc cancel · ${own ? 'type your own' : 'type to filter'}` : `↑↓ move · Enter choose · Esc cancel${own ? ' · type your own' : cards ? '' : ' · type to filter'}`) : 'Enter send · Esc cancel')
+    const hint = (pick?.nav ? (typingOwn ? 'Tab questions · ' : '←→ questions · ') : '') + (pick ? (pick.ctrlC ? 'Enter, Esc or Ctrl+C turn it off' : pick.fixed ? '↑↓ move · Enter choose · Esc close' : pick.multi ? `↑↓ move · Space tick · Alt+A/N all/none · Enter take · Esc cancel · ${own ? 'type your own' : 'type to filter'}` : `↑↓ move · Enter choose · Esc cancel${own ? ' · type your own' : cards ? '' : ' · type to filter'}`) : 'Enter send · Esc cancel')
     const timer = this.autoLine() // on its own line, so it's seen (and not cut off with the keys)
     const long = width(title) > this.#dialogBox(cols, rows).w - 6 // too long for the border: inside instead, said once
     // at most n rows; the rest said to be there
@@ -1212,7 +1214,7 @@ export class UI {
     this.render()
   }
   #copied(text) {
-    this.notice(`copied ${text.length} character${text.length === 1 ? '' : 's'}${copyText(text) === 'osc' ? ' (through the terminal)' : ''}`)
+    this.notice(`copied ${text.length} character${text.length === 1 ? '' : 's'}${copyText(text) === 'osc' ? ' (if your terminal allows it)' : ''}`)
   }
   // A double click: the word under it (no spaces; quotes and brackets around it left out), copied.
   #copyWord(x, y) {
@@ -1495,6 +1497,7 @@ export class UI {
         return this.dialog.key?.(key, s), this.render()
       }
       if (this.recording) return this.recording.key(key, bound) // voice: Space, Enter, Esc; the rest waits
+      if (this.menu.pick?.ctrlC && key.ctrl && key.name === 'c') return this.cancelAsk()
       // a fixed dialog (pick(…, { fixed })): only its keys, nothing typed and no shortcuts
       if (this.menu.pick?.fixed && !['up', 'down', 'return', 'escape'].includes(key.name) && !(key.ctrl && key.name === 'c')) return
       // In a multi-select: Alt+A ticks all, Alt+N unticks all (before Alt+A sends and Alt+N switches tabs)
@@ -2124,9 +2127,10 @@ export class UI {
   // multi: tick several with Space; returns the ticked items (an array), or null.
   // quiet: the question and answer aren't left in the conversation (a question before it starts).
   // fixed: a dialog: no typing to filter, no other keys meanwhile.
+  // ctrlC: Ctrl+C closes it too, like Esc (not the first half of quitting).
   // auto: { item, secs }: nobody answers for secs seconds (each key starts the wait again) → item is chosen.
   // tabs: a row of tabs above it (several questions); nav: ←/→ (Tab, Shift+Tab) close it with { nav: -1 | 1 }.
-  async pick(title, items, { filter = '', multi = false, quiet = false, fixed = false, body = '', auto = null, tabs = '', nav = false } = {}) {
+  async pick(title, items, { filter = '', multi = false, quiet = false, fixed = false, body = '', auto = null, tabs = '', nav = false, ctrlC = false } = {}) {
     if (!this.full) {
       items.forEach((it, i) => this.print(`  ${i + 1}. ${it.group ? `${it.group} · ` : ''}${it.label}${it.desc ? '  ' + c.dim(it.desc) : ''}`))
       const a = await this.ask(`${title} ${c.dim(multi ? '(numbers, like 1,3)' : '(number)')}: `)
@@ -2138,7 +2142,7 @@ export class UI {
     }
     await this.#free()
     if (multi) for (const it of items) if (!it.only) it.checked ??= false
-    this.menu.pick = { items, chosen: null, multi, quiet, fixed, body, tabs, nav, auto: auto && { ...auto } }
+    this.menu.pick = { items, chosen: null, multi, quiet, fixed, body, tabs, nav, ctrlC, auto: auto && { ...auto } }
     this.autoPicked = false // chosen for the user (nobody answered in time), for the caller to say so
     if (auto) {
       this.#armAuto()

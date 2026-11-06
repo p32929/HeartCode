@@ -159,7 +159,7 @@ function forgetList(...names) {
 
 export function startSettings({ cfg, apply = () => {}, port = 0, root = process.cwd(), onLoginMcp = null } = {}) {
   let importCache = [] // the last /api/imports listing, so /api/imports/run can execute by id
-  const token = crypto.randomBytes(24).toString('hex')
+  const token = crypto.randomBytes(16).toString('hex') // short enough for the link to stay on one row of an 80-column dialog, to select it
   const changed = (what) => {
     if (what === 'prompts') reloadPrompts() // this page's own Tests use them too (heart settings has no HeartCode to apply them)
     try {
@@ -1050,7 +1050,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     server.listen(port, '0.0.0.0', () => {
       const at = (host) => `http://${host}:${server.address().port}/?t=${token}`
       const local = at('127.0.0.1') // for a browser on this machine
-      const url = at(addresses()[0] ?? '127.0.0.1') // its network address when it has one: works from another device too
+      const ssh = process.env.SSH_CONNECTION?.split(' ')[2] // over SSH: the address you reached this machine at
+      const url = at((ssh?.includes(':') ? `[${ssh}]` : ssh) ?? addresses()[0] ?? '127.0.0.1') // else its network address when it has one: works from another device too
       log('web', `settings page at ${new URL(url).host}`)
       // models.dev's list (its sizes for your models, whether their providers' lists are on or not):
       // loaded now, and your models' lines brought up to date when it's in

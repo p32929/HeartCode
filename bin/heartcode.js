@@ -9,7 +9,7 @@ import { Session, transcript, contextReport } from '../src/agent.js'
 import { listJobs, getJob, stopJob, removeJob, runningJobs, tailLines, ago as ranFor } from '../src/background.js'
 import { checkUpdate, installKind, UPDATE_COMMANDS, packageDir, whatsNew } from '../src/update.js'
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
-import { UI, c, PERMISSIONS, duration, copyText, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width, shortError, wrapWords } from '../src/ui.js'
+import { UI, c, PERMISSIONS, duration, copyText, overSsh, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width, shortError, wrapWords } from '../src/ui.js'
 import { listFiles, runCommand, clip } from '../src/tools.js'
 import { notify } from '../src/telegram.js'
 import { log, LOG_FILE, LOG_DIR, requestLog, useRequestLog, useLogs, pruneLogs, logDays } from '../src/log.js'
@@ -1205,7 +1205,7 @@ let settingsPage = null
 const effortOf = (cfg) => cfg.effort ?? 'low'
 
 function openBrowser(url) {
-  if (process.env.HEART_NO_BROWSER) return
+  if (process.env.HEART_NO_BROWSER || overSsh) return // over SSH your browser isn't on this machine
   const [cmd, ...args] = process.platform === 'darwin' ? ['open', url] : process.platform === 'win32' ? ['rundll32', 'url.dll,FileProtocolHandler', url] : ['xdg-open', url]
   spawnSync(cmd, args, { stdio: 'ignore' })
 }
@@ -1440,15 +1440,17 @@ async function slash(app, line, working = false) {
       settingsPage ??= startSettings({ cfg, root: app.root, onLoginMcp: (name) => signInMcp(app, name, null), apply: (what) => applySettings(app.tabs ? app.tabs.list.map((t) => t.app) : [app], cfg, what) })
       const { url, local, close } = await settingsPage
       openBrowser(local)
-      ui.print(`${c.info('↗')} ${c.bold('settings')} ${c.muted('opened in your browser:')}\n  ${c.faint(url)}`)
+      if (!ui.full) ui.print(`${c.info('↗')} ${c.bold('settings')} ${c.muted(overSsh ? 'open this link in your browser:' : 'opened in your browser:')}\n  ${c.faint(url)}`)
       // a dialog until it's turned off: nothing else meanwhile, in any tab (Esc turns it off too).
       // Not busy meanwhile: what's changed on the page applies at once, here too (opened while a task
       // works: once it's done).
       if (!working) ui.idle()
       if (app.tabs) app.tabs.locked = true
+      ui.setMouse(false) // the terminal's own selection for the link: OSC 52 copying fails in some terminals
       try {
-        await ui.pick('The settings page is on', [{ label: 'Turn off', desc: 'stops the page and gives HeartCode back' }], { fixed: true, body: `It's open in your browser:\n${url}\n\nWhat you change there applies right away.` })
+        await ui.pick('The settings page is on', [{ label: 'Turn off', desc: 'stops the page and gives HeartCode back' }], { fixed: true, quiet: true, ctrlC: true, body: `${overSsh ? 'Open this link in your browser:' : "It's open in your browser:"}\n${url}\n\nTo copy it, select it with the mouse.\nWhat you change there applies right away.` })
       } finally {
+        ui.setMouse(cfg.mouse !== false)
         if (app.tabs) app.tabs.locked = false
         close()
         settingsPage = null
@@ -1550,7 +1552,7 @@ async function slash(app, line, working = false) {
       const answer = app.chat.history.at(-1)?.answer?.trim()
       if (!answer) return ui.print('No answer to copy yet.')
       const how = copyText(answer)
-      return ui.print(c.dim(`copied the last answer (${answer.split('\n').length} lines)${how === 'osc' ? ' through the terminal' : ''}`))
+      return ui.print(c.dim(`copied the last answer (${answer.split('\n').length} lines)${how === 'osc' ? ' if your terminal allows it' : ''}`))
     }
     case 'background': {
       const jobs = listJobs(app.root)
@@ -2035,7 +2037,7 @@ async function main() {
 
   if (sub === 'settings') {
     const { url, local } = await startSettings({ cfg })
-    console.log(`${c.brand('♥')} HeartCode settings: ${url}\n${c.dim('opened in your browser · from another device on this network, open the link above · Ctrl+C to stop')}`)
+    console.log(`${c.brand('♥')} HeartCode settings: ${url}\n${c.dim(`${overSsh ? 'open it in your browser' : 'opened in your browser'} · from another device on this network, open the link above · Ctrl+C to stop`)}`)
     openBrowser(local)
     return new Promise(() => {}) // until Ctrl+C
   }

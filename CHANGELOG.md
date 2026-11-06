@@ -2,6 +2,15 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.57 (2026-11-06)
+
+- **The `/settings` link can be copied over SSH**: while the page is on, the mouse is the terminal's,
+  so you select the link and copy it as usual (some terminals, like macOS Terminal, drop the copy
+  HeartCode sends through them). The link is shorter and stays on one row at 80 columns, uses the
+  address you reached the machine at, and no browser is started on the remote machine. Copies sent
+  through the terminal now say "if your terminal allows it".
+- **Turning the page off closes it**: no second box to close; Enter, Esc or Ctrl+C turn it off.
+
 ## 0.1.56 (2026-11-05)
 
 - **Questions as tabs**: several questions come in one dialog, a tab each; go back and forth with
