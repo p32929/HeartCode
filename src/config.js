@@ -31,9 +31,9 @@ export function speedOf(cfg) {
 // what the pill covers (its tooltip)]
 export const HELPER_JOBS = {
   ui: ['UI & visuals', 'websites, app screens, games, animation, 3D, charts', 'Websites and landing pages, app screens, games and animation, 3D, charts and SVG: anything people look at.'],
-  code: ['Code & logic', 'backend, APIs, scripts, automation, fixing bugs, tests, reviewing changes', 'Backend and APIs, scripts and automation, fixing bugs, tests and refactoring. Reviews of the work go to these first.'],
+  code: ['Code & logic', 'backend, APIs, scripts, automation, fixing bugs, tests, reviewing changes', 'Backend and APIs, scripts and automation, fixing bugs, tests and refactoring. Reviews of the work go to these first, then to your other models.'],
   hard: ['Big & hard', 'hard thinking, planning, long tasks with many steps, huge files', 'Planning and architecture, tricky logic, long tasks with many steps, huge files or whole folders.'],
-  quick: ['Quick & cheap', 'small jobs: searching and reading code, lookups, small edits', 'Searching and reading code, looking things up, small edits: simple jobs where fast and cheap matter most.'],
+  quick: ['Quick & cheap', 'small jobs: searching and reading code, lookups, small edits', 'Searching and reading code, looking things up, small edits: simple jobs, on a model that answered fast.'],
 }
 // a helper's jobs as saved, in today's names (picks from before the four: search, research → quick, review → code)
 const WAS = { search: 'quick', research: 'quick', review: 'code' }
@@ -146,7 +146,7 @@ export function loadConfig(flags = {}) {
   const model = flags.model || process.env.HEART_MODEL
   if (model && !isAuto(model)) Object.assign(cfg, parseModel(model, cfg.providers, cfg.provider))
   // -m / an ad-hoc URL pins the chosen model for this run (a session of one): cfg.session, below
-  if ((baseUrl || (model && !isAuto(model))) && cfg.providers[cfg.provider] && cfg.model) cfg.session = [{ provider: cfg.provider, model: cfg.model }]
+  if ((baseUrl || (model && !isAuto(model))) && cfg.providers[cfg.provider] && cfg.model) Object.assign(cfg, { session: [{ provider: cfg.provider, model: cfg.model }], pinned: true }) // pinned: asked for by name, so it runs even if its provider is switched off
   synced(cfg, readJson(CONFIG_FILE, {}))
   return cfg
 }

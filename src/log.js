@@ -147,7 +147,7 @@ const safe = (s) => String(s ?? '').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'n
 // firstTokenMs, usage, request, reply }. "full" keeps what was sent and what came back; "summary"
 // only their sizes. API keys are never in it (they're headers, not the body).
 export function logRequest(rec) {
-  if (!requestLog.on) return
+  if (!requestLog.on || process.env.HEART_LOG === 'off') return // HEART_LOG=off: no logs of any kind
   try {
     if (!requestLog.dir) {
       let dir = path.join(REQUESTS, STAMP)

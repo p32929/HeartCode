@@ -654,6 +654,7 @@ export class Client {
     let thought = ''
     let usage
     let finishReason
+    let sawDone = false
     const calls = []
     let raw = '' // the stream as it came (its start), kept for a reply that turns out empty
     // A reply going round (a small model repeating itself, which could fill the window): checked
@@ -682,8 +683,7 @@ export class Client {
       }
       poke()
       firstAt ??= Date.now()
-      if (end) break
-      buf += dec.decode(value, { stream: true })
+      buf += end ? dec.decode() + '\n' : dec.decode(value, { stream: true }) // the end: its last line too, even without a line break after it
       let nl
       while ((nl = buf.indexOf('\n')) !== -1) {
         const line = buf.slice(0, nl).trim()
@@ -691,7 +691,10 @@ export class Client {
         if (raw.length < 100_000 && line) raw += line + '\n'
         if (!line.startsWith('data:')) continue
         const payload = line.slice(5).trim()
-        if (payload === '[DONE]') continue
+        if (payload === '[DONE]') {
+          sawDone = true
+          continue
+        }
         let chunk
         try {
           chunk = JSON.parse(payload)
@@ -749,6 +752,12 @@ export class Client {
         await reader.cancel().catch(() => {}) // the server stops generating
         break
       }
+      if (end) break
+    }
+    // closed with neither [DONE] nor a reason it ended: the connection ended early, the reply may be cut
+    if (!looped && !sawDone && !finishReason) {
+      finishReason = 'incomplete'
+      log('reply', `${this.model}: the stream ended without [DONE] or a finish reason: the reply may be cut off`)
     }
     clearTimeout(timer), started()
     if (looped) {

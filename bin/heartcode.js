@@ -9,7 +9,7 @@ import { Session, transcript, contextReport } from '../src/agent.js'
 import { listJobs, getJob, stopJob, removeJob, runningJobs, tailLines, ago as ranFor } from '../src/background.js'
 import { checkUpdate, installKind, UPDATE_COMMANDS, packageDir, whatsNew } from '../src/update.js'
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
-import { UI, c, PERMISSIONS, duration, copyText, overSsh, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width, shortError, wrapWords } from '../src/ui.js'
+import { UI, c, PERMISSIONS, duration, copyText, overSsh, prettyKey, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width, shortError, wrapWords } from '../src/ui.js'
 import { listFiles, runCommand, clip } from '../src/tools.js'
 import { notify } from '../src/telegram.js'
 import { log, LOG_FILE, LOG_DIR, requestLog, useRequestLog, useLogs, pruneLogs, logDays } from '../src/log.js'
@@ -55,7 +55,7 @@ ${c.bold('options')}
                          "auto" (the default): your list, #1 then the next when one fails
       --fallback-model <name>  after -m's model when it fails (repeatable)
       --api-key <key>    API key for --base-url
-  -y, --yes              do everything without asking (the default)
+  -y, --yes              do everything without asking (the default; through --acp, an editor: ask)
       --ask              ask before every edit and command, this run
       --hide-thinking    the model's thinking: only its last two lines while it thinks (the default; Alt+O shows all of it)
   -C, --cwd <dir>        project folder (default: current folder)
@@ -93,7 +93,8 @@ ${c.bold('headless')} (for other programs; flags and output as in Claude Code's 
 ${c.bold('editors')}  heartcode --acp   the Agent Client Protocol on stdin/stdout (Zed, JetBrains, Neovim)
 
 ${c.bold('env')}  HEART_BASE_URL, HEART_MODEL, HEART_API_KEY (or OPENAI_BASE_URL / OPENAI_API_KEY)
-     HEART_LOG=<file>  every kind of log of this run in that one file, whatever is switched on (off: none)
+     HEART_LOG=<file>  every text log of this run in that one file, whatever is switched on (requests stay
+                       in their own folder); HEART_LOG=off: no logs at all
 
 ${c.bold('in a session')}  attach an image with @path/to/shot.png · /help for commands`
 
@@ -104,7 +105,7 @@ const SECTIONS = [
   ]],
   ['settings', [
     ['/toggle_thinking', "the model's thinking: its last two lines, or all of it (Alt+O)"],
-    ['/voice', 'say your message (or Space in an empty box): it shows in the box as you speak, Enter sends it, Esc cancels'],
+    ['/voice', 'say your message (or Space in an empty box, once voice is set up): it shows in the box as you speak, Enter sends it, Esc cancels'],
   ]],
   ['session', [
     ['/resume', 'continue an earlier session in this folder'],
@@ -133,7 +134,7 @@ const SECTIONS = [
     ['/reset', "HeartCode's settings (or also providers, or everything) back to the start; asks for a code first"],
     ['/settings', 'change providers, models, settings, MCP servers, hooks, keys and skills in your browser'],
     ['/help', 'this list'],
-    ['/tab', 'a new tab (Alt+T): another conversation beside this one · /tab worktree [name]: in its own git worktree · /tab 2: go to tab 2 (Alt+N/P) · Alt+W closes one', true],
+    ['/tab', 'a new tab (Alt+T): another conversation beside this one · /tab worktree [name]: in its own git worktree · /tab 2: go to tab 2 (Alt+2; Alt+N/P: the next or previous) · Alt+W closes one', true],
     ['/close_tab', 'close this tab (Alt+W); asks first'],
     ['/exit', 'quit HeartCode (Alt+W closes just this tab)'],
   ]],
@@ -149,19 +150,18 @@ const SLASH = helpText(SECTIONS)
 
 // The keyboard shortcuts, as [keys, what] rows, read from the effective keybindings (keybindings.json
 // can change any of them) plus the fixed ones (Space, Enter, Esc, Shift+Tab, Ctrl+C).
-function keysHelp(keys = {}, mouse = false) {
-  const NAMES = { pageup: 'PgUp', pagedown: 'PgDn', up: '↑', down: '↓', left: '←', right: '→', ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift' }
-  const pretty = (k) => k.split('+').map((p) => NAMES[p] ?? (p.length === 1 ? p.toUpperCase() : p[0].toUpperCase() + p.slice(1))).join('+')
-  const forAct = (a) => Object.entries(keys).filter(([, v]) => v === a).map(([k]) => pretty(k)).join(' / ')
-  const tabs = /(^|,)alt\+[1-9]/.test(Object.keys(keys).join(','))
+function keysHelp(keys = {}, mouse = false, voice = false) {
+  const forAct = (a) => Object.entries(keys).filter(([, v]) => v === a).map(([k]) => prettyKey(k)).join(' / ')
+  const tabs = Object.values(keys).some((v) => /^tab_[1-9]$/.test(v))
   const rows = [
-    ['Space', 'voice: listens at once, Enter sends what you said (in an empty box)'],
+    [voice ? 'Space' : '', 'voice: listens at once, Enter sends what you said (in an empty box)'],
     ['Enter', 'send · while it works, queue the message (commands like /help, /cost, /select_model run at once)'],
-    ['Option+Enter or Shift+Enter', 'new line in the box'],
-    ['Esc', 'stop the task (press twice to confirm)'],
+    ['Option+Enter or Shift+Enter', 'new line in the box (also while it works)'],
+    ['Esc', 'while it works: queued messages back into the box, then clears the box, then stops the task (twice)'],
     ['Esc Esc', 'rewind to an earlier message (at the prompt)'],
     ['Shift+Tab', 'change what runs without asking (permissions)'],
-    [forAct('background_log'), "the background commands' logs in a dialog, a tab each (←/→ switch, ↑/↓ scroll, K twice stops one, Esc closes)"],
+    [forAct('toggle_thinking'), "the model's thinking: after an answer, all of it in a box; while it works, all of it as it comes or its last two lines"],
+    [forAct('background_log'), "the background commands' logs in a dialog, a tab each (←/→ switch, ↑/↓ scroll, K twice stops one, Esc closes); with text in the box it moves back a word instead"],
     [forAct('new_tab'), 'new tab'],
     [forAct('close_tab'), 'close this tab'],
     [forAct('next_tab'), 'next tab'],
@@ -251,7 +251,7 @@ class App {
         this.ui.print(`${c.info('↗')} ${c.bold(name)} ${c.muted('needs you to sign in; opening your browser…')}\n  ${c.faint(url)}`)
         const [cmd, ...args] = process.platform === 'darwin' ? ['open', url] : process.platform === 'win32' ? ['rundll32', 'url.dll,FileProtocolHandler', url] : ['xdg-open', url]
         spawnSync(cmd, args, { stdio: 'ignore' })
-        this.ui.spinner(`waiting for you to sign in to ${name} in the browser · Esc to stop`)
+        this.ui.spinner(`waiting for you to sign in to ${name} in the browser · Esc twice to stop`)
       }
     return mcp
   }
@@ -367,9 +367,11 @@ class App {
     client.onSwitch = (t) => {
       const i = client.rotation.list.indexOf(t)
       const f = failed?.e
+      const from = failed?.t
       const why = f ? `${failed.t.model} ${f.status === 429 ? 'rate-limited (429)' : `failed (${clip(shortError(f), 50)})`} → ` : ''
       failed = null
       switched = c.dim(`↻ ${why}${t.provider} · ${t.model} answered${i ? ` (#${i + 1} in your model list)` : ' (#1 again)'}`)
+      ui.event?.({ subtype: 'model_switch', from: from ? `${from.provider}/${from.model}` : null, to: `${t.provider}/${t.model}`, reason: f ? (f.status === 429 ? 'rate-limited (429)' : shortError(f)) : null, place: i + 1 })
       setImmediate(client.announceSwitch)
     }
     if (cfg.maxRetries !== undefined) client.retryIf = (e, attempt) => attempt < cfg.maxRetries // headless: then give up
@@ -633,7 +635,7 @@ class App {
     const mine = this.commands().slice(COMMANDS.length)
     const sections = [...SECTIONS]
     if (mine.length) sections.push(['your skills (type /skill:name)', mine])
-    sections.push(['keyboard', keysHelp(this.ui.keys, this.cfg?.mouse !== false)])
+    sections.push(['keyboard', keysHelp(this.ui.keys, this.cfg?.mouse !== false, Boolean(this.ui.voiceReady?.()))])
     return helpText(sections)
   }
 
@@ -912,7 +914,7 @@ class App {
     const { cfg } = this
     if (!cfg.session) return this.myModels(all)
     const seen = new Set()
-    return cfg.session.filter((t) => cfg.providers[t.provider] && (all || !cfg.providers[t.provider].off) && t.model && !seen.has(`${t.provider}/${t.model}`) && seen.add(`${t.provider}/${t.model}`))
+    return cfg.session.filter((t) => cfg.providers[t.provider] && (all || cfg.pinned || !cfg.providers[t.provider].off) && t.model && !seen.has(`${t.provider}/${t.model}`) && seen.add(`${t.provider}/${t.model}`))
   }
 
   // Alt+B, /background: the background commands' logs in a dialog, one at a time with a tab each.
@@ -1235,7 +1237,7 @@ function applySettings(apps, cfg, what) {
     const { ui } = app
     const busy = Boolean(ui.busySince || app.working)
     const now = (fn) => (busy ? app.later.push(fn) : fn())
-    if (app.cfg !== cfg) for (const k of ['providers', 'provider', 'model', 'effort', 'theme', 'context', 'autoCompact', 'director', 'format', 'lsp', 'voice', 'rotation', 'statusBar']) app.cfg[k] = cfg[k]
+    if (app.cfg !== cfg) for (const k of ['providers', 'provider', 'model', 'effort', 'theme', 'context', 'autoCompact', 'director', 'format', 'lsp', 'voice', 'rotation', 'statusBar', 'helpers', 'helpersAuto', 'helperOrder', 'providerRank', 'replyStart', 'replyIdle', 'telegram', 'queue', 'mouse']) app.cfg[k] = cfg[k]
     // a model pinned in this CLI (/select_model) is a session choice: a model/order change on the
     // settings page leaves it alone (only /select_model auto here returns it to the list)
     if (what === 'model' && !app.cfg.session) {
@@ -1426,7 +1428,7 @@ async function slash(app, line, working = false) {
         if (!go?.yes) return
       }
       if (!working && app.s?.wrapping) {
-        ui.spinner('keeping what the last task learned · Ctrl+C to quit now')
+        ui.spinner('keeping what the last task learned · Ctrl+C twice to quit now')
         await app.s.wrapping
       }
       return 'exit'
@@ -1862,7 +1864,7 @@ async function repl(app, f = {}) {
   ui.folder = app.root // what a double click on the header's folder copies
   ui.header = (cols = 100) => {
     const room = cols - 2 - width(`♥ HeartCode ${VERSION}  `) // the folder's own name (its end) stays in sight
-    const keys = [['/', 'run a command'], ['@', 'attach a file'], ...(ui.voiceReady?.() ? [['Space', 'talk (voice)']] : []), [NEWLINE_KEY, 'add a new line'], ['Esc', 'stop'], ['Shift+Tab', 'change permissions']]
+    const keys = [['/', 'run a command'], ['@', 'attach a file'], ...(ui.voiceReady?.() ? [['Space', 'talk (voice)']] : []), [NEWLINE_KEY, 'add a new line'], ui.busySince ? ['Esc twice', 'stop'] : ['Esc Esc', 'go back to a message'], ['Shift+Tab', 'change permissions']]
     // the keys: on a second line when they don't fit one, broken between keys (never inside one)
     const rows = []
     for (const kd of keys) {
@@ -1959,6 +1961,7 @@ async function main() {
   // that starts with "page" ("page fix the footer") is a prompt
   const target = process.argv[3]
   if (process.argv[2] === 'page' && process.argv.length === 4 && (/^https?:\/\//.test(target) || fs.existsSync(target))) return (process.exitCode = await (await import('../src/check.js')).pageCommand(target))
+  if (process.argv[2] === 'page' && process.argv.length === 4 && /[./\\]/.test(target)) return console.error(`heart page: no such file: ${target}`), (process.exitCode = 1) // a file meant, not there: not taken as a task
   // "--resume <id>" (as in Claude Code) vs a bare "--resume" (pick one): an id follows it
   const argv = process.argv.slice(2)
   const print = argv.includes('-p') || argv.includes('--print') // headless: an id after --resume is always an id
@@ -2021,14 +2024,21 @@ async function main() {
   for (const k of ['output-format', 'input-format']) if (f[k] && !['text', 'json', 'stream-json'].includes(f[k])) throw new Error(`--${k} must be text, json or stream-json`)
   if (f['permission-mode'] && !PERMISSION_MODES[f['permission-mode']]) throw new Error(`--permission-mode must be one of ${Object.keys(PERMISSION_MODES).join(', ')}`)
 
-  const cfg = loadConfig({ baseUrl: f['base-url'], model: f.model, apiKey: f['api-key'], context: f.context })
+  if (f.effort && !['default', 'low', 'medium', 'high'].includes(f.effort)) throw new Error('--effort must be low, medium, high or default')
+  const cfg = loadConfig({ baseUrl: f['base-url'], model: f.provider && f.model ? `${f.provider} ${f.model}` : f.model, apiKey: f['api-key'], context: f.context })
   setTheme(cfg.theme)
   useLogs(cfg)
   const safe = { ...cfg, providers: Object.fromEntries(Object.entries(cfg.providers).map(([n, p]) => [n, { ...p, apiKey: p.apiKey && mask(p.apiKey) }])) }
   log('start', `heartcode ${VERSION} · node ${process.version} · ${process.platform} · cwd ${process.cwd()}`, { args: process.argv.slice(2).map((a) => (a === f['api-key'] ? mask(a) : a)), config: safe })
+  // --provider: one model alone, as -m does: with -m, that one (above); alone, that provider's first
+  // model in your list
   if (f.provider) {
     if (!cfg.providers[f.provider]) throw new Error(`no provider "${f.provider}" (heartcode providers lists them)`)
-    Object.assign(cfg, { provider: f.provider, fixed: true })
+    if (!f.model) {
+      const t = [{ provider: cfg.provider, model: cfg.model }, ...(cfg.rotation?.then ?? [])].find((x) => x.provider === f.provider && x.model)
+      if (!t) throw new Error(`--provider ${f.provider}: none of your models is from it; add -m <model>`)
+      Object.assign(cfg, { ...t, session: [t], pinned: true })
+    }
   }
   // --fallback-model: after the model given (as in Claude Code's -p), when it fails
   cfg.fallbacks = (f['fallback-model'] ?? []).map((v) => {
@@ -2041,6 +2051,8 @@ async function main() {
   extraSkillDirs.push(...(f['skills-dir'] ?? []).map((d) => path.resolve(d)))
   if (f.save) {
     cfg.adhoc = null
+    // the model given (-m, -u): saved as #1, not just for this run
+    if (cfg.session?.length) [cfg.provider, cfg.model, cfg.session, cfg.pinned] = [cfg.session[0].provider, cfg.session[0].model, undefined, undefined]
     saveConfig(cfg)
     console.log(c.dim(`saved to ${CONFIG_FILE}`))
   }

@@ -67,10 +67,12 @@ has none, so there's nothing for anyone to poison.
 1. **It asks first.** If your request leaves something open (how it should look, how far to go,
    whether to test it), it asks you, with its own suggestion first. Small fixes it just does.
 2. **It reads up** on whatever it's about to use, instead of trusting its memory.
-3. **It makes a plan**: a todo list you can see. It can't change a file before there's one.
+3. **It makes a plan**: a todo list you can see. Its first change of each message waits for one.
 4. **It does the work**: reading files, running commands, editing.
 5. **It may split the work.** Your #1 model can hand a job to a helper, or run separate parts at
-   the same time, each on its own files. Helpers use your models in your order. The model decides.
+   the same time, each on its own files. The model decides. Pick your helpers yourself (below), or
+   let HeartCode pick them; without any, it can use any of your models, in your order. Every step
+   on screen names the model doing it.
 6. **It checks before it says it's done**: it must have tested what it changed, finished its todo
    list and made the files it names. Then your next models say yes or no; a no sends it back.
 7. **It tidies up** in the background: saves notes for next time, removes throwaway files.
@@ -83,7 +85,7 @@ has none, so there's nothing for anyone to poison.
 npm install -g heartcode
 ```
 
-Or from source (a `git pull` then updates it):
+Or from source (installed the same way: `/update` updates it):
 
 ```sh
 git clone https://github.com/p32929/HeartCode.git
@@ -133,8 +135,13 @@ On **Models → Your list**:
 2. **Drag rows** to fine-tune. #1 is the one HeartCode uses; the rest are its fallbacks, in order.
 3. **Test** (optional): **Test all** sends each model a short message and shows which answer and
    how fast (*Works?*). Sort by it to put the fastest first.
-4. **Filter** (optional): by name, provider, test result, context, abilities or free. **Use only
-   these** keeps just the ones you see, in that order.
+4. **Filter** (optional): by name, provider, test result, context, abilities, free or helpers.
+   **Use only these** keeps just the ones you see, in that order.
+5. **Helpers** (optional): the models #1 can hand parts of a task to. In the *Helper* column, switch
+   a model on and pick what it's good at: **UI & visuals**, **Code & logic**, **Big & hard**,
+   **Quick & cheap** (hover a pill to see what it covers). **Suggest helpers** proposes them from
+   the models that passed **Test all** and the rankings; or set *Helpers* to **picked for you**.
+   *Helpers picked* (beside **Order providers**): in your order, or by your provider ranking.
 
 **Update model info** fetches what each model can do and costs (from models.dev) and its places in
 LMArena's public rankings for coding, web apps and vision, as columns to sort by. A model *not
@@ -205,7 +212,10 @@ Ask it to read, change, run and fix things in your project, like any coding agen
 
 - `/` shows every command; `heart --help` lists the rest.
 - `Shift+Tab` changes what it may do without asking.
-- `Esc` stops it, or closes a dialog.
+- `Esc` twice stops it; `Esc` also closes a dialog.
+- While it works, `Enter` queues a message. `Esc` (or `↑`) takes queued messages back into the box
+  to change or drop, without stopping the work.
+- `Shift+Enter` (or `Option+Enter`) adds a new line. `Alt+O` shows all of the model's thinking.
 - While it works, commands that don't change the conversation (`/help`, `/cost`, `/diff`,
   `/settings`…) run at once; the ones that do (`/compact`, `/rewind`…) wait until it's done.
 

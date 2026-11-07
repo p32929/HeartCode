@@ -55,7 +55,7 @@ const DETAILS = ['full', 'summary']
 const FILES = [
   ['mcp.json', 'MCP servers: programs that give the model more tools', true, '{\n  "mcpServers": {\n    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] },\n    "docs": { "url": "https://mcp.example.com/mcp" }\n  }\n}'],
   ['hooks.json', 'Your commands, run before or after the model uses a tool (one can block it)', true, '{\n  "hooks": {\n    "PreToolUse": [\n      { "matcher": "run_command", "hooks": [{ "type": "command", "command": "./check-command.sh" }] }\n    ]\n  }\n}'],
-  ['keybindings.json', 'Your own keys: an action, or a /command to send', true, '{\n  "alt+o": "cycle_permissions",\n  "alt+g": "/toggle_thinking"\n}'],
+  ['keybindings.json', 'Your own keys: an action, or a /command to send', true, '{\n  "alt+g": "cycle_permissions",\n  "alt+r": "/rewind"\n}'],
   ['theme.json', 'Your own colors, on top of the theme you chose', true, '{\n  "brand": "#ff6b9d",\n  "background": "#101014"\n}'],
   ['format.json', 'The formatter to run on each kind of file HeartCode writes', true, '{\n  ".go": "gofmt -w {file}",\n  ".py": "ruff format {file}"\n}'],
   ['HEARTCODE.md', 'Your instructions for every project (like AGENTS.md, for all of them)', false, '- Answer briefly.\n- Use pnpm, not npm.'],
@@ -675,7 +675,11 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     // for it stay above). A running HeartCode takes it at once.
     // Test: one short message to the model, to see that it answers (key, access, name, the server
     // itself). In the requests log as a model test. Never throws: { ok, ms, reply } or { ok: false, error }.
-    'POST /api/try': ({ provider, model } = {}) => testOne({ provider, model: String(model ?? '') }),
+    'POST /api/try': async ({ provider, model } = {}) => {
+      const r = await testOne({ provider, model: String(model ?? '') })
+      if (autoPick()) emit('helpers', { helpers: helpersOf(cfg.helpers) }) // picked for you: what this test found counts
+      return r
+    },
     // Test, on a model's row: one "Hello" to it, and exactly what was sent and what came back (the
     // key masked), for the page to show. Not streamed, so the answer is the provider's own JSON.
     'POST /api/hello': async ({ provider, model }) => {
@@ -748,6 +752,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       writeJson(profilePath(c), p)
       changed('profile')
       testNews(`${provider}/${t.model}`, t)
+      autoPick() // picked for you: what it can do now counts (thinking, context)
       return state()
     },
     // Measure a tested model's window: one oversized request (client.measureContext); the limit the

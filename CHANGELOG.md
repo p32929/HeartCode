@@ -2,6 +2,35 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.59 (2026-11-07)
+
+- **You see which model does what**: every step names its model (`● web_fetch … · model`), each
+  helper at work has a line with its model, and a plan step handed to a helper says who has it.
+- **Headless says everything the screen shows**: `stream-json` adds `system` lines for the plan
+  (`todos`, with `by`), helpers (`helper`), reviews, model switches, retries, warnings and what it's
+  doing now (`status`, a running command's output too); tool results carry their `model`; every
+  reply and the result have a `stop_reason`. SKILL.md lists them.
+- **Cut-off replies aren't taken as finished**: a reply stopped by its provider's output limit, or a
+  stream that ends without `[DONE]` (its last line is no longer lost), is continued where it
+  stopped; the answer is always sent whole as a reply of its own.
+- **A spinner where the work is**: the running step's ● spins, and while it waits on the model a
+  line at the end of the conversation says so (the status at the bottom stays).
+- **Queued messages can be changed or dropped**: Esc (or ↑) takes them back into the box without
+  stopping the work; Esc twice stops it. Shift+Enter adds a new line while it works too.
+- **Alt+O sends nothing**: it no longer queues `/toggle_thinking`; after an answer it opens that
+  reply's thinking in a box.
+- **No more flicker or broken screens**: a question no longer flickers (only what changed is drawn,
+  shown at once where the terminal can); resizing the terminal keeps the input box and status bar;
+  a plan that grows prints only what changed.
+- **Installed from a clone, /update works**: `npm start` installs a copy in npm's global folder, as
+  `npm install -g heartcode` does, so `/update` replaces it there.
+- **Says what it does**: an audit of every hint, prompt, settings text and doc against the code.
+  Fixed on the way: `--save -m` saves the model, `--provider` picks a model alone, `-m` runs a
+  model of a switched-off provider, `--allowedTools WebFetch/WebSearch` work, guided mode's
+  `--max-turns` is an error, `HEART_LOG=off` stops request logs too, `heart page` with a missing
+  file says so, `list_files` takes `path` and `filter` together, project prompts reach the tool
+  descriptions at once, reviews see browser and helper checks, settings changes reach every tab.
+
 ## 0.1.58 (2026-11-07)
 
 - **Helpers you pick**: on Your models, a Helper column: a switch (can #1 start this model for a part

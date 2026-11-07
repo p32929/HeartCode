@@ -466,7 +466,7 @@ export function searchesOutside(cmd, root) {
 // Waited on for `wait` seconds (the model's choice): finished by then, its exit code and output;
 // still running, it carries on in the background, and the model checks on it when it likes.
 export async function runConfirmed(s, cmd, signal, background = false, wait) {
-  s.ui.step(background ? 'run in background' : 'run', cmd)
+  s.ui.step(background ? 'run in background' : 'run', cmd, s.client?.model)
   if (s.ui.permission === 'plan' && !readOnlyCommand(cmd)) {
     s.ui.result('not run: plan mode')
     return prompt('agent/plan-refused', { command: true })
@@ -609,22 +609,23 @@ export function writeResult(rel, r) {
 const str = { type: 'string' }
 const int = { type: 'integer' }
 const obj = (properties, required = []) => ({ type: 'object', properties, required })
+// (descriptions read each time: a project's own prompts and the settings page's edits apply at once)
 export const TOOL_DEFS = [
-  { name: 'read_file', description: prompt('agent/tool-read_file'), parameters: obj({ path: str, start_line: int, end_line: int }, ['path']) },
-  { name: 'search', description: prompt('agent/tool-search'), parameters: obj({ query: str, path: str }, ['query']) },
-  { name: 'changes', description: prompt('agent/tool-changes'), parameters: obj({ path: str, all: { type: 'boolean' } }) },
-  { name: 'list_files', description: prompt('agent/tool-list_files'), parameters: obj({ path: str, filter: str }) },
-  { name: 'find_command', description: prompt('agent/tool-find_command'), parameters: obj({ names: { type: 'array', items: str } }, ['names']) },
-  { name: 'lsp', description: prompt('agent/tool-lsp'), parameters: obj({ server: str, language: str, action: { type: 'string', enum: ['definition', 'references', 'hover', 'errors'] }, file: str, line: int, column: int, name: str }, ['server', 'language', 'action', 'file']) },
+  { name: 'read_file', get description() { return prompt('agent/tool-read_file') }, parameters: obj({ path: str, start_line: int, end_line: int }, ['path']) },
+  { name: 'search', get description() { return prompt('agent/tool-search') }, parameters: obj({ query: str, path: str }, ['query']) },
+  { name: 'changes', get description() { return prompt('agent/tool-changes') }, parameters: obj({ path: str, all: { type: 'boolean' } }) },
+  { name: 'list_files', get description() { return prompt('agent/tool-list_files') }, parameters: obj({ path: str, filter: str }) },
+  { name: 'find_command', get description() { return prompt('agent/tool-find_command') }, parameters: obj({ names: { type: 'array', items: str } }, ['names']) },
+  { name: 'lsp', get description() { return prompt('agent/tool-lsp') }, parameters: obj({ server: str, language: str, action: { type: 'string', enum: ['definition', 'references', 'hover', 'errors'] }, file: str, line: int, column: int, name: str }, ['server', 'language', 'action', 'file']) },
   // One edit per call: a list of edits per call measured 2–6 malformed calls per benchmark run vs 0.
-  { name: 'edit_file', description: prompt('agent/tool-edit_file'), parameters: obj({ path: str, search: str, replace: str, start_line: int, end_line: int }, ['path', 'replace']) },
-  { name: 'write_file', description: prompt('agent/tool-write_file'), parameters: obj({ path: str, content: str, append: { type: 'boolean' } }, ['path', 'content']) },
-  { name: 'run_command', description: prompt('agent/tool-run_command'), parameters: obj({ command: str, wait: int, background: { type: 'boolean' } }, ['command']) },
-  { name: 'background', description: prompt('agent/tool-background'), parameters: obj({ action: { type: 'string', enum: ['output', 'list', 'stop'] }, id: int, wait: int }, ['action']) },
-  { name: 'todo', description: prompt('agent/tool-todo'), parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] }, parallel: { type: 'boolean' }, model: str, files: { type: 'array', items: str } }, ['content', 'status']) } }, ['todos']) },
-  { name: 'web_search', description: prompt('agent/tool-web_search'), parameters: obj({ query: str, fresh: { type: 'boolean' } }, ['query']) },
-  { name: 'web_fetch', description: prompt('agent/tool-web_fetch'), parameters: obj({ url: str, look_for: str, start: int }, ['url']) },
-  { name: 'ask_user', description: prompt('agent/tool-ask_user'), parameters: obj({ question: str, header: str, options: { type: 'array', items: str }, multiple: { type: 'boolean' }, emphasis: { type: 'boolean' } }, ['question', 'options']) }, // one question a call (small models manage that); several calls in one reply are one dialog (agent.js)
+  { name: 'edit_file', get description() { return prompt('agent/tool-edit_file') }, parameters: obj({ path: str, search: str, replace: str, start_line: int, end_line: int }, ['path', 'replace']) },
+  { name: 'write_file', get description() { return prompt('agent/tool-write_file') }, parameters: obj({ path: str, content: str, append: { type: 'boolean' } }, ['path', 'content']) },
+  { name: 'run_command', get description() { return prompt('agent/tool-run_command') }, parameters: obj({ command: str, wait: int, background: { type: 'boolean' } }, ['command']) },
+  { name: 'background', get description() { return prompt('agent/tool-background') }, parameters: obj({ action: { type: 'string', enum: ['output', 'list', 'stop'] }, id: int, wait: int }, ['action']) },
+  { name: 'todo', get description() { return prompt('agent/tool-todo') }, parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] }, parallel: { type: 'boolean' }, model: str, files: { type: 'array', items: str } }, ['content', 'status']) } }, ['todos']) },
+  { name: 'web_search', get description() { return prompt('agent/tool-web_search') }, parameters: obj({ query: str, fresh: { type: 'boolean' } }, ['query']) },
+  { name: 'web_fetch', get description() { return prompt('agent/tool-web_fetch') }, parameters: obj({ url: str, look_for: str, start: int }, ['url']) },
+  { name: 'ask_user', get description() { return prompt('agent/tool-ask_user') }, parameters: obj({ question: str, header: str, options: { type: 'array', items: str }, multiple: { type: 'boolean' }, emphasis: { type: 'boolean' } }, ['question', 'options']) }, // one question a call (small models manage that); several calls in one reply are one dialog (agent.js)
 ]
 
 // Plan mode (permission "plan"): looking around is fine, changing things isn't. Edits are refused,
@@ -699,7 +700,7 @@ export function extraTools(s) {
     const team = s.team?.() ?? []
     const model = { type: 'string', description: team.some((t) => t.jobs) ? 'Which helper does the job ("provider model" from "Your helpers"). Left out: the first helper.' : 'Which of your models does the job ("provider model" from "Your other models"). Left out: yours, or with images you can\'t see, the first of yours that can.' }
     const images = { type: 'array', items: str, description: 'Image paths or URLs for the helper to look at. Needs a model that sees images.' }
-    out.push({ name: 'agent', description: prompt('agent/tool-agent'), parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }) }, ['description', 'prompt']) })
+    out.push({ name: 'agent', get description() { return prompt('agent/tool-agent') }, parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }) }, ['description', 'prompt']) })
   }
   return [...out, ...(s.director && !s.appendSystem ? s.director.toolDefs(s) : [])] // manage (director.js); not when a program gives the instructions (--append-system-prompt)
 }
@@ -709,13 +710,22 @@ export function extraTools(s) {
 const MARK = { pending: '☐', in_progress: '◐', completed: '☑' }
 // In the conversation: the whole plan when it's new (or its steps changed), else only the steps whose
 // status changed, on one line; the whole of it stays in sight under the spinner (full screen).
+// the plan for a program reading HeartCode (headless stream-json): its steps, and who's doing a part
+export const sendTodos = (s) => !s.isSub && s.ui.event?.({ subtype: 'todos', todos: (s.chat.todos ?? []).map(({ content, status, by, byProvider }) => ({ content, status, ...(by && { by: byProvider ? `${byProvider}/${by}` : by }) })) })
 function showTodos(s, before, todos) {
   const paint = { pending: c.muted, in_progress: (x) => c.info(c.bold(x)), completed: (x) => c.faint(x) }
-  const item = (t) => paint[t.status](`${MARK[t.status]} ${t.content}`)
-  const same = s.ui.full && before?.length === todos.length && before.every((t, i) => t.content === todos[i].content)
-  if (!same) return s.ui.print(todos.map((t) => `  ${item(t)}`).join('\n') || c.faint('  (todo list cleared)'))
-  const moved = todos.filter((t, i) => t.status !== before[i].status)
-  if (moved.length) s.ui.print(`  ${moved.map(item).join(c.faint(' · '))}`)
+  const item = (t) => paint[t.status](`${MARK[t.status]} ${t.content}`) + (t.by ? c.faint(` · ${t.by}`) : '')
+  // full screen, the same plan changed (most of its steps still in it): only what changed, on one line
+  // (steps added, taken out, or whose status moved); the whole plan is pinned under the spinner
+  const was = new Map((before ?? []).map((t) => [t.content, t.status]))
+  const kept = todos.filter((t) => was.has(t.content)).length
+  if (!s.ui.full || !before?.length || kept < Math.max(1, todos.length / 2)) return s.ui.print(todos.map((t) => `  ${item(t)}`).join('\n') || c.faint('  (todo list cleared)'))
+  const now = new Set(todos.map((t) => t.content))
+  const changes = [
+    ...todos.filter((t) => was.get(t.content) !== t.status).map((t) => (was.has(t.content) ? item(t) : `${c.faint('+')} ${item(t)}`)),
+    ...(before ?? []).filter((t) => !now.has(t.content)).map((t) => c.faint(`− ${t.content}`)),
+  ]
+  if (changes.length) s.ui.print(`  ${changes.join(c.faint(' · '))}`)
 }
 async function todoTool(s, args, signal, id) {
   let list = args.todos ?? args.items ?? args
@@ -731,8 +741,10 @@ async function todoTool(s, args, signal, id) {
     .map((t) => (typeof t === 'string' ? { content: t, status: 'pending' } : { content: String(t?.content ?? t?.task ?? t?.title ?? ''), status: String(t?.status ?? 'pending'), ...(t?.model && { model: String(t.model) }), ...((t?.parallel === true || t?.parallel === 'true') && { parallel: true }), ...([t?.files ?? []].flat().filter(Boolean).length && { files: [t.files].flat().map(String) }) }))
     .filter((t) => t.content.trim())
     .map((t) => ({ ...t, status: /done|complete/i.test(t.status) ? 'completed' : /progress|doing|active/i.test(t.status) ? 'in_progress' : 'pending' }))
+  for (const t of todos) Object.assign(t, ((x) => (x?.by && !t.by ? { by: x.by, byProvider: x.byProvider } : {}))(s.chat.todos?.find((x) => x.content === t.content))) // the model a part was given to: kept when the plan is written again
   showTodos(s, s.chat.todos, todos)
   s.chat.todos = todos
+  sendTodos(s)
   s.todoTouched = true
   const parts = await runParts(s, todos, signal, id)
   const done = todos.filter((t) => t.status === 'completed').length
@@ -755,7 +767,8 @@ async function runParts(s, todos, signal, id) {
   const parts = todos.filter((t) => t.status === 'pending' && (t.parallel || t.model))
   if (!parts.length || s.isSub || !s.subagent || s.ui.permission === 'plan') return ''
   // a model that isn't one of yours (a name made up, the product's own name): the part runs on this one
-  const yours = [{ provider: s.client?.provider, model: s.client?.model }, ...(s.team?.() ?? [])]
+  const team = s.team?.() ?? []
+  const yours = [{ provider: s.client?.provider, model: s.client?.model }, ...(team.some((t) => t.jobs) ? team.filter((t) => t.jobs) : team)] // with helpers ticked: those (only they can be started)
   const known = (m) => yours.some((y) => `${y.provider} ${y.model}` === m || y.model === m || m.endsWith(` ${y.model}`))
   const unknown = [...new Set(parts.filter((t) => t.model && !known(t.model)).map((t) => t.model))]
   for (const t of parts) if (t.model && !known(t.model)) delete t.model
@@ -770,7 +783,7 @@ async function runParts(s, todos, signal, id) {
       const brief = prompt('agent/part', { task: s.task ?? '', plan, part: t.content, files: (t.files ?? []).join(', '), choices })
       let out
       try {
-        out = await s.subagent({ prompt: brief, model: t.model, description: clip(t.content, 40), ownFiles: t.files }, signal, id)
+        out = await s.subagent({ prompt: brief, model: t.model, description: clip(t.content, 40), ownFiles: t.files, part: t }, signal, id) // part: its model is noted on it (by)
       } catch (e) {
         if (e.name === 'AbortError' || signal?.aborted) throw e
         out = `error: ${e.message}`
@@ -781,6 +794,7 @@ async function runParts(s, todos, signal, id) {
   )
   s.chat.todos = todos
   showTodos(s, shown, todos)
+  sendTodos(s)
   return prompt('agent/parts-done', { reports: reports.join('\n\n'), unknown: unknown.join(', '), models: yours.map((y) => `${y.provider} ${y.model}`).join(', ') })
 }
 
@@ -1403,7 +1417,7 @@ async function toolRun(name, args, s, signal, id) {
   const notMine = !pre.block && s.ownFiles && partPaths(name, args).find((f) => !s.ownFiles.includes(path.resolve(s.root, f)))
   const stop = pre.block ? prompt('agent/hook', { reason: pre.block, blocked: true }) : notMine ? prompt('agent/part-files', { file: notMine, files: s.ownFiles.map((f) => path.relative(s.root, f)).join(', ') }) : null
   if (stop && name === 'run_command') {
-    s.ui.step('run', String(args?.command ?? '')) // a command's lines are shown where it runs, which this one never reaches
+    s.ui.step('run', String(args?.command ?? ''), s.client?.model) // a command's lines are shown where it runs, which this one never reaches
     s.ui.result(refusal(stop))
   }
   if (stop) return stop
@@ -1468,7 +1482,8 @@ async function tool(name, args, s, signal, id) {
           const v = folderView(root, String(args.path))
           return v.error ? `error: ${v.error}` : v.entries.join('\n') + (v.more ? `\n… ${v.more} more` : '') || '(empty folder)'
         }
-        const files = listFiles(root).filter((f) => !args.filter || f.includes(args.filter))
+        const under = String(args.path ?? '').replace(/^\.?\/+|\/+$/g, '') // with a filter too: the files under that folder that match
+        const files = listFiles(root).filter((f) => (!under || under === '.' || f === under || f.startsWith(`${under}/`)) && (!args.filter || f.includes(args.filter)))
         return files.slice(0, 500).join('\n') + (files.length > 500 ? `\n… ${files.length - 500} more` : '') || 'no files'
       }
       case 'search':

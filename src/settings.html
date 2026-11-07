@@ -966,7 +966,7 @@
             <select id="g-effort"></select>
           </div>
           <div class="setting">
-            <label class="t" for="g-context"><b>Context window</b><span>How many tokens the model can hold. Leave it on auto unless HeartCode gets it wrong.</span></label>
+            <label class="t" for="g-context"><b>Context window</b><span>How many tokens the model can hold. Leave it on auto unless HeartCode gets it wrong: a number here is used for every model, over each model's own.</span></label>
             <input type="number" id="g-context" min="1" placeholder="Auto">
           </div>
         </div>
@@ -1125,7 +1125,7 @@
 </dialog>
 <dialog id="h-test" aria-labelledby="h-test-title">
   <h2 id="h-test-title">Test your models first</h2>
-  <p class="sub">Helpers are picked from the models that answer a short test. None of yours has been tested yet.</p>
+  <p class="sub">Helpers are picked from the models that answer a short test. None of yours has answered one yet.</p>
   <p class="sub" id="h-test-cost"></p>
   <div class="actions"><span class="spacer"></span><button id="h-test-no" type="button" class="ghost">Cancel</button><button id="h-test-go" type="button" class="primary">Test all, then pick</button></div>
 </dialog>
@@ -2594,11 +2594,11 @@ function drawMine(s) {
   const secsCell = (label, name, about, unit, said) => cell(label, about, num(name, label, said), h('span', { className: 'unit', textContent: unit }))
   const settings = h('div', { className: 'mt-sets', inert: busy },
     h('div', { className: 'mt-mode-sets' },
-      cell('If one fails', ro.on === 'retries' ? 'a rate limit or outage: that model is tried again that many times first; any other error moves on at once' : "any error moves on at once, to the next model (another provider's first)",
+      cell('If one fails', ro.on === 'retries' ? 'a rate limit or outage: that model gets that many tries in all before the next one; any other error moves on at once' : "any error moves on at once, to the next model (after an error from its provider: another provider's first)",
         h('select', { onchange: (e) => saveOrder(S.order, 'saved', { on: e.target.value }) },
           [['failure', 'go to the next'], ['retries', 'retry it first']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.on === v }))),
         ro.on === 'retries' ? h('input', { type: 'number', className: 'tries', 'aria-label': 'tries', title: 'tries of the same model first (rate limits, outages)', min: 1, max: 20, value: ro.retries, onchange: (e) => saveOrder(S.order, 'saved', { retries: Number(e.target.value) }) }) : null),
-      secsCell('Give up after', 'replyStart', "a model that hasn't started answering (text, thinking or a tool call) in this many seconds counts as failed", 'sec', (v) => `a model that hasn't started answering in ${v}s counts as failed`),
+      secsCell('Give up after', 'replyStart', "a model that hasn't started answering (text, thinking or a tool call) in this many seconds counts as failed (a streamed reply: a model set up without streaming waits for its whole reply)", 'sec', (v) => `a model that hasn't started answering in ${v}s counts as failed`),
       secsCell('Stalled after', 'replyIdle', 'a reply that stops sending anything for this many seconds is stalled: tried again, or the next model', 'sec', (v) => `a reply silent for ${v}s counts as stalled`),
       cell('Tests wait', 'how long a test waits for each answer',
         h('input', { type: 'number', className: 'tries', min: 1, max: 600, step: 1, value: S.settings.testTimeout ?? 10, 'aria-label': 'Test timeout in seconds', onchange: (e) => {
@@ -2620,7 +2620,7 @@ function drawMine(s) {
     order.length > 1 ? drawHelperBar() : null,
     h('button', { className: 'small', textContent: filtered ? `Test ${n(shown.length)}` : 'Test all', disabled: testingAll || !shown.length, title: `send ${filtered ? 'the models shown' : 'each model'} a short message to see which really answer, and how fast`, onclick: () => tryAll(filtered ? shown : order) }),
     // not on the helpers' view: they're not a list to keep only
-    filtered && FILTER.helpers ? null : h('button', { className: 'small primary', textContent: filtered ? `Use only these ${n(view.length)}` : 'Save list', disabled: !view.length || order.length < 2, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : S.settings.modelChoice === 'fit' ? 'keep the order shown: the orchestrator sees the others in this order, and a failed model goes to the next' : 'save your list as shown: HeartCode uses them in this order (#1 first)', onclick: saveList }))
+    filtered && FILTER.helpers ? null : h('button', { className: 'small primary', textContent: filtered ? `Use only these ${n(view.length)}` : 'Save list', disabled: !view.length || order.length < 2, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : 'save your list as shown: HeartCode uses them in this order (#1 first)', onclick: saveList }))
 
   // --- the table ---
   const all = view.length > 0 && view.every((t) => PICKED.has(keyOf(t)))
@@ -2777,7 +2777,7 @@ function helperCell(t, at) {
   const sug = HSUG?.[k] ?? []
   const busy = locked()
   return h('span', { className: 'hp' + (jobs ? '' : ' off') },
-    h('span', { className: SAVING.has(`${k}|on`) ? 'saving' : '', title: jobs ? 'a helper: #1 can start it for side jobs (click: not a helper)' : 'not a helper (click: #1 can start it for side jobs)' },
+    h('span', { className: SAVING.has(`${k}|on`) ? 'saving' : '', title: jobs ? 'a helper: #1 can start it for side jobs (click: not a helper)' : Object.keys(helpers()).length ? 'not a helper (click: #1 can start it for side jobs)' : 'no helpers ticked: #1 can start any of your models (click: only the ones you tick)' },
       sw({ checked: Boolean(jobs), disabled: busy, 'aria-label': `${t.model} is a helper`, onchange: (e) => setHelper(k, e.target.checked ? (jobs ?? []) : null, 'on') })),
     Object.entries(S.jobs ?? {}).map(([j, [label, , covers]]) => {
       const has = Boolean(jobs?.includes(j))
@@ -2789,13 +2789,13 @@ function helperCell(t, at) {
         h('div', { className: 'tjob', textContent: label }),
         h('div', { className: 'tcover', textContent: covers }),
         sugd ? h('div', { className: 'tcover', textContent: `Suggested from ${SUGGEST_WHY[j]}.` }) : null,
-        S.helpersAuto && has ? h('div', { className: 'tcover', textContent: 'Picked for you, from the rankings, tests and prices.' }) : null,
+        S.helpersAuto && has ? h('div', { className: 'tcover', textContent: 'Picked for you, from the rankings and the tests.' }) : null,
         h('div', { className: 'thint', textContent: (has ? `Click: ${t.model} isn't picked for this any more` : `Click: #1 gives these jobs to ${t.model}${jobs ? '' : ' (it becomes a helper)'}`) + (S.helpersAuto ? ' · from then on, you pick' : '') }),
       ])
     }))
 }
 // what each pill's suggestions go by (said in its tooltip)
-const SUGGEST_WHY = { ui: 'its place in the top half of the web-app ranking (LMArena)', code: 'its place in the top half of the coding ranking (LMArena)', hard: 'it thinks with a context of 128k or more, or its place in the top half of the ranking for long real tasks or the hardest prompts (LMArena)', quick: 'its test: faster than most of yours (or nothing else fits it)' }
+const SUGGEST_WHY = { ui: 'its place in the top half of the web-app ranking (LMArena)', code: 'its place in the top half of the coding ranking (LMArena)', hard: 'it thinks with a context of 128k or more, or its place in the top half of the ranking for long real tasks or the hardest prompts (LMArena)', quick: 'its test: as fast as the middle one of yours or faster (or nothing else fits it)' }
 // Helpers are picked from the models that answered their test: how many did
 const working = () => S.order.filter((t) => TRIES[keyOf(t)]?.ok && !TRIES[keyOf(t)].going).length
 // No test yet: ask before testing them all (each gets a short message, which a paid model charges for);
@@ -2805,7 +2805,7 @@ function testFirst(then) {
   const n = (x) => x.toLocaleString()
   const paid = S.order.filter((t) => t.price && (t.price.input > 0 || t.price.output > 0)).length
   const unknown = S.order.filter((t) => !t.price).length
-  $('h-test-cost').textContent = `Test all sends each of your ${n(S.order.length)} models a short message. ${paid ? `${n(paid)} of them aren't free: each charges for its few tokens. ` : ''}${unknown ? `${n(unknown)} have no price we know of, and may charge too. ` : ''}When it's done, helpers are picked from the ones that worked.`
+  $('h-test-cost').textContent = `Test all sends each of your ${n(S.order.length)} models a short message. ${paid ? `${n(paid)} of them aren't free: each charges for its few tokens. ` : ''}${unknown ? `${n(unknown)} have no price we know of, and may charge too. ` : ''}When it's done, helpers are ${then === 'suggest' ? 'suggested' : 'picked'} from the ones that worked.`
   $('h-test-go').onclick = () => {
     $('h-test').close()
     afterTests = then
@@ -2860,11 +2860,11 @@ function drawHelperBar() {
         saveHelpers(next, [], `${took.length} model${took.length === 1 ? ' is a helper' : 's are helpers'} now`).then(() => drawMine(S))
       } }),
       h('button', { className: 'small ghost', textContent: 'Dismiss', onclick: () => ((HSUG = null), drawMine(S)) })) : null,
-    !HSUG && !S.helpersAuto ? h('button', { className: 'small', title: working() ? `suggest all ${working()} models that answered their test as helpers, each with what it's good at (from the rankings, its test, thinking and context): you see them first, then take them or not` : 'suggest helpers: your models are tested first (helpers are picked from the ones that answer)', onclick: (e) => (working() ? suggestNow(e.currentTarget) : testFirst('suggest')) }, ic('sparkles'), 'Suggest helpers') : null,
-    !HSUG && n ? h('button', { className: 'small ghost', textContent: 'Clear helpers', title: `none of your models a helper (${n} now): helpers run on the model that answers`, onclick: (e) => {
-      if (!confirm(`Clear your ${n} helper${n === 1 ? '' : 's'}? Helpers then run on the model that answers.`)) return
+    !HSUG && !S.helpersAuto ? h('button', { className: 'small', title: working() ? `suggest helpers from the ${working()} models that answered their test (their provider switched on), each with what it's good at that it doesn't have yet (from the rankings, its test, thinking and context): you see them first, then take them or not` : 'suggest helpers: your models are tested first (helpers are picked from the ones that answer)', onclick: (e) => (working() ? suggestNow(e.currentTarget) : testFirst('suggest')) }, ic('sparkles'), 'Suggest helpers') : null,
+    !HSUG && n ? h('button', { className: 'small ghost', textContent: 'Clear helpers', title: `none of your models a helper (${n} now): #1 can then start any of your models again, as before`, onclick: (e) => {
+      if (!confirm(`Clear your ${n} helper${n === 1 ? '' : 's'}? #1 can then start any of your models again, as before.`)) return
       busy(e.currentTarget)
-      saveHelpers({}, [], 'no helpers: they run on the model that answers').then(() => (FILTER.helpers ? setFilter({ helpers: false }) : drawMine(S))) // no helpers left to show only
+      saveHelpers({}, [], 'no helpers: #1 can start any of your models again').then(() => (FILTER.helpers ? setFilter({ helpers: false }) : drawMine(S))) // no helpers left to show only
     } }) : null)
   return helperBar
 }

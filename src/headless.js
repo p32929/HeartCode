@@ -7,16 +7,24 @@
 //       stdin:  {"type":"user","message":{"role":"user","content":"…"}}   one per line, any number
 //               {"type":"control_request","request_id":"1","request":{"subtype":"interrupt"}}
 //       stdout: {"type":"system","subtype":"init",…}, {"type":"assistant",…}, {"type":"user",…}
-//               (tool results), {"type":"result",…} after each message
+//               (tool results), {"type":"result",…} after each message; and what the full screen
+//               shows besides, as {"type":"system","subtype":…}: "todos" (the plan: content, status,
+//               by: the model a part went to), "helper" (one at work: tool_use_id, label, model, status;
+//               "done" at its end), "review" (model, verdict yes/no, issues), "model_switch" (from, to,
+//               reason), "warning" (message), "retry" (attempt, delay_ms, error), "status" (what it's
+//               doing now, as the spinner says it: a running command's latest output line too)
 // Nothing asks anything: what the permission mode would ask about is declined, with the reason
-// told to the model. Logs and warnings go to stderr (and HEART_LOG), never stdout.
+// told to the model. Logs go to their files (or HEART_LOG), never stdout; warnings and retries go to
+// stderr with --verbose (and, in stream-json, as system lines).
 import readline from 'node:readline'
 import { log } from './log.js'
 import { clip, TOOL_DEFS, extraTools, loadMcpTools, mcpName, failed as toolFailed } from './tools.js'
 import { allowed } from './agent.js'
 
+const plain = (t) => String(t ?? '').replace(/\x1b\[[0-9;]*m/g, '')
+
 // Claude Code's tool names → HeartCode's (for --allowedTools / --disallowedTools).
-const CLAUDE_TOOLS = { Read: 'read_file', Grep: 'search', Glob: 'list_files', LS: 'list_files', Edit: 'edit_file', MultiEdit: 'edit_file', Write: 'write_file', NotebookEdit: 'edit_file', Bash: 'run_command', BashOutput: 'background', KillShell: 'background', KillBash: 'background' }
+const CLAUDE_TOOLS = { Read: 'read_file', Grep: 'search', Glob: 'list_files', LS: 'list_files', Edit: 'edit_file', MultiEdit: 'edit_file', Write: 'write_file', NotebookEdit: 'edit_file', Bash: 'run_command', BashOutput: 'background', KillShell: 'background', KillBash: 'background', WebFetch: 'web_fetch', WebSearch: 'web_search', TodoWrite: 'todo', Task: 'agent' }
 export function toolNames(list) {
   const names = list.flatMap((x) => String(x).split(/[,\s]+/)).filter(Boolean).map((t) => t.replace(/\(.*$/, '')) // ponytail: "Bash(git:*)" allows every command, not just git
   return new Set(names.map((t) => CLAUDE_TOOLS[t] ?? t)) // mcp__server__tool and mcp__server as they are (tools.js allowed)
@@ -25,10 +33,24 @@ export function toolNames(list) {
 // --permission-mode, in HeartCode's terms or Claude Code's.
 export const PERMISSION_MODES = { all: 'all', commands: 'commands', ask: 'ask', bypassPermissions: 'all', acceptEdits: 'commands', default: 'ask', plan: 'plan', dontAsk: 'ask' }
 
-// A UI that shows nothing and asks nobody.
+// A UI that shows nothing and asks nobody; what the full screen would show goes to this.event (set
+// by stream-json: a system message each) as data.
 export class HeadlessUI {
   constructor({ permission = 'all', verbose = false } = {}) {
-    Object.assign(this, { permission, verbose, log: [], showThinking: true, full: false, noUser: true })
+    Object.assign(this, { permission, verbose, log: [], showThinking: true, full: false, noUser: true, event: null })
+    // helpers at work (agent.js: label → { id, model, what }): each change sent as a "helper" event
+    const ui = this
+    this.helpers = new (class extends Map {
+      set(label, v) {
+        ui.event?.({ subtype: 'helper', tool_use_id: v?.id ?? null, label, model: v?.model ?? null, status: v?.what ?? null })
+        return super.set(label, v)
+      }
+      delete(label) {
+        const v = this.get(label)
+        if (v) ui.event?.({ subtype: 'helper', tool_use_id: v.id ?? null, label, model: v.model ?? null, status: 'done' })
+        return super.delete(label)
+      }
+    })()
   }
   #err(text) {
     if (this.verbose) process.stderr.write(`${text}\n`)
@@ -36,9 +58,28 @@ export class HeadlessUI {
   warn(text) {
     log('warn', text)
     this.#err(`heartcode: ${text}`)
+    this.event?.({ subtype: 'warning', message: plain(text) })
   }
   retrying(err, ms, attempt) {
     if (err) this.#err(`heartcode: retrying in ${Math.ceil(ms / 1000)}s (attempt ${attempt}): ${err.message}`)
+    if (err) this.event?.({ subtype: 'retry', attempt, delay_ms: ms, error: plain(err.message) })
+  }
+  // What it's doing now, as the spinner would say it: sent when it changes (a label that's a function,
+  // a running command's latest line: read once a second)
+  spinner(label) {
+    clearInterval(this.spinTimer)
+    const say = () => {
+      const text = plain(typeof label === 'function' ? label() : label)
+      // model: a helper's when it's that helper's ("<its job> · …"), else the main conversation's
+      const helper = [...this.helpers].find(([job]) => text.startsWith(`${job} · `))?.[1]
+      if (text && text !== this.said) this.event?.({ subtype: 'status', status: (this.said = text), model: helper?.model ?? this.waitingFor?.() ?? null })
+    }
+    say()
+    if (typeof label === 'function') this.spinTimer = setInterval(say, 1000).unref() // never what keeps a finished run going
+  }
+  stopSpin() {
+    clearInterval(this.spinTimer)
+    this.said = null
   }
   async confirm(question, kind = 'edit') {
     if (this.permission === 'all' || (this.permission === 'commands' && kind === 'edit') || (this.permission === 'plan' && kind === 'read')) return true // plan: only reading
@@ -82,8 +123,6 @@ export class HeadlessUI {
   async pick() {
     return null
   }
-  spinner() {}
-  stopSpin() {}
   print() {}
   write() {}
   gap() {}
@@ -150,9 +189,14 @@ export async function runHeadless(app, opts) {
   // its own arguments, not HeartCode's one mcp tool around them (a program reading it, Nibedita,
   // knows its tools by those names).
   const asClaude = (name, input) => (name === 'mcp' && input?.server && input?.tool ? { name: mcpName(String(input.server), String(input.tool)), input: input.arguments ?? {} } : { name, input })
-  let said = false // the model's text was already sent as an assistant message
+  let said = '' // the main conversation's last text sent as an assistant message
+  // why a reply ended, in Claude's words (stop_reason)
+  const STOP = { stop: 'end_turn', tool_calls: 'tool_use', function_call: 'tool_use', length: 'max_tokens', incomplete: 'max_tokens', content_filter: 'refusal', loop: 'end_turn' }
+  const stopOf = (r) => (r ? (STOP[r] ?? r) : null)
   if (out === 'stream-json') {
     if (opts.partial) app.ui.partial = (event) => emit({ type: 'stream_event', event, session_id, parent_tool_use_id: null }) // the replies as they come (--include-partial-messages)
+    app.ui.event = (e) => emit({ type: 'system', ...e, session_id })
+    app.ui.waitingFor = () => `${s.client.provider}/${s.client.model}` // the model at work now, on status events // the plan, helpers, reviews, model switches, warnings, retries, status
     s.onEvent = (e) => {
       if (e.type === 'assistant') {
         const content = [
@@ -160,11 +204,11 @@ export async function runHeadless(app, opts) {
           ...(e.content ? [{ type: 'text', text: e.content }] : []),
           ...e.toolCalls.map((t) => ({ type: 'tool_use', id: t.id, ...asClaude(t.function.name, parseArgs(t.function.arguments)) })),
         ]
-        if (e.content && !e.parent) said = true
+        if (e.content && !e.parent) said = e.content
         // a helper's (agent) steps too, as Claude Code sends a subagent's: parent_tool_use_id is its agent call
-        if (content.length) emit({ type: 'assistant', message: { role: 'assistant', model: e.model ?? model, content }, parent_tool_use_id: e.parent ?? null, session_id })
+        if (content.length) emit({ type: 'assistant', message: { role: 'assistant', model: e.model ?? model, content, stop_reason: stopOf(e.stop) }, parent_tool_use_id: e.parent ?? null, session_id })
       } else if (e.type === 'tool') {
-        emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: e.id, content: e.output, is_error: toolFailed(e.output) }] }, parent_tool_use_id: e.parent ?? null, session_id })
+        emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: e.id, content: e.output, is_error: toolFailed(e.output) }] }, model: e.model ?? null, parent_tool_use_id: e.parent ?? null, session_id }) // model: the one that made the call
       }
     }
     if (s.strat.actions === 'tools' && s.mcp?.names.length) await loadMcpTools(s) // their tools are in the list, as in Claude Code's
@@ -180,7 +224,8 @@ export async function runHeadless(app, opts) {
     usage = { input_tokens: 0, output_tokens: 0 }
     byModel = {}
     requests = 0
-    said = false
+    said = ''
+    s.lastStop = null
     current = { ctl: new AbortController() }
     app.signal = current.ctl.signal
     app.working = true // settings changed meanwhile: MCP servers and skills wait for the end of it
@@ -201,9 +246,11 @@ export async function runHeadless(app, opts) {
     }
     const subtype = current.maxTurns ? 'error_max_turns' : error ? 'error_during_execution' : 'success' // as Claude Code names them
     current = null
-    const result = { type: 'result', subtype, is_error: Boolean(error), result: error ?? answer, num_turns: Math.max(1, requests), duration_ms: Date.now() - t0, total_cost_usd: (app.chat.usage?.cost ?? 0) - spent, usage, modelUsage: Object.keys(byModel).length ? byModel : { [model]: { inputTokens: 0, outputTokens: 0 } }, session_id }
+    const result = { type: 'result', subtype, is_error: Boolean(error), result: error ?? answer, stop_reason: error ? null : stopOf(s.lastStop ?? 'stop'), num_turns: Math.max(1, requests), duration_ms: Date.now() - t0, total_cost_usd: (app.chat.usage?.cost ?? 0) - spent, usage, modelUsage: Object.keys(byModel).length ? byModel : { [model]: { inputTokens: 0, outputTokens: 0 } }, session_id }
     if (out === 'stream-json') {
-      if (!error && answer && !said) emit({ type: 'assistant', message: { role: 'assistant', model: `${s.client.provider}/${s.client.model}`, content: [{ type: 'text', text: answer }] }, parent_tool_use_id: null, session_id }) // guided mode
+      // the answer as a reply of its own, unless it just went out as one (as it was: a cut-off answer is
+      // its pieces together; guided mode, an answer made after empty replies: never sent)
+      if (!error && answer && said.trim() !== answer.trim()) emit({ type: 'assistant', message: { role: 'assistant', model: `${s.client.provider}/${s.client.model}`, content: [{ type: 'text', text: answer }], stop_reason: stopOf(s.lastStop ?? 'stop') }, parent_tool_use_id: null, session_id })
       emit(result)
     } else if (out === 'json') emit(result)
     else if (error) process.stderr.write(`heartcode: ${error}\n`)

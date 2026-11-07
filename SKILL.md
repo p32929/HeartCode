@@ -16,7 +16,7 @@ heart --version          # installed? (else: node /path/to/heart_cli/bin/heart.j
 heart providers          # the providers set up, and their URLs (keys are masked)
 heart models             # what -m takes, one per line: "auto" first, then the user's models (provider/model), #1 first
 heart models --json      # the same, as JSON
-heart models --all       # every provider's models too (slower: asks each provider)
+heart models --all       # every provider's models (slower: asks each provider); with --json, beside the list
 ```
 
 `heart models` prints one id per line, nothing else (like `opencode models`):
@@ -42,8 +42,9 @@ With `--json`:
 `id` is exactly what to pass to `-m`:
 
 - **`auto`** (always first): the user's list. `fallbacks: true` when it has more than one model:
-  #1 is used, and the next one in order when it fails. No `-m` means `auto` too. (`default` is
-  its old name and still works.)
+  #1 is used, and the next one in order when it fails. No `-m` means `auto` too, unless the user
+  chose a set of models for that folder in HeartCode (`/select_model`): then that set. (`default`
+  is its old name and still works.)
 - **the user's models** (`place` 1, 2, …), as `provider/model`: #1 is the one `auto` starts with.
 
 No model set up yet: `models` is empty (and `heart -p` fails with "no model set up").
@@ -110,12 +111,14 @@ heart -p --output-format json -C /path/to/project "fix the failing test in math.
 
 ```json
 { "type": "result", "subtype": "success", "is_error": false, "result": "Fixed it: …",
-  "num_turns": 6, "duration_ms": 41200, "total_cost_usd": 0.0031,
+  "stop_reason": "end_turn", "num_turns": 6, "duration_ms": 41200, "total_cost_usd": 0.0031,
   "usage": { "input_tokens": 18000, "output_tokens": 900 }, "session_id": "20261027-…" }
 ```
 
 Read `is_error` and `result`. `subtype` is `success`, `error_during_execution` or
-`error_max_turns`. Without `--output-format`, stdout is just the answer text, and an error
+`error_max_turns`. `stop_reason` is why the answer ended, in Claude's words: `end_turn`, or
+`max_tokens` when it was still cut off (see "Cut-off replies" below), `refusal` when the
+provider's filter stopped it. Without `--output-format`, stdout is just the answer text, and an error
 goes to stderr. Logs never go to stdout.
 
 ## Continue the same conversation
@@ -145,7 +148,7 @@ can't switch the model you chose.
 | Everything (edits and commands) | `--permission-mode all` (the default unless the user set another) |
 | Changes kept apart from the user's files | `--worktree=<name>` (in a git repo): it works in `.heartcode/worktrees/<name>` on the branch `heartcode/<name>`; kept if anything changed (merge it from there), removed if nothing did |
 | A cap on how long it works | `--max-turns 30` (model steps), `--max-retries 3` (a failing provider) |
-| Nothing kept: no session, logs, settings or notes in `~/.heart`, nothing in the project's `.heartcode/` | `--temp` (a throwaway copy, shared by the `--temp` runs going on at once, deleted after the last; the project's notes and research are read, and what the run adds goes with the copy) |
+| Nothing kept: no session, logs, settings or notes in `~/.heart`, nothing in the project's `.heartcode/` | `--temp` (a throwaway copy, shared by the `--temp` runs going on at once, deleted after the last; the project's notes and research are read, and what the run adds goes with the copy)  With `--worktree` too, the worktree itself is made in the project's `.heartcode/worktrees/` (git needs it in the repository) |
 
 Tool names: HeartCode's own (`read_file`, `edit_file`, `write_file`, `run_command`, `search`,
 `list_files`, `changes`, `web_fetch`, `web_search`…) or Claude Code's (`Read`, `Edit`, `Write`, `Bash`,
@@ -169,10 +172,16 @@ nothing is sent to the model to find out. A model models.dev doesn't know works 
 assumptions, and the user can set it up on the settings page. Models that can't call tools still
 work, in a slower guided mode.
 
-The model in use knows the user's other models (in the user's order, with what each can do) and works with them through its `agent` tool: it asks a model that can for what it
+The model in use knows the user's other models and works with them through its `agent` tool.
+When the user picked helpers (on *Your models*: a switch per model and what it's good at: UI &
+visuals, Code & logic, Big & hard, Quick & cheap), it knows only those, and a job goes to the
+helper good at it (no model named: the first helper, in the user's order or by their provider
+ranking, as they chose); else it knows all of them, in the user's order, with what each can do. It
+asks a model that can for what it
 can't do itself (a model that can't see asks one that can about a screenshot: "which tiles show a
 chair?"), several at once when there are many images or parts, and a helper that fails is handed to
-the next capable model in the user's order until one does the job. A helper works until its job is done (no step
+the next capable model in the user's order (with helpers picked: the next helper, then the model in
+use) until one does the job. A helper works until its job is done (no step
 limit; `--max-turns` applies to it too). Their tokens are in `usage`, and each model's in
 `modelUsage`.
 
@@ -193,7 +202,7 @@ HEART_API_KEY=… heart -u https://api.groq.com/openai/v1 -m openai/gpt-oss-120b
 ```
 
 A model server on this machine (Ollama on :11434, LM Studio on :1234, llama.cpp on :8080) is
-found on its own. The user can also set everything up in a browser: `heart settings` (its link has
+found on its own while no provider is set up yet. The user can also set everything up in a browser: `heart settings` (its link has
 the machine's network address, so it opens from another device too, for HeartCode on a server), where
 **Test all** under *Your models* sends each model a short message to show it really answers, and how fast. A run that fails with a wrong key or an unknown model: ask the user to test it there.
 
@@ -201,7 +210,7 @@ the machine's network address, so it opens from another device too, for HeartCod
 
 | Flag | |
 |---|---|
-| `--append-system-prompt "<text>"` | your instructions for this run, at the end of the system prompt. HeartCode's own part then says less (no role of its own, no "stay in the project folder", no way of finishing of its own) and tells the model to follow yours where they differ; its `manage` tool is left out, and nothing from the run's messages is saved to its memory |
+| `--append-system-prompt "<text>"` | your instructions for this run, at the end of the system prompt. HeartCode's own part then says less (no role of its own, no "stay in the project folder", no way of finishing of its own) and tells the model to follow yours where they differ; its `manage` tool is left out (its memory still works: `--no-memory` turns that off) |
 | `--mcp-config <file or JSON>` | more MCP servers (repeatable); `--strict-mcp-config`: only those. The model sees every server's tools by name, one line each, and gets a tool's arguments when it uses it (a call that doesn't fit them comes back with what's wrong, not run). What a server says about using its tools comes once, with the first result of one of them |
 | `--skills-dir <folder>` | more skills (repeatable) |
 | `--no-memory` | nothing read or kept: no memory notes, no web pages saved in the project, no wrap-up at the end (see "What a run leaves") |
@@ -227,7 +236,8 @@ stopped when HeartCode exits.
 
 Before a task that changed files ends, another of the user's models (the same one when only one is
 used) reviews the work against the request in a request of its own; a NO sends it back to fix.
-The first file change of a task waits for the model's plan (its todo list). Changing files and
+The first file change of each message waits for the model's plan (its todo list): without one it
+isn't made, once (the model is told to write the plan first). Changing files and
 then saying it's done without running anything since sends it back to check. Nothing stops a
 task but `--max-turns`, `--max-retries` or an interrupt: a model going round in circles hands the
 work to the next model in the list. These requests are in `usage` and `modelUsage` too.
@@ -240,7 +250,8 @@ heart -p --input-format stream-json --output-format stream-json
 
 Stdin: one message per line, `{"type":"user","message":{"role":"user","content":"…"}}`.
 Stop the running one with `{"type":"control_request","request_id":"1","request":{"subtype":"interrupt"}}`;
-any other control request gets a `control_response` with `subtype: "error"` (not supported).
+`initialize` and `set_permission_mode` (`"mode"`: as `--permission-mode` takes it) are answered with
+`subtype: "success"`; any other control request gets a `control_response` with `subtype: "error"` (not supported).
 Stdout: one JSON event per line, `system`/`init` (its `tools` include the MCP servers' tools, each
 `mcp__<server>__<tool>`, and `mcp_servers` says which are `connected`), then `assistant` (text, thinking, `tool_use`),
 `user` (`tool_result`), and a `result` after each message. It runs until stdin closes. An MCP
@@ -257,13 +268,43 @@ several can run at once) come as `assistant` and `user` lines too, as Claude Cod
 subagent's: `parent_tool_use_id` is the id of the `agent` call they belong to (`null` for the main
 conversation's). The helper's last reply is that `agent` call's `tool_result`.
 
-Every `assistant` line's `message.model` is the model that wrote it (`provider/model`): after a
-fallback, the one that took over, not the one the run started with (the `init` line's `model`).
+**Which model does what.** Every line says which model it's from, as `provider/model`:
+
+- `assistant`: `message.model` is the model that wrote it (after a fallback, the one that took
+  over, not the `init` line's `model`; a helper's lines: the helper's model).
+- `user` (a `tool_result`): a top-level `model`, the model that made the call.
+- `system` lines (below): `model` on `status`, `helper` and `review`; `by` on each plan step a
+  helper took; `from` and `to` on `model_switch`.
+
 `modelUsage` in the `result` has each model that answered.
 
-Not in the stream: HeartCode's own prompts (the system prompt, its nudges), the review's verdict
-and the wrap-up. Helpers' work is in it: `agent` tool calls, with the helper's lines under them. Their tokens are in `usage` and
-`modelUsage`. Retries and switches to another model go to stderr with `--verbose`.
+**Why a reply ended.** Each `assistant` line's `message.stop_reason` is `end_turn`, `tool_use`,
+`max_tokens` (cut off: its provider's output limit, or a connection that ended early) or `refusal`
+(the provider's filter); the `result` has the final answer's.
+
+**Cut-off replies.** HeartCode sends no `max_tokens`, so each provider's own output limit applies.
+An answer cut off by it (or by a stream that ended without `[DONE]`) isn't taken as finished: the
+model is asked to go on where it stopped (up to 3 times in a row), and the answer is the pieces
+together. Each piece comes as its own `assistant` line (`stop_reason: max_tokens`), then the whole
+answer as one more `assistant` line, so the last `assistant` line before the `result` is always
+the answer as a whole (and so is `result`).
+
+**What the full screen shows, as `system` lines** (`{"type":"system","subtype":…,"session_id":…}`;
+a program that doesn't know a subtype can skip it, as for Claude Code):
+
+| `subtype` | Fields | When |
+|---|---|---|
+| `status` | `status`, `model` | what it's doing now, as the screen's spinner says it ("thinking", "waiting for …", "preparing read_file README.md", a running command's latest output line, read once a second); sent when it changes. A helper's: its model |
+| `todos` | `todos`: `[{ content, status, by? }]` | the whole plan, each time it changes; `status` is `pending`, `in_progress` or `completed`; `by`: the model a step was handed to |
+| `helper` | `tool_use_id`, `label`, `model`, `status` | a helper at work: `starting`, then what it's doing, then `done`. `tool_use_id` is its `agent` call (several parts of a plan run at once can share one); `label` its job |
+| `review` | `model`, `verdict` (`yes`/`no`), `issues` | another model's look at the changes before the answer; a `no` sends the work back to be fixed |
+| `model_switch` | `from`, `to`, `reason`, `place` | the user's list moved on: `from` failed (`reason`, e.g. `rate-limited (429)`), `to` answers now (`place`: its place in the list) |
+| `retry` | `attempt`, `delay_ms`, `error` | a request failed and is tried again after `delay_ms` |
+| `warning` | `message` | what the screen shows as a warning (e.g. a model models.dev doesn't know) |
+
+Not in the stream: HeartCode's own prompts (the system prompt, its nudges) and the wrap-up's
+requests (their `retry` lines can come after the `result`). Their tokens are in `usage` and
+`modelUsage`.
 
 ## Don't
 

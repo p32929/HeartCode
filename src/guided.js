@@ -13,12 +13,13 @@ import { runHooks } from './hooks.js'
 import { foldersOf } from './agent.js'
 import { c } from './ui.js'
 
-// The steps, as "name: description" lines in prompts/guided/actions.md.
-const ACTIONS = prompt('guided/actions')
-  .split('\n')
-  .map((l) => l.split(/:\s*/, 2))
-  .filter(([n, d]) => n && d)
-const DESC = Object.fromEntries(ACTIONS)
+// The steps, as "name: description" lines in prompts/guided/actions.md (read each time: a project's
+// own prompts and the settings page's edits apply at once)
+const actions = () =>
+  prompt('guided/actions')
+    .split('\n')
+    .map((l) => l.split(/:\s*/, 2))
+    .filter(([n, d]) => n && d)
 const TEST_FILE = /(^|[/._-])(tests?|spec|__tests__)([/._-]|$)/i
 
 // Obvious next steps are taken without asking: a weak model's effort goes into
@@ -39,7 +40,7 @@ export function nextActions(st) {
   if (!st.reads && st.hasFiles) first = ['read', 'search']
   else if (st.wantsChange && !st.edits) first = st.hasFiles ? ['edit', 'create', 'read'] : ['create']
   else first = ['finish', 'edit', 'run']
-  return [...new Set([...first, ...ACTIONS.map(([n]) => n)])].filter((n) => (n !== 'delegate' || st.canDelegate) && (n !== 'ask' || !st.noAsk) && n !== st.avoid) // a step that just repeated with nothing new isn't offered again (a small model picks it over and over)
+  return [...new Set([...first, ...actions().map(([n]) => n)])].filter((n) => (n !== 'delegate' || st.canDelegate) && (n !== 'ask' || !st.noAsk) && n !== st.avoid) // a step that just repeated with nothing new isn't offered again (a small model picks it over and over)
 }
 
 // A reply may be plain text or JSON like {"path": "a.js"}.
@@ -264,7 +265,8 @@ class Guided {
 
   async start(images) {
     this.images = images.length > 0
-    this.st.canDelegate = Boolean(this.s.team?.().some((t) => t.tools && (!this.images || t.images))) // one that sees them, with images
+    const team = this.s.team?.() ?? []
+    this.st.canDelegate = Boolean((team.some((t) => t.jobs) ? team.filter((t) => t.jobs) : team).some((t) => t.tools && (!this.images || t.images))) // one that sees them, with images; your helpers when you ticked some
     if (!this.s.isSub) Object.assign(this.s, { research: [], ran: [], dirsBefore: foldersOf(this.s.root) }) // this message's, for the wrap-up (a helper adds to its main agent's)
     if (images.length) await this.describeImages(images)
     this.autoRead()
@@ -273,7 +275,8 @@ class Guided {
     let last = ''
     let repeats = 0
     // No step limit (Esc stops it); a model doing the same thing three times in a row is stopped.
-    for (let step = 0; !this.s.maxTurns || step < this.s.maxTurns; step++) {
+    let step = 0
+    for (; !this.s.maxTurns || step < this.s.maxTurns; step++) {
       this.ui.spinner('deciding next step')
       const auto = autoAction(this.st)
       const action = auto ?? (await this.pickAction())
@@ -310,6 +313,10 @@ class Guided {
       }
       if (repeats === 1) this.note(null, 'warning', prompt('guided/note-repeated'))
     }
+    if (this.s.maxTurns && step >= this.s.maxTurns) {
+      if (!this.s.isSub) this.ui.warn(`stopped after ${this.s.maxTurns} steps (--max-turns); say "continue" to go on`)
+      throw Object.assign(new Error(`stopped after ${this.s.maxTurns} steps (--max-turns)`), { maxTurns: true })
+    }
     const answer = await this.finish()
     this.s.wrapUpLater?.(this.task, answer) // after the answer, beside what comes next (skipped for helpers and without memory)
     return answer
@@ -320,7 +327,7 @@ class Guided {
   async tool(name, args, run) {
     const { s } = this
     const id = `guided_${++this.calls}`
-    s.onEvent?.({ type: 'assistant', model: `${s.client.provider}/${s.client.model}`, content: '', toolCalls: [{ id, type: 'function', function: { name, arguments: JSON.stringify(args) } }] })
+    s.onEvent?.({ type: 'assistant', model: `${s.client.provider}/${s.client.model}`, content: '', toolCalls: [{ id, type: 'function', function: { name, arguments: JSON.stringify(args) } }], stop: 'tool_calls' })
     let out
     const pre = allowed(s, name) && (await runHooks(s, 'PreToolUse', { tool_name: name, tool_input: args }, this.signal))
     const notMine = name === 'write_file' && s.ownFiles && !s.ownFiles.includes(path.resolve(s.root, args.path))
@@ -333,7 +340,7 @@ class Guided {
       if (post.block) out += `\n\n${prompt('agent/hook', { reason: post.block, after: true })}`
     }
     if (!pre || pre.block || notMine) this.ui.result(c.red(clip(out, 120)))
-    s.onEvent?.({ type: 'tool', id, name, output: out })
+    s.onEvent?.({ type: 'tool', id, name, output: out, model: `${s.client.provider}/${s.client.model}` })
     return out
   }
 
@@ -358,14 +365,15 @@ class Guided {
   readNote(f, quiet = false) {
     const body = readFileTool(this.s.root, f, 1, undefined, 2000)
     this.note(`read:${f}`, `contents of ${f}`, clip(body, Math.floor(this.s.strat.context * 3.5 * 0.4)))
-    if (!quiet) this.ui.step('read', f)
+    if (!quiet) this.ui.step('read', f, this.s.client.model)
     this.st.reads++
     return body
   }
 
   async pickAction() {
     const names = nextActions(this.st)
-    const menu = names.map((n, i) => `${i + 1}. ${n} - ${DESC[n]}`).join('\n')
+    const desc = Object.fromEntries(actions())
+    const menu = names.map((n, i) => `${i + 1}. ${n} - ${desc[n]}`).join('\n')
     let q = prompt('guided/next-action', { menu, reply: '', count: names.length })
     for (let i = 0; i < 2; i++) {
       const res = await this.query(q, { room: 16, oneLine: true })
@@ -408,7 +416,7 @@ class Guided {
     const res = await this.query(prompt('guided/search'), { room: 40, oneLine: true })
     const q = unquote(answerText(res.content).split('\n')[0].trim())
     if (!q) return 'search:'
-    this.ui.step('search', q)
+    this.ui.step('search', q, this.s.client.model)
     const out = await this.tool('search', { query: q }, () => searchFiles(this.s.root, q))
     this.ui.result(out.startsWith('no matches') ? 'no matches' : `${out.split('\n').length} matches`)
     this.note(`search:${q}`, `search results for "${q}"`, out)
@@ -424,7 +432,7 @@ class Guided {
     let f = await this.pickFile(true, files)
     if (!f) return 'edit:'
     const old = fs.readFileSync(resolveIn(this.s.root, f), 'utf8')
-    this.ui.step('edit', f)
+    this.ui.step('edit', f, this.s.client.model)
     let next = null
     next = await this.editBlocks(f, old)
     if (next === null) next = await this.editRewrite(f, old)
@@ -546,7 +554,7 @@ class Guided {
     if (!rel) return 'create:'
     const abs = resolveIn(this.s.root, rel)
     const f = path.relative(this.s.root, abs)
-    this.ui.step('create', f)
+    this.ui.step('create', f, this.s.client.model)
     if (fs.existsSync(abs)) {
       const old = fs.readFileSync(abs, 'utf8')
       const next = await this.editRewrite(f, old)
@@ -600,7 +608,8 @@ class Guided {
   // Another of your models, one with tool calls, does the whole task; what it did goes in the notes.
   async delegate() {
     // the first of yours with tool calls (that sees images, if the task came with some)
-    const team = this.s.team().filter((t) => t.tools && (!this.images || t.images)).sort((a, b) => Boolean(b.jobs) - Boolean(a.jobs)) // your helpers first
+    const all = this.s.team()
+    const team = (all.some((t) => t.jobs) ? all.filter((t) => t.jobs) : all).filter((t) => t.tools && (!this.images || t.images)) // your helpers, when you ticked some
     const t = team[0]
     const args = { description: 'the task', prompt: this.task, model: `${t.provider} ${t.model}` }
     const done = await this.tool('agent', args, (id) => this.s.subagent(args, this.signal, id))

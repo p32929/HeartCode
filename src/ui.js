@@ -107,11 +107,14 @@ export function setTheme(name = 'dark') {
 }
 setTheme()
 
-// keybindings.json: { "alt+o": "cycle_permissions", "alt+g": "/toggle_thinking", "shift+tab": "none" }.
+// keybindings.json: { "alt+g": "cycle_permissions", "alt+r": "/rewind", "shift+tab": "none" }.
 // Actions: stop, send_first, send_all, queue_mode, cycle_permissions, newline, clear_input, scroll_up, scroll_down (a page),
-// scroll_line_up, scroll_line_down (3 lines), scroll_top, scroll_bottom, voice, new_tab,
+// scroll_line_up, scroll_line_down (3 lines), scroll_top, scroll_bottom, voice, toggle_thinking, background_log, new_tab,
 // close_tab, next_tab, prev_tab, tab_1…tab_9, none (turns a
 // built-in key off); anything else is sent as typed (a /command or a message). Ctrl+C stays Ctrl+C.
+// A key as people read it ("alt+shift+down" → "Alt+Shift+↓")
+const KEY_NAMES = { pageup: 'PgUp', pagedown: 'PgDn', up: '↑', down: '↓', left: '←', right: '→', ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift' }
+export const prettyKey = (k) => k.split('+').map((p) => KEY_NAMES[p] ?? (p.length === 1 ? p.toUpperCase() : p[0].toUpperCase() + p.slice(1))).join('+')
 const CONTROL_KEYS = { '\x1c': 'ctrl+\\', '\x1d': 'ctrl+]', '\x1e': 'ctrl+^', '\x1f': 'ctrl+_' } // no name from readline
 export const keyId = (key, s = '') => CONTROL_KEYS[key.sequence ?? s] ?? [key.ctrl && 'ctrl', key.meta && 'alt', key.shift && 'shift', key.name ?? s].filter(Boolean).join('+').toLowerCase()
 // The built-in keys use Alt/Option, never Ctrl (the user's rule; Ctrl keys also clash with the shell and
@@ -124,7 +127,7 @@ export const keyId = (key, s = '') => CONTROL_KEYS[key.sequence ?? s] ?? [key.ct
 // Alt+N/P, Alt+1…9: tabs; Shift+↑↓ and Alt+↑↓ scroll the conversation (as PgUp/PgDn and the mouse
 // wheel do), Alt+Shift+↑↓ to its top and bottom; Alt+O: all of the model's thinking, or its last lines.
 // keybindings.json can move any of them.
-export const DEFAULT_KEYS = { 'alt+o': '/toggle_thinking', 'alt+b': 'background_log', 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+shift+up': 'scroll_top', 'alt+shift+down': 'scroll_bottom', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
+export const DEFAULT_KEYS = { 'alt+o': 'toggle_thinking', 'alt+b': 'background_log', 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+shift+up': 'scroll_top', 'alt+shift+down': 'scroll_bottom', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
 export function loadKeys(file = path.join(HOME, 'keybindings.json')) {
   let raw = {}
   try {
@@ -747,6 +750,7 @@ export const PERMISSIONS = [
 ]
 
 let drewLast = null // the UI (tab) that last drew the screen: only its own last frame can be diffed against
+let drewAt = null // the tab whose frame lastFrame is (another tab drawing in between: it's no longer on screen)
 export class UI {
   constructor({ yes = false, input = process.stdin, output = process.stdout } = {}) {
     this.permission = yes ? 'all' : 'ask' // see PERMISSIONS
@@ -780,7 +784,7 @@ export class UI {
     this.frame = 0
     this.dialog = null // a box over the screen (the background commands' logs)
     this.waitingFor = null // () → the model a request waits on (the app's), for "waiting for <model>"
-    this.helpers = new Map() // helpers at work (agent.js): label → what it's doing now, shown under the spinner
+    this.helpers = new Map() // helpers at work (agent.js): label → { model, what it's doing now }, shown under the spinner
   }
 
   // A dialog: a box in the middle, 70% of the screen each way, the conversation going on around it;
@@ -971,7 +975,8 @@ export class UI {
     if (!open.length) return []
     const done = todos.length - open.length
     const mark = { pending: c.muted('☐'), in_progress: c.info('◐'), completed: c.faint('☑') }
-    const line = (t) => fit(`    ${mark[t.status]} ${t.status === 'in_progress' ? c.info(c.bold(t.content)) : t.status === 'completed' ? c.faint(t.content) : c.muted(t.content)}`, cols)
+    const by = (t) => (t.by ? c.faint(' · ') + (t.status === 'in_progress' ? c.info(t.by) : c.faint(t.by)) : '') // the model a part was given to
+    const line = (t) => fit(`    ${mark[t.status]} ${t.status === 'in_progress' ? c.info(c.bold(t.content)) : t.status === 'completed' ? c.faint(t.content) : c.muted(t.content)}${by(t)}`, cols)
     const shown = todos.length <= 8 ? todos : open.slice(0, 7)
     return [
       fit(`  ${c.muted('Plan')} ${c.faint(`· ${done} of ${todos.length} done`)}`, cols),
@@ -1015,6 +1020,7 @@ export class UI {
   // who: the model thinking, named over its thinking (helpers say their own: helperUI in agent.js)
   response(who) {
     const t0 = Date.now()
+    this.lastThought = null // the key shows this reply's thinking from now on, not an older one's
     const secs = () => duration(Date.now() - t0)
     const write = (x) => this.write(x)
     let think = null
@@ -1025,7 +1031,7 @@ export class UI {
       if (thought.trim() && !think) {
         // what it thought stays in the conversation: its last two lines (all of it: Alt+O)
         const last = thought.split('\n').map((l) => l.trim()).filter(Boolean).slice(-2)
-        this.print(c.faint(c.italic(`✻ ${who ? `${who} ` : ''}thought for ${secs()} · Alt+O shows all of it`)))
+        this.print(c.faint(c.italic(`✻ ${who ? `${who} ` : ''}thought for ${secs()}${this.keyFor('toggle_thinking') ? ` · ${this.keyFor('toggle_thinking')} shows all of it` : ''}`)))
         this.print(c.think(c.italic(last.map((l) => `  ${l}`).join('\n'))))
         this.lastThought = { who, text: thought } // Alt+O shows it, now that it's over (showLastThought)
       }
@@ -1041,6 +1047,8 @@ export class UI {
         }
         if (!think) {
           this.thinkTail = ''
+          this.replying = true // its own text shows it's at work: no spinner line after it
+          this.liveStep = null
           this.gap()
           this.print(c.faint(c.italic(`✻ ${who ? `${who} is thinking` : 'Thinking'}…`)))
           const style = (x) => c.think(c.italic(x))
@@ -1054,6 +1062,8 @@ export class UI {
         if (!t) return
         this.tokenAt = Date.now()
         if (!text) {
+          this.replying = true
+          this.liveStep = null
           if (this.label === 'thinking') this.label = 'answering'
           think?.end()
           this.gap()
@@ -1067,6 +1077,7 @@ export class UI {
         if (text) text.end()
         else if (think) think.end()
         else summary()
+        this.replying = false
         this.afterBlock = Boolean(text || think)
       },
     }
@@ -1116,8 +1127,10 @@ export class UI {
     // alternate screen · kitty keyboard protocol (Shift/Cmd+Enter are told apart) · bracketed paste
     // · mouse reports (SGR), when HeartCode takes the mouse
     this.out.write('\x1b[?1049h\x1b[H\x1b[2J\x1b[>1u\x1b[?2004h' + this.mouseOn)
-    this.frame0 = null
-    this.out.on('resize', () => this.render())
+    this.frame0 = this.lastFrame = null
+    // a new size: the whole screen again, after readline's own handler (it clears from its cursor down,
+    // which took the input box and the status bar with it)
+    this.out.on('resize', () => setImmediate(() => ((this.frameSize = this.lastFrame = null), this.render())))
     this.#rl()
     process.on('exit', () => this.leaveFullscreen())
   }
@@ -1135,10 +1148,16 @@ export class UI {
       this.rl?.resume()
       if (wasFull) {
         this.out.write('\x1b[?1049h\x1b[>1u\x1b[?2004h' + this.mouseOn)
-        this.frame0 = null
+        this.frame0 = this.lastFrame = null
         this.render()
       }
     }
+  }
+
+  // The key bound to an action now (keybindings.json can move or remove it), as people read it; null: none
+  keyFor(action) {
+    const k = Object.entries(this.keys ?? {}).find(([, v]) => v === action)?.[0]
+    return k ? prettyKey(k) : null
   }
 
   // Taking the mouse, or giving it back to the terminal, now (the settings page's switch)
@@ -1325,14 +1344,23 @@ export class UI {
   }
 
   // The conversation as screen rows (wrapped to the width; cached per line).
+  // While it works, the conversation shows where too: the step running (its ● spins until its
+  // result), else (waiting on the model between steps) a line of its own at the end, as the
+  // spinner under the conversation says it.
   #rows(cols) {
     if (this.wrapCols !== cols) [this.wrapped, this.wrapCols] = [[], cols]
+    const spin = this.timer && !this.asking ? c.brand(FRAMES[this.frame % FRAMES.length]) : null
+    let last = this.log.length - 1
+    while (last >= 0 && !this.log[last]) last--
+    const live = spin && this.liveStep && this.log[last] === this.liveStep ? last : -1 // only while nothing came after it
     const out = []
     this.log.forEach((line, i) => {
+      if (i === live) return out.push(...wrapHang(line.replace('●', spin), cols)) // not kept: it changes every frame
       const w = this.wrapped[i]
       if (!w || w.src !== line) this.wrapped[i] = { src: line, rows: wrapHang(line, cols) } // at spaces, wrapped rows under the text
       out.push(...this.wrapped[i].rows)
     })
+    if (spin && live === -1 && !this.replying && this.statusText) out.push(...wrapHang(`${spin} ${c.muted(this.statusText)}`, cols))
     return out
   }
 
@@ -1364,26 +1392,27 @@ export class UI {
       const label = this.#label()
       const waiting = request && !(this.tokenAt >= request) && this.beforeRetry === undefined
       const status = waiting ? `${/^(working|thinking|answering)$/.test(plainOf(label)) ? '' : `${label} · `}waiting for ${this.waitingFor?.() || 'the model'} ${short(Date.now() - request)}` : label
-      const timer = this.busySince ? [this.beforeRetry !== undefined && 'no answer yet', `${short(this.worked())} in all`, 'Esc to stop', this.thinkTail && 'Alt+O shows all thinking'].filter(Boolean).join(' · ') : ''
+      const timer = this.busySince ? [this.beforeRetry !== undefined && 'no answer yet', `${short(this.worked())} in all`, 'Esc twice to stop', this.thinkTail && this.keyFor('toggle_thinking') && `${this.keyFor('toggle_thinking')} shows all thinking`].filter(Boolean).join(' · ') : ''
       if (this.thinkTail) {
         // the thinking's last two lines (long ones wrapped), dim, changing as it comes
         const w = Math.max(20, cols - 6)
         const lines = this.thinkTail.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).flatMap((l) => l.match(new RegExp(`.{1,${w}}(\\s|$)|.{${w}}`, 'g')) ?? [l]).map((l) => l.trim()).filter(Boolean)
         for (const l of lines.slice(-2)) bottom.push(fit(`  ${c.think(c.italic(l))}`, cols))
       }
+      this.statusText = status // the same, at the end of the conversation (#rows)
       bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(status)}`, cols))
       if (timer) bottom.push(...wrapParts(timer, cols - 2).map((r) => fit(`  ${c.faint(r)}`, cols)))
       // helpers at work (agent.js keeps them in this.helpers: label → what it's doing), then the plan
       const helpers = [...this.helpers]
-      for (const [name, what] of helpers.slice(0, helpers.length > 6 ? 5 : 6)) bottom.push(fit(`  ${c.faint('◦')} ${c.muted(name)}${what ? c.faint(` · ${what}`) : ''}`, cols))
+      for (const [name, { model, what }] of helpers.slice(0, helpers.length > 6 ? 5 : 6)) bottom.push(fit(`  ${c.faint('◦')} ${c.muted(name)}${model ? `${c.faint(' · ')}${c.info(model)}` : ''}${what ? c.faint(` · ${what}`) : ''}`, cols))
       if (helpers.length > 6) bottom.push(c.faint(`  … ${helpers.length - 5} more`))
       bottom.push(...this.#todoLines(cols))
     }
-    if (this.scroll) bottom.push(c.dim(`  ↓ ${Number.isFinite(this.scroll) ? this.scroll : 'more'} lines below · held here while you read · Alt+Shift+↓ to the bottom`))
+    if (this.scroll) bottom.push(c.dim(`  ↓ ${Number.isFinite(this.scroll) ? this.scroll : 'more'} lines below · held here while you read${this.keyFor('scroll_bottom') ? ` · ${this.keyFor('scroll_bottom')} to the bottom` : ''}`))
     if (this.ahead.length) {
       const key = (k, d) => `${c.muted(k)} ${c.faint(d)}`
       const sep = c.ghost(' · ')
-      const queued = `${c.bright(`queued ${this.ahead.length}`)}${sep}${c.faint(`when done: ${this.queueMode === 'one' ? 'one by one' : 'all together'}`)}${sep}${[key('Alt+S', 'send first now'), key('Alt+A', 'send all now'), key('Alt+M', 'change when done')].join(sep)}`
+      const queued = `${c.bright(`queued ${this.ahead.length}`)}${sep}${c.faint(`when done: ${this.queueMode === 'one' ? 'one by one' : 'all together'}`)}${sep}${[['Esc', 'edit or cancel'], [this.keyFor('send_first'), 'send first now'], [this.keyFor('send_all'), 'send all now'], [this.keyFor('queue_mode'), 'change when done']].filter(([k]) => k).map(([k, d]) => key(k, d)).join(sep)}`
       bottom.push(...wrapParts(queued, cols - 2, sep).map((r) => fit(`  ${r}`, cols))) // on more lines, not cut
       for (const [i, l] of this.ahead.slice(0, 5).entries()) bottom.push(fit(`  ${c.accent(`${i + 1}.`)} ${c.muted(l.replace(/\s+/g, ' '))}`, cols))
       if (this.ahead.length > 5) bottom.push(c.faint(`  … ${this.ahead.length - 5} more`))
@@ -1416,12 +1445,18 @@ export class UI {
     }
     // only the rows that changed since the last frame are written (scrolling rewrote the whole screen
     // every time); a dialog or a selection over it, or a resize: all of them
-    const overlay = Boolean(this.dialog || asked || this.ssel || this.flash)
-    const was = !overlay && !this.frameOverlay && this.frameSize === `${rows}x${cols}` && drewLast === this ? this.frame0 : null // another tab drew since: all of it
+    // a dialog open in the last frame too: the same, as long as the box itself stays where it was (it's
+    // drawn over the rows again each frame; all of them once it moved, grew or closed). Writing every
+    // row each frame under it made it flicker, 12 times a second while the spinner turns.
+    // (a selection drawn over the screen: all of them, every time, as its old cells must go)
+    const overlay = this.ssel || this.flash ? 'selection' : this.dialog || asked ? 'dialog' : ''
+    const was = overlay !== 'selection' && overlay === this.frameOverlay && this.frameSize === `${rows}x${cols}` && drewLast === this ? this.frame0 : null // another tab drew since: all of it
     const frame = []
+    let every = s // all the rows, for when the box moved (decided once it's drawn)
     const put = (r, line, always = false) => {
       const text = row(line)
       frame[r] = text
+      every += `\x1b[${r};1H${text}`
       if (always || was?.[r] !== text) s += `\x1b[${r};1H${text}`
     }
     for (let r = 0; r < inputTop - 1; r++) {
@@ -1445,13 +1480,19 @@ export class UI {
     if (this.dialog || asked) {
       this.regions = new Map()
       const [box, cur] = this.#drawDialog(cols, rows, this.dialog ? { title: this.dialog.title, fill: this.dialog.fill, lines: (w, h) => this.dialog.draw(w, h) } : this.#question(cols, rows))
+      const rect = JSON.stringify(this.dialogAt)
+      if (rect !== this.frameRect) s = every // it moved, grew or shrank: the rows it no longer covers again
+      this.frameRect = rect
       s += box
       cursor = cur // a question: its cursor in the box; else hidden
     } else {
-      this.dialogAt = null
+      this.dialogAt = this.frameRect = null
       cursor = this.asking || typing ? `\x1b[${inputTop + input.cur.row - first};${input.cur.col + 1}H\x1b[?25h` : `\x1b[${inputTop};1H`
     }
-    out.write(s + this.#screenSelection() + cursor)
+    const frameText = `\x1b[?2026h${s}${this.#screenSelection()}${cursor}\x1b[?2026l` // shown at once where the terminal can (synchronized output), never half-drawn
+    if (frameText === this.lastFrame && drewAt === this) return // the same as on screen (a spinner tick under a dialog): nothing written
+    ;[this.lastFrame, drewAt] = [frameText, this]
+    out.write(frameText)
   }
 
   // A selection outside the conversation (in a dialog, the header, the input, the status bar), or a
@@ -1493,7 +1534,7 @@ export class UI {
       const bound = !(key.ctrl && key.name === 'c') && this.keys[keyId(key, s)] // ~/.heart/keybindings.json
       // a dialog: its keys, all of them; Esc (or its own key) closes it; Ctrl+C still stops and quits
       if (this.dialog && !(key.ctrl && key.name === 'c')) {
-        if (key.name === 'escape' || (bound && bound === this.dialog.toggle)) return this.setDialog(null)
+        if (key.name === 'escape' || (bound && bound.replace(/^\//, '') === String(this.dialog.toggle ?? '').replace(/^\//, ''))) return this.setDialog(null)
         return this.dialog.key?.(key, s), this.render()
       }
       if (this.recording) return this.recording.key(key, bound) // voice: Space, Enter, Esc; the rest waits
@@ -1650,15 +1691,40 @@ export class UI {
   }
 
   // input), sent when the answer is done, or at once with send_first / send_all. Esc stops the task.
+  // Queued messages taken back into the box (Esc, ↑): before what's typed there, one a line.
+  #unqueue(msgs) {
+    const rl = this.rl
+    rl.line = [...msgs, rl.line].filter((x) => x.trim()).join('\n')
+    rl.cursor = rl.line.length
+    this.escArm = 0
+    this.render()
+  }
   #typeAhead(s, key, write) {
     const rl = this.rl
     const m = this.menu
     const it = m.on && m.items[m.sel] // a suggestion is highlighted (commands/@files show while working too)
+    // Esc, a layer at a time, and the work goes on: the queued messages come back into the box (to
+    // change, or drop); then what's in the box is cleared; only then does Esc stop the work
     if (key.name === 'escape') {
       if (m.on) return (m.off = rl.line), this.#suggestWhileWorking() // first Esc just closes the suggestions
+      if (this.ahead.length) {
+        const n = this.ahead.length
+        this.#unqueue(this.ahead.splice(0))
+        return this.notice(`${n === 1 ? 'The queued message is' : `${n} queued messages are`} back in the box: change ${n === 1 ? 'it' : 'them'} and press Enter, or Esc to clear`, 4000)
+      }
+      if (rl.line.trim()) return this.clearInput(), (this.escArm = 0), this.notice('Cleared · Esc twice stops the answer', 2500)
       return this.escStop()
     }
+    // ↑ in an empty box: the last queued message back into it, to change or drop
+    if (key.name === 'up' && !rl.line && this.ahead.length && !it) return this.#unqueue([this.ahead.pop()])
     if (key.name === 'tab' && key.shift) return this.cyclePermission()
+    // Shift+Enter, Option+Enter: a new line in the box, as at the prompt (readline would send the line)
+    if (key.name === 'enter' || (key.name === 'return' && key.meta)) {
+      rl.line = rl.line.slice(0, rl.cursor) + '\n' + rl.line.slice(rl.cursor)
+      rl.cursor++
+      m.items = []
+      return this.render()
+    }
     if (key.name === 'pageup' || key.name === 'pagedown') return this.scrollBy(key.name === 'pageup' ? this.page() : -this.page())
     if (it && (key.name === 'up' || key.name === 'down')) {
       m.sel = (m.sel + (key.name === 'up' ? m.items.length - 1 : 1)) % m.items.length
@@ -1707,6 +1773,19 @@ export class UI {
     switch (what) {
       case 'none':
         return
+      // the model's thinking: all of it as it comes, or its last two lines; one just over, all of it in a
+      // box now (the key closes it). A key, not a message: nothing is sent, queued or kept in ↑
+      // after an answer: its whole thinking in a box (the key closes it again; how thinking shows
+      // stays as it was); else how thinking shows switches: all of it as it comes, or its last two
+      // lines (a thought shown in full already goes on in full until its reply ends)
+      case 'toggle_thinking':
+      case '/toggle_thinking': {
+        const t = !this.busySince ? this.lastThought : null
+        if (t?.text?.trim()) return this.showText(`${t.who ? `${t.who}'s thinking` : 'Thinking'}`, t.text.trim(), 'toggle_thinking')
+        this.showThinking = !this.showThinking
+        const k = this.keyFor('toggle_thinking') ?? 'the key'
+        return this.notice(this.showThinking ? `Thinking: all of it, as it comes · ${k}: its last two lines` : `Thinking: its last two lines from the next reply on · ${k}: all of it`, 2500)
+      }
       case 'new_tab':
       case 'close_tab':
       case 'next_tab':
@@ -2295,12 +2374,16 @@ export class UI {
   print(s = '') {
     this.write(s + '\n')
   }
-  step(name, detail = '') {
+  // who: the model that made this call (named after it)
+  step(name, detail = '', who = '') {
     if (this.afterBlock) this.gap()
     this.afterBlock = false
-    this.print(`${c.accent('●')} ${c.accent(c.bold(name))} ${c.info(detail)}`)
+    const line = `${c.accent('●')} ${c.accent(c.bold(name))} ${c.info(detail)}${who ? c.faint(` · ${who}`) : ''}`
+    this.print(line)
+    this.liveStep = line // its ● spins until its result (#rows)
   }
   result(text) {
+    this.liveStep = null
     this.print(`  ${c.ghost('⎿')} ${c.faint(text)}`)
   }
   warn(text) {
@@ -2349,6 +2432,7 @@ export class UI {
     if (this.busySince) return void (this.label = 'working') // still busy: keep spinning, generically
     clearInterval(this.timer)
     this.timer = null
+    this.liveStep = null
     if (this.full) this.render()
     else this.out.write('\r\x1b[K')
   }
