@@ -697,7 +697,7 @@ export function extraTools(s) {
   }
   if (!s.isSub && s.subagent) {
     const team = s.team?.() ?? []
-    const model = { type: 'string', description: 'Which of your models does the job ("provider model" from "Your other models"). Left out: yours, or with images you can\'t see, the first of yours that can.' }
+    const model = { type: 'string', description: team.some((t) => t.jobs) ? 'Which helper does the job ("provider model" from "Your helpers"). Left out: the first helper.' : 'Which of your models does the job ("provider model" from "Your other models"). Left out: yours, or with images you can\'t see, the first of yours that can.' }
     const images = { type: 'array', items: str, description: 'Image paths or URLs for the helper to look at. Needs a model that sees images.' }
     out.push({ name: 'agent', description: prompt('agent/tool-agent'), parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }) }, ['description', 'prompt']) })
   }

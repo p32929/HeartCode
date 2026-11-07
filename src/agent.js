@@ -12,7 +12,7 @@ import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, searchesOutside, e
 import { serversNote } from './lsp.js'
 import { newlyEnded, jobLine } from './background.js'
 import { loadHooks, runHooks } from './hooks.js'
-import { takeConfigErrors } from './config.js'
+import { takeConfigErrors, HELPER_JOBS } from './config.js'
 import { c, duration, Block, Markdown, color, diffLines, renderDiff } from './ui.js'
 
 // Images for a helper (the agent tool's "images"), as data: URLs: image URLs (fetched), data: URLs,
@@ -248,15 +248,19 @@ export class Session {
     }
     const name = (t) => `${t.provider} ${t.model}`
     const self = { provider: this.client.provider, model: this.client.model, images: this.strat.vision, tools: this.strat.actions === 'tools', self: true }
-    const all = [self, ...(this.team?.() ?? [])] // this model, then your others in your list's order
+    const team = this.team?.() ?? []
+    const helpers = helpersOf(team)
+    // the helpers you ticked (then this model), else this model and your others, in your list's order
+    const all = helpers ? [...helpers, self] : [self, ...team]
     const want = String(args.model ?? '').trim()
     // only one model available (a pinned model, or you have just one): helpers use it, whatever was asked
     const first = !want || all.length === 1 ? all[0] : (all.find((t) => name(t) === want || `${t.provider}/${t.model}` === want) ?? all.find((t) => t.model === want || want.endsWith(` ${t.model}`) || t.model.endsWith(`/${want}`)))
-    if (!first) return `error: no model "${want}". Yours: ${all.map(name).join(', ')}`
+    if (!first) return `error: no model "${want}". ${helpers ? 'Your helpers' : 'Yours'}: ${all.map(name).join(', ')}`
     // the one asked for first, then the others in your list's order: only those that can do the job
     // (images need a model that sees them)
     const able = (t) => !images.length || t.images
-    const order = [first, ...all.filter((t) => t !== first)].filter(able)
+    let order = [first, ...all.filter((t) => t !== first)].filter(able)
+    if (!order.length && helpers) order = [self, ...team].filter(able) // no helper sees images: any of yours that does
     if (!order.length) return 'error: none of your models can see images'
     const failed = []
     for (const [i, t] of order.entries()) {
@@ -579,14 +583,19 @@ const SYSTEM = (s) => {
     .join('\n\n')
 }
 
+// The helpers you ticked on Your models (jobs: what for), in your order; null when none are.
+export const helpersOf = (team) => (team.some((t) => t.jobs) ? team.filter((t) => t.jobs) : null)
+
 // Your other models and what each can do, for the agent tool's model (only when there are any): a
-// short line each, in your list's order.
+// short line each, in your list's order. With helpers ticked: only them, and what each is good at.
 const teamPrompt = (s) => {
   const team = s.team?.() ?? []
   if (!team.length) return ''
+  const helpers = helpersOf(team)
   const can = (t) => [t.tools === false && 'no tool calls', t.images && 'images', t.thinking && 'thinking'].filter(Boolean)
-  const line = (t) => `- ${t.provider} ${t.model}${can(t).length ? `: ${can(t).join(', ')}` : ''}`
-  return prompt('agent/team', { models: team.map(line).join('\n'), you: [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking'].filter(Boolean).join(', ') })
+  const good = (t) => (t.jobs?.length ? ` · good at: ${t.jobs.map((j) => HELPER_JOBS[j]?.[1]).filter(Boolean).join('; ')}` : '')
+  const line = (t) => `- ${t.provider} ${t.model}${can(t).length ? `: ${can(t).join(', ')}` : ''}${good(t)}`
+  return prompt('agent/team', { helpers: Boolean(helpers), models: (helpers ?? team).map(line).join('\n'), you: [s.strat.vision ? 'images' : 'no images', s.strat.thinking && 'thinking'].filter(Boolean).join(', ') })
 }
 
 const sizeOf = (m) =>
@@ -1433,7 +1442,9 @@ export async function review(s, task, answer, signal) {
   const ran = (s.ran ?? []).slice(-15).map((r) => `- ${clip(r.command.replace(/\s+/g, ' '), 160)} → ${r.result}`).join('\n')
   const ask = prompt('agent/review', { request: requestsOf(s.chat, 1200), emphasis: (s.chat?.choices ?? []).join('; '), plan: plan || '(none)', answer: clip(String(answer ?? ''), 3000), changes: diffs.join('\n\n'), ran: ran || '(nothing)' })
   const self = { provider: s.client.provider, model: s.client.model, self: true }
-  const team = (s.team?.() ?? []).filter((t) => t.tools !== false && !(t.provider === self.provider && t.model === self.model)) // your next two, in your order
+  const others = (s.team?.() ?? []).filter((t) => t.tools !== false && !(t.provider === self.provider && t.model === self.model))
+  const reviewers = others.filter((t) => t.jobs?.includes('code')).sort((a, b) => Boolean(b.thinking) - Boolean(a.thinking)) // ticked for Code & logic on Your models, the thinking ones first
+  const team = reviewers.length ? reviewers : others // else your next two, in your order
   for (const t of [...team.slice(0, 2), self]) {
     s.ui.spinner(`${t.model} is reviewing the work`)
     try {

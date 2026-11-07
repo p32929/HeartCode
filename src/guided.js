@@ -600,7 +600,7 @@ class Guided {
   // Another of your models, one with tool calls, does the whole task; what it did goes in the notes.
   async delegate() {
     // the first of yours with tool calls (that sees images, if the task came with some)
-    const team = this.s.team().filter((t) => t.tools && (!this.images || t.images))
+    const team = this.s.team().filter((t) => t.tools && (!this.images || t.images)).sort((a, b) => Boolean(b.jobs) - Boolean(a.jobs)) // your helpers first
     const t = team[0]
     const args = { description: 'the task', prompt: this.task, model: `${t.provider} ${t.model}` }
     const done = await this.tool('agent', args, (id) => this.s.subagent(args, this.signal, id))

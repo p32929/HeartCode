@@ -2,6 +2,23 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.58 (2026-11-07)
+
+- **Helpers you pick**: on Your models, a Helper column: a switch (can #1 start this model for a part
+  of a task?) and four pills for what it's good at: UI & visuals, Code & logic, Big & hard, Quick &
+  cheap (hover one: what it covers, and what a click does). A click saves at once; #1 is told only
+  your helpers and what each is good at, and a job with no model named goes to the first helper.
+  Reviews go to the Code & logic ones first. None picked: everything works as before.
+- **Suggest helpers**: every model that answered its test (#1 too, also ones without tool calls),
+  each with what it's good at: the top half of LMArena's web-app or coding ranking, thinking with a
+  big context or a place in its new agent and hardest-prompts rankings, a fast test. Shown dashed,
+  taken all at once or one by one. Not tested yet: a dialog offers Test all first, saying how many
+  of your models may charge for it.
+- **Picked for you**: Helpers in the list's settings: HeartCode picks them, again after Update model
+  info, a test run or a new order; a click on a pill makes them yours again.
+- **Helpers picked in your order or by provider**: beside Order providers; your list stays as it is.
+- A Helpers filter; Save order is now Save list.
+
 ## 0.1.57 (2026-11-06)
 
 - **The `/settings` link can be copied over SSH**: while the page is on, the mouse is the terminal's,

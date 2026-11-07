@@ -129,7 +129,7 @@ On **Models → Providers**:
 On **Models → Your list**:
 
 1. **Sort.** Click *Abilities*, then *Context*: the most capable models come first, the biggest
-   context window first among those. Click **Save order**.
+   context window first among those. Click **Save list**.
 2. **Drag rows** to fine-tune. #1 is the one HeartCode uses; the rest are its fallbacks, in order.
 3. **Test** (optional): **Test all** sends each model a short message and shows which answer and
    how fast (*Works?*). Sort by it to put the fastest first.

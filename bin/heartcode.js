@@ -2,7 +2,7 @@
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { Client, limitSaid, estMessages } from '../src/client.js'
-import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, TEMP, AUTO_MODEL, isAuto, parseModel, takeIn, whatOf, VERSION, speedOf } from '../src/config.js'
+import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, TEMP, AUTO_MODEL, isAuto, parseModel, takeIn, whatOf, VERSION, speedOf, jobsOf } from '../src/config.js'
 import { loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
 import { learnFromUsage, LIMIT_MS, RATE_CAP_MS } from '../src/context.js'
 import { Session, transcript, contextReport } from '../src/agent.js'
@@ -848,7 +848,18 @@ class App {
     const now = this.s?.client.rotation?.list[this.s.client.rotation.at] ?? this.sessionModels()[0]
     return this.sessionModels()
       .filter((t) => !(t.provider === now?.provider && t.model === now?.model))
-      .map((t) => ({ ...t, ...this.abilities(t) }))
+      .map((t) => ({ ...t, ...this.abilities(t), jobs: jobsOf(this.cfg.helpers?.[`${t.provider}/${t.model}`]) })) // jobs: ticked as a helper on Your models (what for)
+      .sort(this.byProvider()) // helpers picked in your list's order, or your provider ranking's (Your models)
+  }
+
+  // Your models' "Helper order": by your provider ranking, a sort that puts the higher-ranked
+  // provider's models first (each provider's in your list's order; providers not ranked after, A to
+  // Z); in your list's order, one that keeps it.
+  byProvider() {
+    const rank = this.cfg.helperOrder === 'provider' && Array.isArray(this.cfg.providerRank) ? this.cfg.providerRank : null
+    if (!rank) return () => 0
+    const at = (p) => (rank.includes(p) ? rank.indexOf(p) : rank.length)
+    return (a, b) => at(a.provider) - at(b.provider) || (at(a.provider) === rank.length ? a.provider.localeCompare(b.provider) : 0)
   }
 
   // What a model can do, from its saved profile or models.dev (guessed: neither knows it).

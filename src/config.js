@@ -19,7 +19,7 @@ export function projectDir(root, what) {
   return dir
 }
 
-const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director', 'theme', 'format', 'lsp', 'voice', 'queue', 'rotation', 'statusBar', 'log', 'logRequests', 'logDetail', 'logDays', 'telegram', 'search', 'testTimeout', 'updateCheck', 'logs', 'replyStart', 'replyIdle', 'mouse']
+const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director', 'theme', 'format', 'lsp', 'voice', 'queue', 'rotation', 'statusBar', 'log', 'logRequests', 'logDetail', 'logDays', 'telegram', 'search', 'testTimeout', 'updateCheck', 'logs', 'replyStart', 'replyIdle', 'mouse', 'helpers', 'helpersAuto', 'helperOrder', 'providerRank']
 // How long a reply may take (the settings page's Your models), in seconds, with the defaults:
 // replyStart: a reply must start within it, else that model failed; replyIdle: a reply that stops
 // sending for it is stalled.
@@ -27,6 +27,18 @@ export function speedOf(cfg) {
   const sec = (v, d, min, max) => (Number.isInteger(Number(v)) && Number(v) >= min && Number(v) <= max ? Number(v) : d)
   return { replyStart: sec(cfg.replyStart, 60, 5, 600), replyIdle: sec(cfg.replyIdle, 150, 10, 1800) }
 }
+// What a helper can be picked for (Your models' pills): [its label there, what #1 is told it's good at,
+// what the pill covers (its tooltip)]
+export const HELPER_JOBS = {
+  ui: ['UI & visuals', 'websites, app screens, games, animation, 3D, charts', 'Websites and landing pages, app screens, games and animation, 3D, charts and SVG: anything people look at.'],
+  code: ['Code & logic', 'backend, APIs, scripts, automation, fixing bugs, tests, reviewing changes', 'Backend and APIs, scripts and automation, fixing bugs, tests and refactoring. Reviews of the work go to these first.'],
+  hard: ['Big & hard', 'hard thinking, planning, long tasks with many steps, huge files', 'Planning and architecture, tricky logic, long tasks with many steps, huge files or whole folders.'],
+  quick: ['Quick & cheap', 'small jobs: searching and reading code, lookups, small edits', 'Searching and reading code, looking things up, small edits: simple jobs where fast and cheap matter most.'],
+}
+// a helper's jobs as saved, in today's names (picks from before the four: search, research → quick, review → code)
+const WAS = { search: 'quick', research: 'quick', review: 'code' }
+export const jobsOf = (jobs) => (Array.isArray(jobs) ? [...new Set(jobs.map((j) => WAS[j] ?? j).filter((j) => HELPER_JOBS[j]))] : undefined)
+export const helpersOf = (map) => Object.fromEntries(Object.entries(map ?? {}).map(([k, jobs]) => [k, jobsOf(jobs)]).filter(([, jobs]) => jobs))
 export const SPEED_LIMITS = { replyStart: [5, 600], replyIdle: [10, 1800] }
 
 const LOCAL_NAMES = { 11434: 'ollama', 1234: 'lmstudio', 8080: 'llamacpp' }

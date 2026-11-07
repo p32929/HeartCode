@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import os from 'node:os'
-import { HOME, saveConfig, readJson, writeJson, byName, takeIn, whatOf, VERSION, speedOf, SPEED_LIMITS } from './config.js'
+import { HOME, saveConfig, readJson, writeJson, byName, takeIn, whatOf, VERSION, speedOf, SPEED_LIMITS, HELPER_JOBS, helpersOf } from './config.js'
 import { newer } from './update.js'
 import { DEFAULT_SERVERS, mcpAuth, serverName } from './mcp.js'
 import { sections, BUILTIN_PROMPTS, prompt, reloadPrompts } from './prompts.js'
@@ -404,7 +404,44 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       const over = { ...runState(), over: true }
       run = null
       emit('testrun', over)
+      if (autoPick()) emit('helpers', { helpers: helpersOf(cfg.helpers) }) // picked for you: what the tests found counts
     }
+  }
+
+  const keyOf = (t) => `${t.provider}/${t.model}`
+
+  // Helpers picked from what's known: every model of yours (#1 too) that answered its test and whose
+  // provider is on, each with the jobs it's good at (at least one): UI & visuals and Code &
+  // logic when it's in the top half of LMArena's web-app or coding ranking; Big & hard when it thinks
+  // with a big context, or is in the top half of its agent (long real tasks) or hardest-prompts ranking; Quick & cheap when its test was faster than most (or it's good at none of the
+  // others). have: picks already made (a job a model has isn't picked again). { key: [jobs] }.
+  const pickHelpers = (have = {}) => {
+    const ranked = loadRankings()
+    const order = [{ provider: cfg.provider, model: cfg.model }, ...rotationOf(cfg).then]
+    const pool = order.map((t) => ({ ...t, can: testedOf(t), test: tests[keyOf(t)] })).filter((t) => !cfg.providers[t.provider]?.off && t.test?.ok && t.test.ms != null) // without tool calls too: a helper then works in guided mode
+    const top = (t, list) => ((x) => Boolean(x && x.rank / x.of <= 0.5))(rankIn(t.model, list, ranked))
+    const times = pool.map((t) => t.test.ms).sort((x, y) => x - y)
+    const fast = times[Math.floor((times.length - 1) / 2)] // the middle time: faster than that is quick
+    const picks = Object.fromEntries(pool.map((t) => {
+      const jobs = [top(t, 'webdev:webdev') && 'ui', top(t, 'text:coding') && 'code', ((t.can?.thinking && t.can.context >= 128_000) || top(t, 'agent:overall') || top(t, 'text:hard_prompts')) && 'hard', t.test.ms <= fast && 'quick'].filter(Boolean)
+      return [keyOf(t), jobs.length ? jobs : ['quick']]
+    }))
+    const out = {}
+    for (const [k, jobs] of Object.entries(picks)) {
+      const fresh = jobs.filter((j) => !have[k]?.includes(j))
+      if (fresh.length) out[k] = fresh
+    }
+    return out
+  }
+  // Picked for you: the helpers made again from what's known now (after Update model info, a test run,
+  // your list's order changed). true when they changed.
+  const autoPick = () => {
+    if (cfg.helpersAuto !== true) return false
+    const next = pickHelpers()
+    if (JSON.stringify(next) === JSON.stringify(helpersOf(cfg.helpers))) return false
+    cfg.helpers = Object.keys(next).length ? next : undefined
+    save('setting:helpers')
+    return true
   }
 
   const state = (ranked = loadRankings()) => ({
@@ -418,6 +455,10 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     order: [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then].map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t), ranks: ranksOf(t.model, ranked) })),
     rankings: ranked && { fetched: ranked.fetched, source: ranked.source },
     rotation: (({ then, ...opts }) => opts)(rotationOf(cfg)),
+    helpers: helpersOf(cfg.helpers), // { 'provider/model': [jobs] }
+    helperOrder: cfg.helperOrder === 'provider' ? 'provider' : 'own', // the order helpers are picked in: your list's, or your provider ranking's
+    helpersAuto: cfg.helpersAuto === true, // picked for you (pickHelpers), again whenever what's known changes: the models #1 may start as helpers, and what you picked each for
+    jobs: HELPER_JOBS,
     settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), logs: kindsOn(cfg), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg), testTimeout: Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10, ...speedOf(cfg) },
     logs: { runs: tilde(path.join(LOGS, 'runs')), requests: tilde(REQUESTS) },
     voice: cfg.voice ? JSON.stringify(cfg.voice, null, 2) : '',
@@ -440,6 +481,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     // LMArena's public rankings, fetched now (with models.dev: Update model info on Your models)
     'POST /api/rankings': async () => {
       if (!(await rankings({ now: true }))) throw new Error("couldn't get the rankings (huggingface.co)")
+      autoPick()
       return state()
     },
     'GET /api/log-size': () => logSize(),
@@ -574,6 +616,33 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       forgetTests()
       return state()
     },
+    // the helpers, all at once: { 'provider/model': [jobs] } (a model in it can be started as a helper; its
+    // jobs: what you picked it for, told to #1). Models no longer in your list are left out.
+    // picked for you (on), or by you (off: the helpers stay as they are, yours to change)
+    'POST /api/helpers/auto': ({ on }) => {
+      cfg.helpersAuto = on === true ? true : undefined
+      if (!autoPick()) save('setting:helpersAuto')
+      return { helpers: helpersOf(cfg.helpers), helpersAuto: cfg.helpersAuto === true }
+    },
+    // Suggest helpers: what would be picked, beside what you have (nothing saved)
+    'POST /api/helpers/suggest': () => ({ suggest: pickHelpers(helpersOf(cfg.helpers)) }),
+    'POST /api/helpers': ({ helpers }) => {
+      if (!helpers || typeof helpers !== 'object') throw new Error('helpers: an object')
+      cfg.helpersAuto = undefined // your own picks now
+      const yours = new Set(rotationOf(cfg).then.map((t) => `${t.provider}/${t.model}`).concat(cfg.provider && cfg.model ? [`${cfg.provider}/${cfg.model}`] : []))
+      const clean = helpersOf(Object.fromEntries(Object.entries(helpers).filter(([k]) => yours.has(k))))
+      cfg.helpers = Object.keys(clean).length ? clean : undefined
+      save('setting:helpers')
+      return { helpers: helpersOf(cfg.helpers), helpersAuto: false } // only these: the page saves a click at once, and the whole state of a long list takes seconds
+    },
+    // the order helpers are picked in: 'own' (your list's) or 'provider' (your provider ranking's, each
+    // provider's in your list's order; rank: the ranking as the page has it, kept for HeartCode to use)
+    'POST /api/helper-order': ({ by, rank }) => {
+      cfg.helperOrder = by === 'provider' ? 'provider' : undefined
+      cfg.providerRank = cfg.helperOrder && (Array.isArray(rank) ? rank.filter((x) => typeof x === 'string') : readJson(PREFS, {}).rank)
+      save('setting:helperOrder')
+      return { helperOrder: cfg.helperOrder ?? 'own' }
+    },
     // the model list, in order (#1 is the model), and when to go on to the next
     'POST /api/order': ({ list, on, retries, next }) => {
       if (!Array.isArray(list)) throw new Error('a list of models is needed')
@@ -596,6 +665,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       ownWrite = Date.now()
       saveConfig(cfg)
       changed(changed1 ? 'model' : 'setting:rotation')
+      autoPick() // picked for you: from your list as it is now
       test(clean)
       forgetTests()
       return state()

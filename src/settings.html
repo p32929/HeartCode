@@ -307,6 +307,7 @@
   .prov-h .by-name input { width: 190px; height: 28px; padding: 0 9px; font-size: 12px; font-family: var(--mono); background: transparent; }
   .prov-h .by-name button, .prov-h > button.small { height: 28px; }
   dialog#gone { width: min(560px, 92vw); }
+  dialog#h-test { width: min(560px, 92vw); }
   dialog#gone h2 { color: var(--err); font-family: inherit; font-size: 18px; }
   dialog#gone::backdrop { background: rgba(0, 0, 0, .75); }
   .hello-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
@@ -427,7 +428,7 @@
   .mt-more-pill button:hover:not(:disabled) { background: var(--hover); }
   .mt-more-pill button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .mt-more-pill button:disabled { color: var(--faint); cursor: default; }
-  .mt, .mt-h.mt-hpick { min-width: 1310px; } /* the columns below, their gaps and padding: the header, the selection bar and the rows line up (the rows are drawn a screenful at a time, so this can't come from them) */
+  .mt, .mt-h.mt-hpick { min-width: 1766px; } /* the columns below, their gaps and padding: the header, the selection bar and the rows line up (the rows are drawn a screenful at a time, so this can't come from them) */
   .mt-h input[type=checkbox], .mtable input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(--brand); cursor: pointer; }
   .mtable li.picked { background: var(--brand-soft); }
   .mt-rules { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 24px; padding: 12px 18px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
@@ -449,9 +450,9 @@
   .pill .again:hover:not(:disabled) { color: var(--text); }
   .pill.on { border-color: var(--accent); background: var(--accent-soft); }
   .pill.on .again { border-left-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-  .mt-h, .mtable li { display: grid; grid-template-columns: 14px 18px 40px minmax(200px, 1fr) 104px 62px 46px 66px 56px 76px 76px 76px 112px 86px 124px; /* the last: Test · Request · Edit · ✕, as wide as they are */ align-items: center; column-gap: 6px; padding: 8px 18px; }
+  .mt-h, .mtable li { display: grid; grid-template-columns: 14px 18px 40px minmax(200px, 1fr) 104px 450px 62px 46px 66px 56px 76px 76px 76px 112px 86px 124px; /* the last: Test · Request · Edit · ✕, as wide as they are */ align-items: center; column-gap: 6px; padding: 8px 18px; }
   .mt-h button.mid, .mtable .mid { text-align: center; }
-  .mt-h > :nth-child(14), .mtable .try { padding-left: 12px; } /* Works?: a little room after the right-aligned price */
+  .mt-h > :nth-child(15), .mtable .try { padding-left: 12px; } /* Works?: a little room after the right-aligned price */
   .mtable li .acts { justify-content: flex-start; }
   .mt-h { border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 500; color: var(--faint); padding-top: 10px; padding-bottom: 10px; background: var(--panel2); }
   .mt-h button { display: inline; border: 0; background: none !important; padding: 0; font: inherit; color: inherit; text-align: left; white-space: nowrap; transform: none !important; }
@@ -473,6 +474,28 @@
   .mtable .m { font-family: var(--mono); font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mtable .p { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mtable .yes { color: var(--ok); }
+  /* Helper: a switch (can #1 start it for side jobs?), then what it's good at, as pills */
+  .hp { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .hp > span:first-child { display: inline-flex; }
+  .hp .sw { display: inline-block; width: 30px; height: 18px; margin: 0 4px 0 0; }
+  .hp .sw i::after { width: 12px; height: 12px; }
+  .hp .sw input:checked + i::after { transform: translateX(12px); }
+  .mtable li .hp .jp { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line-strong); background: transparent; font-size: 11.5px; font-weight: 400; color: var(--faint); white-space: nowrap; cursor: pointer; transition: background .15s, color .15s, border-color .15s, transform .1s; }
+  .mtable li .hp .jp:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+  .mtable li .hp .jp:active:not(:disabled) { transform: scale(.95); }
+  .mtable li .hp .jp:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .mtable li .hp .jp.on { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--text); font-weight: 500; }
+  .mtable li .hp .jp.on::before { content: '✓'; color: var(--accent); font-weight: 700; }
+  .mtable li .hp .jp.sug { border-style: dashed; border-color: var(--accent); color: var(--accent); }
+  .mtable li .hp .jp.sug::before { content: '+'; font-weight: 700; }
+  .mtable li .hp.off .jp:not(.sug) { opacity: .6; }
+  /* the helper suggestions, waiting for a yes: beside the list's buttons */
+  .hsug { display: inline-flex; align-items: center; gap: 6px; padding: 2px 3px 2px 10px; border: 1px dashed var(--accent); border-radius: 10px; background: var(--accent-soft); color: var(--text); white-space: nowrap; }
+  .hsug .ic { color: var(--accent); }
+  .hbar { display: contents; }
+  .mtable li .hp .jp.saving, .hp .saving .sw { opacity: .55; animation: hp-pulse .9s ease-in-out infinite alternate; pointer-events: none; } /* its save on its way */
+  @keyframes hp-pulse { to { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .mtable li .hp .jp.saving, .hp .saving .sw { animation: none; } }
   .mtable .no { color: var(--faint); }
   .mtable .src { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
   .mtable .src.warn { color: var(--warn); }
@@ -541,6 +564,10 @@
   button.sorting::after { content: ''; display: inline-block; width: 9px; height: 9px; margin-left: 6px; vertical-align: -1px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; }
   /* Your models: the header's buttons, the list's settings, the toolbar (sticky), the table */
   .mt-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .h-order { display: inline-flex; align-items: center; gap: 8px; margin-right: 4px; }
+  .h-order .mt-setl { white-space: nowrap; }
+  .mt-actions .seg { height: 32px; }
+  .mt-actions .seg label { padding: 0 11px; font-size: 12.5px; }
   .mt-sets { display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 12px 18px 4px; } /* with the filters below: one toolbar, 8px between its two lines */
   .mt-mode-sets { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
   .mt-set { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -644,6 +671,8 @@
   #tip dt { color: var(--faint); }
   #tip dd { margin: 0; }
   #tip .tdesc { color: var(--muted); margin-top: 10px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  #tip .tjob { font-weight: 650; font-size: 13.5px; }
+  #tip .tcover { color: var(--muted); margin-top: 6px; line-height: 1.5; }
   #tip .thint { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--accent); font-weight: 600; }
   #toast { position: fixed; bottom: 24px; left: 50%; transform: translate(-50%, 8px); padding: 10px 18px; border-radius: 12px; background: var(--text); color: var(--bg); font-weight: 500; box-shadow: var(--shadow-pop); opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; max-width: calc(100% - 32px); z-index: 10; }
   #toast.show { opacity: 1; transform: translate(-50%, 0); }
@@ -1093,6 +1122,12 @@
   <p class="sub">Skills, commands, MCP servers, instructions and memory found in Claude Code, Cursor, Gemini CLI and Codex. Tick what to bring into HeartCode — nothing already here is overwritten.</p>
   <div id="imp-list" class="imp-list"></div>
   <div class="actions"><span class="spacer"></span><button id="imp-cancel" type="button">Cancel</button><button class="primary" id="imp-go" type="button">Import selected</button></div>
+</dialog>
+<dialog id="h-test" aria-labelledby="h-test-title">
+  <h2 id="h-test-title">Test your models first</h2>
+  <p class="sub">Helpers are picked from the models that answer a short test. None of yours has been tested yet.</p>
+  <p class="sub" id="h-test-cost"></p>
+  <div class="actions"><span class="spacer"></span><button id="h-test-no" type="button" class="ghost">Cancel</button><button id="h-test-go" type="button" class="primary">Test all, then pick</button></div>
 </dialog>
 <dialog id="gone" aria-labelledby="gone-title">
   <h2 id="gone-title">Disconnected</h2>
@@ -1761,6 +1796,7 @@ async function tryAll(only) {
     const { run } = await api('/api/tests/start', only ? { only: only.map(({ provider, model }) => ({ provider, model })) } : {})
     showRun(run)
   } catch (e) {
+    afterTests = null // no run: nothing to do after it
     toast(e.message, true)
   }
 }
@@ -1779,6 +1815,12 @@ function showRun(run) {
   if (!testingAll) {
     for (const [key, r] of Object.entries(TRIES)) if (r.going) r.before ? (TRIES[key] = r.before) : delete TRIES[key] // stopped before it: as it was
     job('test-all')
+    if (run?.over && afterTests) {
+      const then = afterTests
+      afterTests = null
+      if (then === 'suggest') suggestNow()
+      else setAuto(true, $('h-auto'))
+    } else if (!run?.over) afterTests = null // never started
     if (run?.over) toast(`${run.stopping ? `stopped after ${run.done} of ${run.total}: ` : ''}${run.good} of ${run.done} work${run.good === run.done ? '' : `; ${run.done - run.good} don't (Works? says why, on hover)`}`, run.good < run.done)
   } else
     job('test-all', {
@@ -1963,7 +2005,7 @@ function sortable(v, onMove) {
   const scrolled = () => (scroller === window ? scrollY : scroller.scrollTop)
   box.addEventListener('pointerdown', (e) => {
     const li = e.target.closest('li.in')
-    if (!li || e.button !== 0 || e.target.closest('button, a, input, select, textarea') || !box.classList.contains('drag')) return
+    if (!li || e.button !== 0 || e.target.closest('button, a, input, select, textarea, .hp') || !box.classList.contains('drag')) return
     if (e.pointerType !== 'mouse' && !e.target.closest('.grip')) return // a finger scrolls the list, except on the grip
     const n = v.items
     const from = Number(li.dataset.i)
@@ -2351,6 +2393,7 @@ $('pr-save').onclick = () => {
   RANK = [...list, ...RANK.filter((n) => !list.includes(n))] // providers not in your list now keep their place for later
   savePref('rank', RANK)
   $('pr').close()
+  if (S.helperOrder === 'provider') api('/api/helper-order', { by: 'provider', rank: RANK }).catch((e) => toast(e.message, true)) // helpers by the new ranking
   setSort(SORT.some((x) => x.key === 'provider') ? SORT : [{ key: 'provider', dir: 'down' }, ...SORT]) // sorted by it now
 }
 const firstDir = (key) => COLS[key].first // up: A to Z, low to high
@@ -2391,9 +2434,9 @@ function sorted(order) {
 }
 const dirText = (key, dir) => COLS[key].words[dir === 'up' ? 0 : 1] + (key === 'works' ? ' (then not tested, then not working)' : '')
 // Filters on the Your models page: which models are shown (and tested by "Test N shown", counted,
-// sorted, selected by "select all", saved first by Save order). Combined: a model shows when it passes
+// sorted, selected by "select all", saved first by Save list). Combined: a model shows when it passes
 // all of them. Kept with the page's choices.
-const NO_FILTER = { text: '', provider: '', works: '', context: 0, tools: false, thinking: false, images: false, free: false }
+const NO_FILTER = { text: '', provider: '', works: '', context: 0, tools: false, thinking: false, images: false, free: false, helpers: false }
 let FILTER = { ...NO_FILTER }
 let filtersLoaded = false
 const filtering = () => Object.keys(NO_FILTER).some((k) => FILTER[k] !== NO_FILTER[k])
@@ -2413,6 +2456,7 @@ function passes(t, skip) {
   const c = can(t)
   if ((f.tools && !c.tools) || (f.thinking && !c.thinking) || (f.images && !c.images)) return false
   if (f.free && !(t.price?.input === 0 && t.price?.output === 0)) return false
+  if (f.helpers && !helpers()[keyOf(t)] && !HSUG?.[keyOf(t)]) return false // and the ones suggested, while they are
   return true
 }
 const setFilter = (change) => {
@@ -2446,7 +2490,8 @@ function filterBarOf(order, counts = {}) {
         toggle('tools', 'Tools', 'only models that call tools'),
         toggle('thinking', 'Thinking', 'only models that think'),
         toggle('images', 'Images', 'only models that see images'),
-        toggle('free', 'Free', 'only models that cost nothing, in and out')))
+        toggle('free', 'Free', 'only models that cost nothing, in and out'),
+        toggle('helpers', 'Helpers', 'only your helpers (the models #1 can start for side jobs), and the ones suggested')))
   }
   const bar = filterBar
   const focused = (el) => document.activeElement === el
@@ -2503,7 +2548,7 @@ function drawMine(s) {
     slots.forEach((k, m) => (all[k] = list[m]))
     return keep(all, true)
   }
-  // Save order: the models HeartCode uses become the ones shown, in the order shown. Filtered: only
+  // Save list: the models HeartCode uses become the ones shown, in the order shown. Filtered: only
   // those (asked first; the others stay under Providers, to add back any time)
   const saveList = () => {
     if (filtered && !confirm(`HeartCode will use only these ${n(view.length)}, in this order.\n\nThe other ${n(order.length - view.length)} stay under Providers: add any back whenever you like.`)) return
@@ -2522,7 +2567,15 @@ function drawMine(s) {
   $('mt-lead').textContent = 'The models HeartCode uses, in your order: #1 answers, the next one when it fails.'
   const busy = locked()
   $('mt-actions').inert = busy
+  // the order helpers are picked in when #1 starts them: your list's, or your provider ranking's
+  const helperOrder = (by) => api('/api/helper-order', { by, rank: RANK }).then((r) => ((S.helperOrder = r.helperOrder), drawMine(S)), (e) => toast(e.message, true))
+  const orderBy = h('span', { className: 'h-order' }, h('span', { className: 'mt-setl', textContent: 'Helpers picked' }),
+    h('div', { className: 'seg', role: 'radiogroup', 'aria-label': 'The order helpers are picked in' },
+      [['own', 'in your order', 'when #1 starts helpers, it picks from them in your list\'s order (the first one that fits the job)'], ['provider', 'by provider', 'when #1 starts helpers, it picks from them by your provider ranking (Order providers), each provider\'s in your list\'s order. Your list itself stays as it is']].map(([v, t, about]) =>
+        h('label', { className: (S.helperOrder ?? 'own') === v ? 'on' : '', title: about },
+          h('input', { type: 'radio', name: 'helper-order', checked: (S.helperOrder ?? 'own') === v, onchange: () => helperOrder(v) }), t))))
   put($('mt-actions'),
+    order.some((t) => t.provider !== order[0]?.provider) ? orderBy : null, // one provider: nothing to order by
     ((why) => h('span', { title: why ?? '' }, h('button', { className: 'small', textContent: 'Order providers', disabled: Boolean(why), title: why ? '' : 'drag your providers into order; the Provider column sorts by it', onclick: openRanking })))( // disabled: why, on a span (a disabled button shows no tooltip in every browser)
       !order.some((t) => t.provider !== order[0]?.provider) ? 'All your models are from one provider: nothing to order' : null),
     h('button', { className: 'small', textContent: 'Update model info', disabled: !order.length, title: `what each model can do (context, tools, thinking, images, price) from models.dev, and its places in LMArena's public rankings (coding, web apps, vision${S.rankings ? `; rankings from ${new Date(S.rankings.fetched).toLocaleDateString()}` : ''})`, onclick: () => lookUp() }))
@@ -2555,14 +2608,19 @@ function drawMine(s) {
         } }), h('span', { className: 'unit', textContent: 'sec' })),
       cell('New message to', 'the model a new message goes to first',
         h('select', { onchange: (e) => saveOrder(S.order, 'saved', { next: e.target.value }) },
-          [['first', '#1'], ['stay', 'the last that worked']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.next === v }))))))
+          [['first', '#1'], ['stay', 'the last that worked']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.next === v })))),
+      cell('Helpers', 'who picks the helpers (the Helper column): HeartCode, from the models that answered their test and the rankings, again whenever those change; or you, with the pills',
+        h('select', { id: 'h-auto', onchange: (e) => setAuto(e.target.value === 'auto', e.target) },
+          [['auto', 'picked for you'], ['manual', 'you pick']].map(([v, t]) => h('option', { value: v, textContent: t, selected: (S.helpersAuto ? 'auto' : 'manual') === v }))))))
 
   // --- beside the filters: what's shown · what you do with it (the sorts show in the column heads) ---
   const line = h('div', { className: 'mt-line' },
     h('span', { className: 'count', title: SORT.length ? `sorted by ${SORT.map(({ key, dir }) => `${COLS[key].label} ${COLS[key].words[dir === 'up' ? 0 : 1]}`).join(', then ')}; ties keep your order` : '' }, filtered ? [h('b', { textContent: n(shown.length) }), ` of ${n(order.length)}`] : [h('b', { textContent: n(order.length) }), ` model${order.length === 1 ? '' : 's'}`]),
     filtering() || SORT.length ? h('button', { className: 'small ghost', textContent: 'Clear', title: 'every filter and the sort off: your whole list, in your order', onclick: clearView }) : null,
+    order.length > 1 ? drawHelperBar() : null,
     h('button', { className: 'small', textContent: filtered ? `Test ${n(shown.length)}` : 'Test all', disabled: testingAll || !shown.length, title: `send ${filtered ? 'the models shown' : 'each model'} a short message to see which really answer, and how fast`, onclick: () => tryAll(filtered ? shown : order) }),
-    h('button', { className: 'small primary', textContent: filtered ? `Use only these ${n(view.length)}` : 'Save order', disabled: !view.length || order.length < 2, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : S.settings.modelChoice === 'fit' ? 'keep the order shown: the orchestrator sees the others in this order, and a failed model goes to the next' : 'HeartCode uses them in the order shown (#1 first)', onclick: saveList }))
+    // not on the helpers' view: they're not a list to keep only
+    filtered && FILTER.helpers ? null : h('button', { className: 'small primary', textContent: filtered ? `Use only these ${n(view.length)}` : 'Save list', disabled: !view.length || order.length < 2, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : S.settings.modelChoice === 'fit' ? 'keep the order shown: the orchestrator sees the others in this order, and a failed model goes to the next' : 'save your list as shown: HeartCode uses them in this order (#1 first)', onclick: saveList }))
 
   // --- the table ---
   const all = view.length > 0 && view.every((t) => PICKED.has(keyOf(t)))
@@ -2582,7 +2640,7 @@ function drawMine(s) {
           h('button', { className: 'small ghost', textContent: 'Invert', title: "select the ones shown that aren't selected, unselect the ones that are", onclick: () => (view.forEach((t) => (PICKED.has(keyOf(t)) ? PICKED.delete(keyOf(t)) : PICKED.add(keyOf(t)))), (lastPicked = null), drawMine(S)) }),
           h('button', { className: 'small ghost', textContent: 'Select none', onclick: () => (PICKED.clear(), drawMine(S)) })))
     : h('div', { className: 'mt mt-h' }, h('span'), selectAll,
-        h('span', { textContent: '#', title: 'its place in your list' }), head('model'), head('provider'), head('context', 'num'), head('tools', 'mid'), head('thinking', 'mid'), head('images', 'mid'), head('coding', 'num'), head('web', 'num'), head('vision', 'num'), head('price', 'num'), head('works'), h('span', { className: 'num', textContent: '' }))
+        h('span', { textContent: '#', title: 'its place in your list' }), head('model'), head('provider'), h('span', { textContent: 'Helper', title: '#1 can hand a part of a task to a helper. Switch a model on, and pick what it\'s good at (hover a pill to see what it covers): #1 is told, and picks by it. None switched on: helpers run on the model that answers.' }), head('context', 'num'), head('tools', 'mid'), head('thinking', 'mid'), head('images', 'mid'), head('coding', 'num'), head('web', 'num'), head('vision', 'num'), head('price', 'num'), head('works'), h('span', { className: 'num', textContent: '' }))
   const table = view.length ? h('ol', { className: 'mtable' + (view.length < 2 || busy ? '' : ' drag') }) : null
   // ticked or not; with Shift, every row from the last one ticked to this one
   const pick = (i, e) => {
@@ -2667,6 +2725,150 @@ const src = (t) => {
 // a row of the table: one model of your list, in the order shown (at: its place in your order)
 const money = (x) => (x == null ? '–' : x === 0 ? '$0' : usd(x))
 const priceOf = (t) => (t.price?.input == null && t.price?.output == null ? '–' : t.price.input === 0 && t.price.output === 0 ? 'free' : `${money(t.price.input)} / ${money(t.price.output)}`)
+// --- Helpers: the models #1 may start for side jobs, and what each is good at (S.helpers: { key: [jobs] }).
+// A click saves at once, in the background: only that row's cell is redrawn, and the button clicked
+// shows it's saving. MINE: your latest picks while saves are on their way (each save sends them all,
+// one after another, so quick clicks don't undo each other).
+// HSUG: suggestions not taken yet ({ key: [jobs] }), shown dashed until you take or dismiss them.
+let HSUG = null
+let MINE = null
+let saving = Promise.resolve()
+let unsaved = 0
+const SAVING = new Set() // 'key|job' (or 'key|on'): the buttons whose save is on its way
+const helpers = () => MINE ?? S.helpers ?? {}
+let helperBar = null // the toolbar's part for helpers: the same element every time, filled in place
+const redrawCell = (k) => {
+  const li = document.querySelector(`.mtable li[data-key="${CSS.escape(k)}"]`)
+  const at = S.order.findIndex((t) => keyOf(t) === k)
+  if (li && at >= 0) li.querySelector('.hp')?.replaceWith(helperCell(S.order[at], at))
+}
+function saveHelpers(next, marks = [], done) {
+  MINE = next
+  unsaved++
+  for (const m of marks) SAVING.add(m)
+  const cells = new Set(marks.map((m) => m.split('|')[0]))
+  cells.forEach(redrawCell)
+  drawHelperBar()
+  saving = saving
+    .then(() => api('/api/helpers', { helpers: next }))
+    .then((r) => ((S.helpers = r.helpers), (S.helpersAuto = r.helpersAuto), $('h-auto') && ($('h-auto').value = r.helpersAuto ? 'auto' : 'manual'), done && toast(done)))
+    .catch((e) => toast(e.message, true))
+    .finally(() => {
+      for (const m of marks) SAVING.delete(m)
+      if (!--unsaved) MINE = null // all saved: what the server has is yours
+      cells.forEach(redrawCell)
+      drawHelperBar()
+    })
+  return saving
+}
+function setHelper(k, jobs, mark) {
+  const next = { ...helpers() }
+  jobs ? (next[k] = jobs) : delete next[k]
+  if (HSUG?.[k] && jobs) {
+    const left = HSUG[k].filter((j) => !jobs.includes(j))
+    left.length ? (HSUG[k] = left) : delete HSUG[k]
+    if (!Object.keys(HSUG).length) HSUG = null
+  }
+  saveHelpers(next, [`${k}|${mark}`])
+}
+function helperCell(t, at) {
+  const k = keyOf(t)
+  const jobs = helpers()[k]
+  const sug = HSUG?.[k] ?? []
+  const busy = locked()
+  return h('span', { className: 'hp' + (jobs ? '' : ' off') },
+    h('span', { className: SAVING.has(`${k}|on`) ? 'saving' : '', title: jobs ? 'a helper: #1 can start it for side jobs (click: not a helper)' : 'not a helper (click: #1 can start it for side jobs)' },
+      sw({ checked: Boolean(jobs), disabled: busy, 'aria-label': `${t.model} is a helper`, onchange: (e) => setHelper(k, e.target.checked ? (jobs ?? []) : null, 'on') })),
+    Object.entries(S.jobs ?? {}).map(([j, [label, , covers]]) => {
+      const has = Boolean(jobs?.includes(j))
+      const sugd = !has && sug.includes(j)
+      const pill = h('button', { type: 'button', className: 'jp' + (has ? ' on' : sugd ? ' sug' : '') + (SAVING.has(`${k}|${j}`) ? ' saving' : ''), disabled: busy, 'aria-pressed': String(has), 'aria-label': `${label}: ${covers}`, onclick: () => setHelper(k, has ? jobs.filter((x) => x !== j) : [...(jobs ?? []), j], j) }, label)
+      // what the pill means, and what a click does here
+      return withTip(pill, () => [
+        at === 0 ? h('div', { className: 'tcover', textContent: '#1 answers you; as a helper it\'s started when another of your models is answering.' }) : null,
+        h('div', { className: 'tjob', textContent: label }),
+        h('div', { className: 'tcover', textContent: covers }),
+        sugd ? h('div', { className: 'tcover', textContent: `Suggested from ${SUGGEST_WHY[j]}.` }) : null,
+        S.helpersAuto && has ? h('div', { className: 'tcover', textContent: 'Picked for you, from the rankings, tests and prices.' }) : null,
+        h('div', { className: 'thint', textContent: (has ? `Click: ${t.model} isn't picked for this any more` : `Click: #1 gives these jobs to ${t.model}${jobs ? '' : ' (it becomes a helper)'}`) + (S.helpersAuto ? ' · from then on, you pick' : '') }),
+      ])
+    }))
+}
+// what each pill's suggestions go by (said in its tooltip)
+const SUGGEST_WHY = { ui: 'its place in the top half of the web-app ranking (LMArena)', code: 'its place in the top half of the coding ranking (LMArena)', hard: 'it thinks with a context of 128k or more, or its place in the top half of the ranking for long real tasks or the hardest prompts (LMArena)', quick: 'its test: faster than most of yours (or nothing else fits it)' }
+// Helpers are picked from the models that answered their test: how many did
+const working = () => S.order.filter((t) => TRIES[keyOf(t)]?.ok && !TRIES[keyOf(t)].going).length
+// No test yet: ask before testing them all (each gets a short message, which a paid model charges for);
+// then: what to do once the run is over ('suggest', or nothing: picked for you does it itself)
+let afterTests = null
+function testFirst(then) {
+  const n = (x) => x.toLocaleString()
+  const paid = S.order.filter((t) => t.price && (t.price.input > 0 || t.price.output > 0)).length
+  const unknown = S.order.filter((t) => !t.price).length
+  $('h-test-cost').textContent = `Test all sends each of your ${n(S.order.length)} models a short message. ${paid ? `${n(paid)} of them aren't free: each charges for its few tokens. ` : ''}${unknown ? `${n(unknown)} have no price we know of, and may charge too. ` : ''}When it's done, helpers are picked from the ones that worked.`
+  $('h-test-go').onclick = () => {
+    $('h-test').close()
+    afterTests = then
+    tryAll(S.order)
+  }
+  $('h-test-no').onclick = () => $('h-test').close()
+  $('h-test').showModal()
+}
+// Picked for you (HeartCode makes them from what's known, again whenever that changes) or by you
+async function setAuto(on, select) {
+  if (on && !working()) return (select.value = 'manual'), testFirst('auto') // nothing to pick from yet
+  select.disabled = true
+  try {
+    const r = await api('/api/helpers/auto', { on })
+    Object.assign(S, { helpers: r.helpers, helpersAuto: r.helpersAuto })
+    HSUG = null
+    drawMine(S)
+  } catch (e) {
+    toast(e.message, true)
+    select.value = S.helpersAuto ? 'auto' : 'manual'
+  } finally {
+    select.disabled = false
+  }
+}
+
+// Suggest helpers: the server's picks, beside yours (nothing saved until you take them)
+async function suggestNow(b) {
+  if (b) b.disabled = true
+  const r = await api('/api/helpers/suggest', {}).catch((x) => (toast(x.message, true), null))
+  if (b) b.disabled = false
+  if (!r) return
+  HSUG = Object.keys(r.suggest).length ? r.suggest : null
+  if (!HSUG) return toast(working() ? 'Nothing more to suggest' : 'None of your models worked in the test: nothing to pick from', !working())
+  setFilter({ helpers: true }) // your helpers and the suggested ones, together: not lost among the rest
+}
+// The toolbar's helpers part: suggestions waiting (take all · dismiss), or Suggest helpers and Clear
+// helpers. Each saves at once, its own button saying so.
+function drawHelperBar() {
+  helperBar ??= h('span', { className: 'hbar' })
+  const order = S.order
+  const n = Object.keys(helpers()).length
+  const busy = (b) => Object.assign(b, { disabled: true, textContent: 'Saving…' })
+  put(helperBar,
+    HSUG ? h('span', { className: 'hsug', title: 'shown dashed in the Helper column: click one to take just that' }, ic('sparkles'),
+      h('span', { textContent: `${Object.keys(HSUG).length} suggested` }),
+      h('button', { className: 'small primary', textContent: 'Take all', onclick: (e) => {
+        busy(e.currentTarget)
+        const next = { ...helpers() }
+        const took = Object.keys(HSUG)
+        for (const [k, jobs] of Object.entries(HSUG)) next[k] = [...new Set([...(next[k] ?? []), ...jobs])]
+        HSUG = null
+        saveHelpers(next, [], `${took.length} model${took.length === 1 ? ' is a helper' : 's are helpers'} now`).then(() => drawMine(S))
+      } }),
+      h('button', { className: 'small ghost', textContent: 'Dismiss', onclick: () => ((HSUG = null), drawMine(S)) })) : null,
+    !HSUG && !S.helpersAuto ? h('button', { className: 'small', title: working() ? `suggest all ${working()} models that answered their test as helpers, each with what it's good at (from the rankings, its test, thinking and context): you see them first, then take them or not` : 'suggest helpers: your models are tested first (helpers are picked from the ones that answer)', onclick: (e) => (working() ? suggestNow(e.currentTarget) : testFirst('suggest')) }, ic('sparkles'), 'Suggest helpers') : null,
+    !HSUG && n ? h('button', { className: 'small ghost', textContent: 'Clear helpers', title: `none of your models a helper (${n} now): helpers run on the model that answers`, onclick: (e) => {
+      if (!confirm(`Clear your ${n} helper${n === 1 ? '' : 's'}? Helpers then run on the model that answers.`)) return
+      busy(e.currentTarget)
+      saveHelpers({}, [], 'no helpers: they run on the model that answers').then(() => (FILTER.helpers ? setFilter({ helpers: false }) : drawMine(S))) // no helpers left to show only
+    } }) : null)
+  return helperBar
+}
+
 function tableRow(t, at, pick) {
   const c = can(t)
   const ctx = COLS.context.get(t)
@@ -2684,6 +2886,7 @@ function tableRow(t, at, pick) {
     h('span', { className: 'n', textContent: `#${at + 1}`, title: SORT.length || filtering() ? 'its place in your list' : '' }),
     h('span', { className: 'm' }, h('span', { className: 'name', textContent: t.model, title: t.model }), tag),
     h('span', { className: 'p', textContent: isOff(t.provider) ? `${t.provider} · off` : t.provider, title: t.provider }),
+    helperCell(t, at),
     h('span', { className: 'num', textContent: ctx ? `${t.tested?.sure === false ? '~' : ''}${kTok(ctx)}` : '–', title: ctx ? `${ctx.toLocaleString()} tokens${t.tested?.sure === false ? ' (assumed: the server and models.dev don\'t say)' : ''}` : '' }),
     yes(c.tools), yes(c.thinking), yes(c.images),
     rankCell(t, 'coding'), rankCell(t, 'web'), rankCell(t, 'vision'),
@@ -3581,6 +3784,7 @@ if (token) {
     gotResult(key, result)
   })
   events.addEventListener('testrun', (e) => showRun(JSON.parse(e.data)))
+  events.addEventListener('helpers', (e) => ((S.helpers = JSON.parse(e.data).helpers), drawMine(S))) // picked for you again, after a test run
   // many at once (thousands of models added): taken in once a frame, the table drawn once
   const news = new Map()
   events.addEventListener('test', (e) => {

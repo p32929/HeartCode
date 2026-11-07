@@ -8,11 +8,12 @@ import { readParquet } from './parquet.js'
 
 const FILE = path.join(HOME, 'rankings.json')
 const WEEK = 7 * 24 * 3600_000
-const VERSION = 2 // 2: with each model's score; an older file is fetched again
+const VERSION = 3 // 2: with each model's score; 3: with the agent ranking and hard prompts; an older file is fetched again
 const FILES = 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main' // one Parquet file per ranking: text, webdev, vision, agent
 
-// The lists kept (ranking:category): shown on Your models and to the orchestrator
-const LISTS = ['text:overall', 'text:coding', 'webdev:webdev', 'vision:overall']
+// The lists kept (ranking:category): shown on Your models; the helpers picked for you go by them too
+// (agent: long real tasks, done by the model with tools; hard prompts: the hardest questions)
+const LISTS = ['text:overall', 'text:coding', 'text:hard_prompts', 'webdev:webdev', 'vision:overall', 'agent:overall']
 
 export const loadRankings = () => readJson(FILE, null)
 
