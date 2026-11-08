@@ -6,6 +6,7 @@
 import path from 'node:path'
 import { HOME, readJson, writeJson } from './config.js'
 import { log } from './log.js'
+import { fetch } from './http.js' // not the built-in one: see http.js
 
 const FILE = path.join(HOME, 'prices.json')
 const DAY = 86_400_000

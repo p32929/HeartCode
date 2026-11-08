@@ -2,6 +2,16 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.61 (2026-11-09)
+
+- **No more hours of "not answering" after a connection dies**: requests go over HeartCode's own
+  HTTP/1.1 client (node:http/https, no packages) instead of Node's built-in fetch. That one used
+  HTTP/2, one connection for every request to a host; when it died without a word, every later
+  request waited on it and none was sent (every model behind one proxy "didn't start answering"
+  while the host answered at once). Now each request has its own socket, a stopped one takes it
+  with it, and the next request goes through on a fresh connection.
+- **Alt+B shows the running background commands**; `A` shows the stopped and finished ones too.
+
 ## 0.1.60 (2026-11-08)
 
 - **Models say when they're stuck, and get help**: a todo step can be marked `stuck` with why; the

@@ -933,13 +933,20 @@ class App {
 
   // Alt+B, /background: the background commands' logs in a dialog, one at a time with a tab each.
   // ←/→ (or a click on a tab): another one; ↑/↓, PgUp/PgDn, the wheel: back in its log (End: the
-  // newest again); K twice: stop it and close its tab; Esc or Alt+B: closed.
+  // newest again); K twice: stop it and close its tab; A: the stopped ones too; Esc or Alt+B: closed.
   toggleJobs(on = !this.jobsShown) {
     const { ui } = this
     if (!on) return ui.setDialog(null)
     this.jobsShown = true
     const ERROR = /\b(error|errors|failed|fail|exception|traceback|panic|fatal)\b/i
-    const jobs = () => listJobs(this.root)
+    // running ones only (and any that stop while it's open); A: the stopped and finished ones too
+    let showAll = false
+    const live = new Set()
+    const jobs = () => {
+      for (const j of runningJobs(this.root)) live.add(j.id) // a command's leftover that's gone counts as stopped
+      const list = listJobs(this.root)
+      return showAll ? list : list.filter((j) => live.has(j.id))
+    }
     const current = () => jobs().find((j) => j.id === this.jobTab) ?? jobs().findLast((j) => !j.exited) ?? jobs().at(-1)
     let spots = [] // where each tab is on its row: { from, to, id }
     let back = 0 // lines scrolled back from the newest (0: following it)
@@ -978,6 +985,7 @@ class App {
         if (key.name === 'end') return (back = 0)
         if (key.name === 'home') return (back = 1e6)
         if (key.name === 'k' && !key.ctrl && !key.meta) return kill()
+        if (key.name === 'a' && !key.ctrl && !key.meta) return (showAll = !showAll), (back = 0)
       },
       click: (col, row) => {
         const hit = row === 0 && spots.find((t) => col >= t.from && col < t.to)
@@ -985,7 +993,8 @@ class App {
       },
       draw: (w, h) => {
         const all = jobs()
-        if (!all.length) return ['', ...wrapWords('Nothing runs in the background. The model starts servers and watchers there.', w - 2).map((l) => `  ${c.faint(l.trim())}`), '', `  ${c.faint('Esc close')}`]
+        const ended = listJobs(this.root).length - all.length // stopped or finished, not shown
+        if (!all.length) return ['', ...wrapWords('Nothing runs in the background. The model starts servers and watchers there.', w - 2).map((l) => `  ${c.faint(l.trim())}`), '', `  ${c.faint(`${ended ? `A show ${ended} stopped · ` : ''}Esc close`)}`]
         const job = current()
         this.jobTab = job.id
         // the tabs, scrolled so the one shown is on screen
@@ -1016,7 +1025,7 @@ class App {
           ` ${c.bold(clip(job.command, Math.max(10, w - 2 - width(`  · ${state} · ${ranFor(job)}${where}`.replace(/\x1b\[[0-9;]*m/g, '')))))} ${c.faint('·')} ${state} ${c.faint(`· ${ranFor(job)}`)}${where}`, // the command, as much as the rest leaves room for
           ...Array.from({ length: n }, (_, i) => (shown.length ? (shown[i] === undefined ? '' : ` ${ERROR.test(shown[i]) ? c.red(shown[i]) : c.muted(shown[i])}`) : i ? '' : ` ${c.faint('(no output yet)')}`)),
           c.ghost('─'.repeat(w)),
-          ` ${said ? c.yellow(said) : c.faint(`${all.length > 1 ? '←/→ another one · ' : ''}↑/↓ PgUp/PgDn scroll · K ${job.exited ? 'close' : 'stop'} it · Esc close`)}`,
+          ` ${said ? c.yellow(said) : c.faint(`${all.length > 1 ? '←/→ another one · ' : ''}↑/↓ PgUp/PgDn scroll · K ${job.exited ? 'close' : 'stop'} it · ${showAll ? 'A running only' : ended ? `A show ${ended} stopped` : ''}${showAll || ended ? ' · ' : ''}Esc close`)}`,
         ]
       },
     })

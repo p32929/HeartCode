@@ -27,6 +27,7 @@ import { capabilities } from './capabilities.js'
 import { connect, sendTelegram, tokenHint, tgReady, EVENTS } from './telegram.js'
 import { searchSettings, testSearxng, ENGINE_NAMES } from './web.js'
 import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays, logSize, clearLogs, LOG_KINDS, kindsOn, listLogRuns, readLog } from './log.js'
+import { fetch } from './http.js' // not the built-in one: see http.js
 
 const PAGE = new URL('./settings.html', import.meta.url)
 const EFFORTS = ['default', 'low', 'medium', 'high']

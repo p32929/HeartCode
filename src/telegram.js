@@ -5,6 +5,7 @@
 // (cfg.telegram: { token, chatId, chatName, bot, on, events }). The token is never logged or shown whole.
 import { log } from './log.js'
 import { saveConfig } from './config.js'
+import { fetch } from './http.js' // not the built-in one: see http.js
 
 const API = process.env.HEART_TELEGRAM_API || 'https://api.telegram.org' // the env: a stand-in server, for tests
 export const EVENTS = {

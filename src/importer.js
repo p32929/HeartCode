@@ -10,6 +10,7 @@ import { spawnSync } from 'node:child_process'
 import { HOME, TEMP, readJson, writeJson } from './config.js'
 import { frontMatter } from './skills.js'
 import { Memory } from './memory.js'
+import { fetch } from './http.js' // not the built-in one: see http.js
 
 const exists = (p) => {
   try {

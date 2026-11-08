@@ -58,7 +58,7 @@ has none, so there's nothing for anyone to poison.
 - **Skills, MCP servers and hooks** in Claude Code's formats; `/import` brings yours over.
 - **Tabs** (`Alt+T`) and git worktrees, for work kept apart.
 - **Servers in the background**: the model starts a dev server and keeps working. `Alt+B` shows
-  their logs live.
+  the running ones' logs live (`A`: the stopped ones too).
 - **Telegram messages** when a task finishes, fails or waits for you.
 - **Logs** of exactly what you choose (seven kinds, all off by default), readable on the settings page.
 - **`heart -p`** runs one task without the screen, for other tools and AI agents, like `claude -p`

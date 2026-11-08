@@ -5,6 +5,7 @@ import path from 'node:path'
 import { HOME, readJson, writeJson } from './config.js'
 import { log } from './log.js'
 import { readParquet } from './parquet.js'
+import { fetch } from './http.js' // not the built-in one: see http.js
 
 const FILE = path.join(HOME, 'rankings.json')
 const WEEK = 7 * 24 * 3600_000

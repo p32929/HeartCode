@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process'
 import { HOME } from './config.js'
 import { runCommand } from './tools.js'
 import { log } from './log.js'
+import { fetch } from './http.js' // not the built-in one: see http.js
 
 const onPath = (cmd) => (process.env.PATH ?? '').split(path.delimiter).find((d) => d && fs.existsSync(path.join(d, cmd)))
 

@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { log, logRequest, requestLog } from './log.js'
+import { fetch } from './http.js' // not the built-in one: see http.js
 
 // Tokens in a text, estimated the way tokenizers split it: a word or a number is about one, a long
 // word more, every symbol one. Prose comes out near characters ÷ 4; code, CSS, JSON and SVG paths,

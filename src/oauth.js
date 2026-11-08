@@ -8,6 +8,7 @@ import path from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
 import { HOME, readJson, writeJson } from './config.js'
 import { log } from './log.js'
+import { fetch } from './http.js' // not the built-in one: see http.js
 
 const FILE = path.join(HOME, 'mcp-auth.json')
 const b64url = (buf) => Buffer.from(buf).toString('base64url')

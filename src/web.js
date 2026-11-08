@@ -7,6 +7,7 @@
 import path from 'node:path'
 import { HOME, CONFIG_FILE, readJson, writeJson } from './config.js'
 import { keywords } from './memory.js'
+import { fetch } from './http.js' // not the built-in one: see http.js
 // ponytail: scraping, no API; add a keyed backend (Brave, Tavily) if DuckDuckGo blocks for good.
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'

@@ -18,6 +18,7 @@ import { pathToFileURL } from 'node:url'
 import { HOME, readJson, readConfig, writeJson, VERSION } from './config.js'
 import { log } from './log.js'
 import { savedToken, signIn, hasToken } from './oauth.js'
+import { fetch } from './http.js' // not the built-in one: see http.js
 
 // Built in: none. HeartCode comes with no MCP servers; you add the ones you want (/settings → MCP
 // servers, /mcp, or ~/.heart/mcp.json). Kept as a map so a server could be built in again by name.

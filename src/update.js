@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { HOME, VERSION, readJson, writeJson } from './config.js'
+import { fetch } from './http.js' // not the built-in one: see http.js
 
 const FILE = path.join(HOME, 'update-check.json')
 const PKG = fileURLToPath(new URL('..', import.meta.url))

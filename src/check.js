@@ -12,6 +12,7 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 import { HOME } from './config.js'
 import { log } from './log.js'
+import { fetch } from './http.js' // not the built-in one: see http.js
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 const tail = (t, n = 2500) => ((t = String(t).trim()), t.length > n ? `…${t.slice(-n)}` : t)

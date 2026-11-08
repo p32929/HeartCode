@@ -14,6 +14,7 @@ import { newlyEnded, jobLine } from './background.js'
 import { loadHooks, runHooks } from './hooks.js'
 import { takeConfigErrors, HELPER_JOBS } from './config.js'
 import { c, duration, Block, Markdown, color, diffLines, renderDiff } from './ui.js'
+import { fetch } from './http.js' // not the built-in one: see http.js
 
 // Images for a helper (the agent tool's "images"), as data: URLs: image URLs (fetched), data: URLs,
 // or files: in the project, saved screenshots (OUTPUTS), or a path the user gave in a message.
