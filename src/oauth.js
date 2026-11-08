@@ -108,7 +108,7 @@ export async function signIn(url, wwwAuth, open, { signal, oauth = {} } = {}) {
         const q = new URL(req.url, redirect)
         if (q.pathname !== '/callback') return res.writeHead(404).end()
         const ok = q.searchParams.get('state') === state && q.searchParams.get('code')
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><title>HeartCode</title><body style="font:16px system-ui;padding:40px">${ok ? '♥ Signed in. You can close this tab and go back to HeartCode.' : `Sign-in failed: ${String(q.searchParams.get('error_description') ?? q.searchParams.get('error') ?? 'wrong state').replace(/</g, '&lt;')}`}</body>`)
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><title>HeartCode</title><body style="font:16px system-ui;padding:40px">${ok ? '♥ Signed in. This tab can be closed now.' : `Sign-in failed: ${String(q.searchParams.get('error_description') ?? q.searchParams.get('error') ?? 'wrong state').replace(/</g, '&lt;')}`}</body>`)
         clearTimeout(timer)
         ok ? resolve(ok) : reject(new Error(`sign-in failed: ${q.searchParams.get('error_description') ?? q.searchParams.get('error') ?? 'the reply did not match'}`))
       })

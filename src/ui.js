@@ -898,7 +898,7 @@ export class UI {
     const own = pick?.items.some((x) => x.own) // typing goes into "Something else", not a filter
     const typingOwn = m.items[m.sel]?.item?.own && m.items[m.sel].item.text // ←/→ move in what's typed; Tab goes on
     const body = pick?.body ? String(pick.body).split('\n') : []
-    const hint = (pick?.nav ? (typingOwn ? 'Tab questions · ' : '←→ questions · ') : '') + (pick ? (pick.ctrlC ? 'Enter, Esc or Ctrl+C turn it off' : pick.fixed ? '↑↓ move · Enter choose · Esc close' : pick.multi ? `↑↓ move · Space tick · Alt+A/N all/none · Enter take · Esc cancel · ${own ? 'type your own' : 'type to filter'}` : `↑↓ move · Enter choose · Esc cancel${own ? ' · type your own' : cards ? '' : ' · type to filter'}`) : 'Enter send · Esc cancel')
+    const hint = (pick?.nav ? (typingOwn ? 'Tab questions · ' : '←→ questions · ') : '') + (pick ? (pick.ctrlC ? 'Enter, Esc or Ctrl+C turn it off' : pick.fixed ? '↑↓ move · Enter choose · Esc close' : pick.multi ? `↑↓ move · Space tick · Alt+A/N all/none · Enter take · Esc cancel · ${own ? 'type an answer' : 'type to filter'}` : `↑↓ move · Enter choose · Esc cancel${own ? ' · type an answer' : cards ? '' : ' · type to filter'}`) : 'Enter send · Esc cancel')
     const timer = this.autoLine() // on its own line, so it's seen (and not cut off with the keys)
     const long = width(title) > this.#dialogBox(cols, rows).w - 6 // too long for the border: inside instead, said once
     // at most n rows; the rest said to be there
@@ -974,9 +974,9 @@ export class UI {
     const open = todos.filter((t) => t.status !== 'completed')
     if (!open.length) return []
     const done = todos.length - open.length
-    const mark = { pending: c.muted('☐'), in_progress: c.info('◐'), completed: c.faint('☑') }
+    const mark = { pending: c.muted('☐'), in_progress: c.info('◐'), completed: c.faint('☑'), stuck: c.warn('⚠') }
     const by = (t) => (t.by ? c.faint(' · ') + (t.status === 'in_progress' ? c.info(t.by) : c.faint(t.by)) : '') // the model a part was given to
-    const line = (t) => fit(`    ${mark[t.status]} ${t.status === 'in_progress' ? c.info(c.bold(t.content)) : t.status === 'completed' ? c.faint(t.content) : c.muted(t.content)}${by(t)}`, cols)
+    const line = (t) => fit(`    ${mark[t.status]} ${t.status === 'in_progress' ? c.info(c.bold(t.content)) : t.status === 'completed' ? c.faint(t.content) : t.status === 'stuck' ? c.warn(t.content) : c.muted(t.content)}${by(t)}`, cols)
     const shown = todos.length <= 8 ? todos : open.slice(0, 7)
     return [
       fit(`  ${c.muted('Plan')} ${c.faint(`· ${done} of ${todos.length} done`)}`, cols),
@@ -1233,7 +1233,7 @@ export class UI {
     this.render()
   }
   #copied(text) {
-    this.notice(`copied ${text.length} character${text.length === 1 ? '' : 's'}${copyText(text) === 'osc' ? ' (if your terminal allows it)' : ''}`)
+    this.notice(`copied ${text.length} character${text.length === 1 ? '' : 's'}${copyText(text) === 'osc' ? ' (if the terminal allows it)' : ''}`)
   }
   // A double click: the word under it (no spaces; quotes and brackets around it left out), copied.
   #copyWord(x, y) {
@@ -1408,7 +1408,7 @@ export class UI {
       if (helpers.length > 6) bottom.push(c.faint(`  … ${helpers.length - 5} more`))
       bottom.push(...this.#todoLines(cols))
     }
-    if (this.scroll) bottom.push(c.dim(`  ↓ ${Number.isFinite(this.scroll) ? this.scroll : 'more'} lines below · held here while you read${this.keyFor('scroll_bottom') ? ` · ${this.keyFor('scroll_bottom')} to the bottom` : ''}`))
+    if (this.scroll) bottom.push(c.dim(`  ↓ ${Number.isFinite(this.scroll) ? this.scroll : 'more'} lines below · held here for reading${this.keyFor('scroll_bottom') ? ` · ${this.keyFor('scroll_bottom')} to the bottom` : ''}`))
     if (this.ahead.length) {
       const key = (k, d) => `${c.muted(k)} ${c.faint(d)}`
       const sep = c.ghost(' · ')
@@ -1611,7 +1611,7 @@ export class UI {
         const onOwn = own && it?.item === own
         const typing = own && !key.ctrl && !key.meta && ((key.name === 'backspace' && onOwn) || (/^[^\x00-\x1f\x7f]+$/.test(s ?? '') && !(key.name === 'space' && m.pick.multi && !onOwn)))
         if (typing) {
-          own.hint ??= own.text ? 'type your own answer' : own.desc // what it says before anything's typed
+          own.hint ??= own.text ? 'type an answer' : own.desc // what it says before anything's typed
           own.text = key.name === 'backspace' ? (own.text ?? '').slice(0, -1) : (own.text ?? '') + s
           own.desc = own.text ? `› ${own.text}▏` : own.hint
           if (m.pick.multi) own.checked = Boolean(own.text)
@@ -2183,7 +2183,7 @@ export class UI {
           const said = (x) => (x.own && x.text?.trim() ? x.text.trim() : x.label) // their own answer: what they typed
           const picked = Array.isArray(pick?.chosen) ? pick.chosen.map(said).join(', ') : pick?.chosen && said(pick.chosen)
           if (pick?.quiet) this.render()
-          else if (pick) this.write(echo + (picked ?? c.dim(pick.closedAs ?? 'cancelled')) + (pick.auto?.fired ? c.dim(` · no answer in ${pick.auto.secs}s: ${pick.auto.fired === 'theirs' ? 'yours' : 'the recommended one'}`) : '') + '\n')
+          else if (pick) this.write(echo + (picked ?? c.dim(pick.closedAs ?? 'cancelled')) + (pick.auto?.fired ? c.dim(` · no answer in ${pick.auto.secs}s: ${pick.auto.fired === 'theirs' ? 'the typed one' : 'the recommended one'}`) : '') + '\n')
           else if (l !== null && history && this.isCommand(l.trim()) && !/^\s*\/skill:/.test(l)) this.notice(/^\S+/.exec(l.trim())[0], 3000, '›') // a command isn't part of the conversation: its name for a moment (not its arguments: maybe a key)
           else if (l?.trim()) this.write(echo + c.bright(l.replace(/\n/g, '\n' + ' '.repeat(width(echo.replace(/\x1b\[[0-9;]*m/g, ''))))) + '\n')
           else this.render()
@@ -2273,7 +2273,7 @@ export class UI {
     const a = pick?.auto
     if (!a) return ''
     const theirs = pick.items.some((x) => x.checked || (x.own && x.text?.trim())) // ticked or typed: that's what goes
-    return `◷ ${Math.max(0, Math.ceil((a.until - Date.now()) / 1000))}s · then ${theirs ? 'yours is sent' : (a.say ?? 'the recommended answer is chosen')} · a key restarts it`
+    return `◷ ${Math.max(0, Math.ceil((a.until - Date.now()) / 1000))}s · then ${theirs ? 'the typed answer is sent' : (a.say ?? 'the recommended answer is chosen')} · a key restarts it`
   }
 
   setPermission(mode) {

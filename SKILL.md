@@ -295,7 +295,8 @@ a program that doesn't know a subtype can skip it, as for Claude Code):
 | `subtype` | Fields | When |
 |---|---|---|
 | `status` | `status`, `model` | what it's doing now, as the screen's spinner says it ("thinking", "waiting for …", "preparing read_file README.md", a running command's latest output line, read once a second); sent when it changes. A helper's: its model |
-| `todos` | `todos`: `[{ content, status, by? }]` | the whole plan, each time it changes; `status` is `pending`, `in_progress` or `completed`; `by`: the model a step was handed to |
+| `todos` | `todos`: `[{ content, status, why?, by? }]` | the whole plan, each time it changes; `status` is `pending`, `in_progress`, `completed` or `stuck` (`why`: the model's reason); `by`: the model a step was handed to |
+| `stuck` | `step`, `why`, `count`, `model` | the model says it's stuck on a step (`count` this message): the 1st time it's told to change approach, the 2nd another model gives a second opinion, the 3rd the next model takes over (a `warning` says so) |
 | `helper` | `tool_use_id`, `label`, `model`, `status` | a helper at work: `starting`, then what it's doing, then `done`. `tool_use_id` is its `agent` call (several parts of a plan run at once can share one); `label` its job |
 | `review` | `model`, `verdict` (`yes`/`no`), `issues` | another model's look at the changes before the answer; a `no` sends the work back to be fixed |
 | `model_switch` | `from`, `to`, `reason`, `place` | the user's list moved on: `from` failed (`reason`, e.g. `rate-limited (429)`), `to` answers now (`place`: its place in the list) |

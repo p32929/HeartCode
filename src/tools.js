@@ -622,7 +622,7 @@ export const TOOL_DEFS = [
   { name: 'write_file', get description() { return prompt('agent/tool-write_file') }, parameters: obj({ path: str, content: str, append: { type: 'boolean' } }, ['path', 'content']) },
   { name: 'run_command', get description() { return prompt('agent/tool-run_command') }, parameters: obj({ command: str, wait: int, background: { type: 'boolean' } }, ['command']) },
   { name: 'background', get description() { return prompt('agent/tool-background') }, parameters: obj({ action: { type: 'string', enum: ['output', 'list', 'stop'] }, id: int, wait: int }, ['action']) },
-  { name: 'todo', get description() { return prompt('agent/tool-todo') }, parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] }, parallel: { type: 'boolean' }, model: str, files: { type: 'array', items: str } }, ['content', 'status']) } }, ['todos']) },
+  { name: 'todo', get description() { return prompt('agent/tool-todo') }, parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'stuck'] }, why: str, parallel: { type: 'boolean' }, model: str, files: { type: 'array', items: str } }, ['content', 'status']) } }, ['todos']) },
   { name: 'web_search', get description() { return prompt('agent/tool-web_search') }, parameters: obj({ query: str, fresh: { type: 'boolean' } }, ['query']) },
   { name: 'web_fetch', get description() { return prompt('agent/tool-web_fetch') }, parameters: obj({ url: str, look_for: str, start: int }, ['url']) },
   { name: 'ask_user', get description() { return prompt('agent/tool-ask_user') }, parameters: obj({ question: str, header: str, options: { type: 'array', items: str }, multiple: { type: 'boolean' }, emphasis: { type: 'boolean' } }, ['question', 'options']) }, // one question a call (small models manage that); several calls in one reply are one dialog (agent.js)
@@ -707,22 +707,22 @@ export function extraTools(s) {
 
 // todo: the model's checklist for this message, shown to the user each time it changes.
 // Lenient: the list as JSON text, plain strings for items, "done" for completed.
-const MARK = { pending: '☐', in_progress: '◐', completed: '☑' }
+const MARK = { pending: '☐', in_progress: '◐', completed: '☑', stuck: '⚠' }
 // In the conversation: the whole plan when it's new (or its steps changed), else only the steps whose
 // status changed, on one line; the whole of it stays in sight under the spinner (full screen).
 // the plan for a program reading HeartCode (headless stream-json): its steps, and who's doing a part
-export const sendTodos = (s) => !s.isSub && s.ui.event?.({ subtype: 'todos', todos: (s.chat.todos ?? []).map(({ content, status, by, byProvider }) => ({ content, status, ...(by && { by: byProvider ? `${byProvider}/${by}` : by }) })) })
+export const sendTodos = (s) => !s.isSub && s.ui.event?.({ subtype: 'todos', todos: (s.chat.todos ?? []).map(({ content, status, why, by, byProvider }) => ({ content, status, ...(why && { why }), ...(by && { by: byProvider ? `${byProvider}/${by}` : by }) })) })
 function showTodos(s, before, todos) {
-  const paint = { pending: c.muted, in_progress: (x) => c.info(c.bold(x)), completed: (x) => c.faint(x) }
-  const item = (t) => paint[t.status](`${MARK[t.status]} ${t.content}`) + (t.by ? c.faint(` · ${t.by}`) : '')
+  const paint = { pending: c.muted, in_progress: (x) => c.info(c.bold(x)), completed: (x) => c.faint(x), stuck: (x) => c.warn(x) }
+  const item = (t) => paint[t.status](`${MARK[t.status]} ${t.content}`) + (t.status === 'stuck' && t.why ? c.warn(`: ${clip(t.why, 80)}`) : '') + (t.by ? c.faint(` · ${t.by}`) : '')
   // full screen, the same plan changed (most of its steps still in it): only what changed, on one line
   // (steps added, taken out, or whose status moved); the whole plan is pinned under the spinner
-  const was = new Map((before ?? []).map((t) => [t.content, t.status]))
+  const was = new Map((before ?? []).map((t) => [t.content, `${t.status}${t.why ?? ''}`]))
   const kept = todos.filter((t) => was.has(t.content)).length
   if (!s.ui.full || !before?.length || kept < Math.max(1, todos.length / 2)) return s.ui.print(todos.map((t) => `  ${item(t)}`).join('\n') || c.faint('  (todo list cleared)'))
   const now = new Set(todos.map((t) => t.content))
   const changes = [
-    ...todos.filter((t) => was.get(t.content) !== t.status).map((t) => (was.has(t.content) ? item(t) : `${c.faint('+')} ${item(t)}`)),
+    ...todos.filter((t) => was.get(t.content) !== `${t.status}${t.why ?? ''}`).map((t) => (was.has(t.content) ? item(t) : `${c.faint('+')} ${item(t)}`)),
     ...(before ?? []).filter((t) => !now.has(t.content)).map((t) => c.faint(`− ${t.content}`)),
   ]
   if (changes.length) s.ui.print(`  ${changes.join(c.faint(' · '))}`)
@@ -738,14 +738,22 @@ async function todoTool(s, args, signal, id) {
   }
   if (!Array.isArray(list)) return 'error: todos must be a list of {content, status}'
   const todos = list
-    .map((t) => (typeof t === 'string' ? { content: t, status: 'pending' } : { content: String(t?.content ?? t?.task ?? t?.title ?? ''), status: String(t?.status ?? 'pending'), ...(t?.model && { model: String(t.model) }), ...((t?.parallel === true || t?.parallel === 'true') && { parallel: true }), ...([t?.files ?? []].flat().filter(Boolean).length && { files: [t.files].flat().map(String) }) }))
+    .map((t) => (typeof t === 'string' ? { content: t, status: 'pending' } : { content: String(t?.content ?? t?.task ?? t?.title ?? ''), status: String(t?.status ?? 'pending'), ...(t?.why && { why: String(t.why).trim() }), ...(t?.model && { model: String(t.model) }), ...((t?.parallel === true || t?.parallel === 'true') && { parallel: true }), ...([t?.files ?? []].flat().filter(Boolean).length && { files: [t.files].flat().map(String) }) }))
     .filter((t) => t.content.trim())
-    .map((t) => ({ ...t, status: /done|complete/i.test(t.status) ? 'completed' : /progress|doing|active/i.test(t.status) ? 'in_progress' : 'pending' }))
+    .map((t) => ({ ...t, status: /stuck|block|fail|struggl/i.test(t.status) ? 'stuck' : /done|complete/i.test(t.status) ? 'completed' : /progress|doing|active/i.test(t.status) ? 'in_progress' : 'pending' }))
+    .map(({ why, ...t }) => (t.status === 'stuck' ? { ...t, why: why || 'no reason given' } : t)) // a reason only on a stuck step
   for (const t of todos) Object.assign(t, ((x) => (x?.by && !t.by ? { by: x.by, byProvider: x.byProvider } : {}))(s.chat.todos?.find((x) => x.content === t.content))) // the model a part was given to: kept when the plan is written again
+  // newly stuck (or stuck for a new reason): the model says it's struggling. Counted per message; not
+  // the same stuck step sent again with the rest of the list
+  const before = new Map((s.chat.todos ?? []).map((t) => [t.content, t]))
+  const newlyStuck = todos.filter((t) => t.status === 'stuck' && !(before.get(t.content)?.status === 'stuck' && before.get(t.content)?.why === t.why))
   showTodos(s, s.chat.todos, todos)
   s.chat.todos = todos
   sendTodos(s)
   s.todoTouched = true
+  // a step it said it was stuck on, now done: what got it out is worth learning (agent.js)
+  for (const t of todos) if (t.status === 'completed' && before.get(t.content)?.status === 'stuck') (s.unstuck ??= []).push({ step: t.content, why: before.get(t.content).why })
+  if (newlyStuck.length) return `Todo list saved: ${todos.filter((x) => x.status === 'completed').length} of ${todos.length} done.\n\n${await stuckSaid(s, newlyStuck[0].content, newlyStuck[0].why, signal, id)}`
   const parts = await runParts(s, todos, signal, id)
   const done = todos.filter((t) => t.status === 'completed').length
   const next = todos.find((t) => t.status !== 'completed')
@@ -758,6 +766,51 @@ async function todoTool(s, args, signal, id) {
   if (askResearch) s.researchAsked = true
   const check = askSplit || askResearch ? `\n\n${prompt('agent/plan-check', { split: askSplit, research: askResearch })}` : ''
   return `Todo list saved: ${done} of ${todos.length} done.${next ? ` Next: ${next.content}` : ''}${parts ? `\n\n${parts}` : ''}${check}`
+}
+
+// The model says it's stuck on a step (todo status "stuck", with why). Believed: a model rarely says
+// so when it isn't (a "done" is what gets checked). The 1st time this message: told to change its
+// approach; the 2nd: a second opinion from another of your models (a Big & hard helper first),
+// which looks into it without changing files; the 3rd: the next of your models takes over (agent.js).
+// Also when its final answer says it didn't manage (agent.js). Returns what to tell it.
+export async function stuckSaid(s, step, why, signal, id, answer = false) {
+  const t = { content: step, why }
+  const n = (s.stuckReports = (s.stuckReports ?? 0) + 1)
+  const say = (more = {}) => (more.last && (s.toldLast = true), prompt('agent/stuck', { why, last: false, advice: '', adviser: '', ...more, plain: !answer && !more.advice && !more.last, answer: answer && !more.advice && !more.last }))
+  log('stuck', `${s.client?.model} says it's stuck (${n}): ${t.content} — ${t.why}`)
+  s.ui.event?.({ subtype: 'stuck', step: t.content, why: t.why, count: n, model: `${s.client?.provider}/${s.client?.model}` })
+  if (!s.isSub) (s.troubles ??= []).push({ model: s.client?.model, step: t.content, why: t.why })
+  // models it could go to: yours, not this one, not one given up on this message
+  const r = s.client?.rotation
+  const others = (r?.list ?? []).filter((x) => x !== r.list[r.at] && !s.gaveUp?.has(`${x.provider}/${x.model}`)).length
+  if (n >= 3 && !s.isSub && others) {
+    // two models have taken over already this message: no more; it says plainly what blocks it
+    if ((s.stuckHandovers ?? 0) >= 2) return say({ last: true })
+    s.stuckSelf = `said it's stuck ${n} times (last: "${clip(t.content, 60)}": ${clip(t.why, 120)})`
+    return '(Noted. Another of your models takes over from here.)'
+  }
+  if (n >= 3 && !s.isSub) return say({ last: true }) // no model left to take over (or the others were stuck too): it says plainly what blocks it
+  let advice = ''
+  const other = n === 2 && !s.isSub && s.subagent && secondOpinionModel(s)
+  if (other) {
+    s.ui.step('stuck', `asking ${other.model} for a second opinion`)
+    const tried = (s.ran ?? []).slice(-12).map((r) => `- ${r.command} → ${r.result}`).join('\n')
+    try {
+      advice = await s.subagent({ prompt: prompt('agent/second-opinion', { task: s.task ?? '', step: t.content, why: t.why, tried }), model: `${other.provider} ${other.model}`, description: 'second opinion' }, signal, id)
+    } catch (e) {
+      if (e.name === 'AbortError' || signal?.aborted) throw e
+      advice = `error: ${e.message}`
+    }
+    if (failed(advice)) advice = ''
+  }
+  return say({ advice: clip(advice, 4000), adviser: other ? `${other.provider} ${other.model}` : '' })
+}
+// Another of your models for a second opinion: a Big & hard helper, else your first helper or model that isn't this one.
+function secondOpinionModel(s) {
+  const me = (t) => t.model === s.client?.model && (t.provider ?? s.client?.provider) === s.client?.provider
+  const team = (s.team?.() ?? []).filter((t) => !me(t) && !s.gaveUp?.has(`${t.provider ?? s.client?.provider}/${t.model}`))
+  const helpers = team.filter((t) => t.jobs)
+  return helpers.find((t) => t.jobs.includes('hard')) ?? helpers[0] ?? (team.some((t) => t.jobs) ? null : team[0]) ?? null
 }
 
 // The plan's parts marked parallel (or given to another model): each started at once as a helper
@@ -825,7 +878,7 @@ async function askUser(s, args) {
   s.askedUser = true // asked through the dialog this message (not as text: see askedInText)
   for (const q of qs) {
     q.items[0].desc = ['recommended', q.items[0].desc].filter(Boolean).join(' · ')
-    q.own = { label: 'Something else', desc: 'type your own answer', own: true }
+    q.own = { label: 'Something else', desc: 'type an answer', own: true }
   }
   s.ui.stopSpin()
   const tabbed = qs.length > 1 && s.ui.full
@@ -841,7 +894,7 @@ async function askUser(s, args) {
       // the last tab: every answer, sent with Enter (or after ASK_WAIT seconds)
       const body = qs.map((q, j) => `${q.question} ${c.faint('›')} ${answerOf(said[j]) || `${q.items[0].label} ${c.faint('(recommended)')}`}`).join('\n')
       const send = { label: 'Send answers', desc: 'or ← to change one' }
-      const got = await s.ui.pick('Send these answers?', [send], { body, tabs: tabs(i), nav: true, quiet: true, auto: { item: send, secs: ASK_WAIT, say: 'your answers are sent' } })
+      const got = await s.ui.pick('Send these answers?', [send], { body, tabs: tabs(i), nav: true, quiet: true, auto: { item: send, secs: ASK_WAIT, say: 'the answers are sent' } })
       if (got?.nav) {
         i = Math.min(qs.length, Math.max(0, i + got.nav)) // → on Send: stays there
         continue
@@ -864,8 +917,8 @@ async function askUser(s, args) {
     let text = ''
     if (list.some((x) => x.own)) {
       // typed in its row (full screen); without full screen, asked for now
-      text = q.own.text?.trim() || ((await s.ui.ask(`${c.bold('Your answer')} ${c.dim('›')} `, { initial: said[i]?.text ?? '' }))?.trim() ?? '')
-      Object.assign(q.own, { text, desc: text ? `› ${text}` : 'type your own answer' })
+      text = q.own.text?.trim() || ((await s.ui.ask(`${c.bold('Answer')} ${c.dim('›')} `, { initial: said[i]?.text ?? '' }))?.trim() ?? '')
+      Object.assign(q.own, { text, desc: text ? `› ${text}` : 'type an answer' })
       if (!text && list.length === 1) continue // nothing typed: the same question again
     }
     if (s.ui.autoPicked) {
@@ -1161,6 +1214,7 @@ async function callMcp(s, server, tool, a, signal) {
     }
     note = `\n(${s.pendingImages.length - shown} image(s): shown to you in the next message${left.length ? `; not shown: ${left.join('; ')}` : ''})`
   } else if (files.length && s.team?.().some((t) => t.images)) note = `\n${prompt('agent/tool-images', { files: files.join('\n'), unseen: true })}`
+  else if (files.length && s.describeFor) note = `\n${await s.describeFor(files).catch((e) => `(couldn't have the image(s) described: ${e.message})`)}`
   else if (files.length) note = `\n(${files.length} image(s) not shown: this model can't see images)`
   const mendNote = mended.fixed.length ? `\n(HeartCode corrected the arguments: ${mended.fixed.join('; ')}. Use them that way next time.)` : ''
   return `${r.isError ? 'error: ' : ''}${text || '(no text)'}${note}${mendNote}`

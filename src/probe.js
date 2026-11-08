@@ -1,4 +1,5 @@
 // A model's profile (what it can do: models.dev's word, or your settings) and how HeartCode talks to it.
+import fs from 'node:fs'
 import path from 'node:path'
 import { HOME, readJson } from './config.js'
 import { contextWindow, contextSource, ASSUMED_REMOTE, LIMIT_MS } from './context.js'
@@ -13,8 +14,17 @@ export const profilePath = (client) => {
 }
 // Bump when a profile's shape changes, so older saved ones are made again once.
 const PROBE_VERSION = 2
+// Kept in memory by file and its time: a page listing thousands of models reads only the ones that
+// changed (a test, a setup, another HeartCode), not every file every time.
+const profiles = new Map() // file → { at: its mtime, p }
 export const loadProfile = (client) => {
-  const p = readJson(profilePath(client), null)
+  const file = profilePath(client)
+  const st = fs.statSync(file, { throwIfNoEntry: false })
+  if (!st) return profiles.delete(file), null
+  const at = `${st.mtimeMs}:${st.size}` // the size too: a file system that keeps times to the second
+  let hit = profiles.get(file)
+  if (hit?.at !== at) profiles.set(file, (hit = { at, p: readJson(file, null) }))
+  const p = hit.p && structuredClone(hit.p) // a copy, as a read gave: a caller may change it before writing
   // another model's (a model list switch once saved the first model's profile under the next one's name)
   return p?.version === PROBE_VERSION && (!p.model || p.model === client.model) ? p : null
 }
@@ -48,9 +58,9 @@ export function strategy(p, cfg = {}) {
 
 export function describe(p, s) {
   const yn = (v) => (v ? c.green('yes') : c.red('no'))
-  const context = ['context', `${s.context}${c.dim(`  (${p.set?.context ? 'set by you on /settings' : contextSource(p)}; change it on /settings)`)}`]
-  const from = { 'models.dev': 'models.dev', you: 'you, on /settings', assumed: "nothing: it isn't in models.dev. Set what it can do on /settings" }[p.source] ?? 'an earlier test'
-  const mine = (k) => (p.set?.[k] !== undefined ? c.dim('  (set by you)') : '')
+  const context = ['context', `${s.context}${c.dim(`  (${p.set?.context ? 'set on /settings' : contextSource(p)}; change it on /settings)`)}`]
+  const from = { 'models.dev': 'models.dev', you: '/settings (set by hand)', assumed: "nothing: it isn't in models.dev. Set what it can do on /settings" }[p.source] ?? 'an earlier test'
+  const mine = (k) => (p.set?.[k] !== undefined ? c.dim('  (set by hand)') : '')
   return [['from', from], context, ['tool calls', yn(s.actions === 'tools') + mine('tools')], ['thinking', yn(s.thinking) + mine('thinking')], ['images', yn(s.vision) + (Date.now() - (p.quirks?.noImages ?? -Infinity) < LIMIT_MS ? c.dim('  (its provider refused an image today)') : mine('images'))], ['streaming', yn(s.stream) + mine('stream')]]
     .map(([k, v]) => `  ${c.dim(k.padEnd(15))} ${v}`)
     .join('\n')

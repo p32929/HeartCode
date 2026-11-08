@@ -33,7 +33,7 @@ export function capabilities(cfg = {}) {
     else if (/whisper-cli/.test(vp)) need = 'whisper (whisper-cli) and a model — or a transcription provider'
     else need = 'a whisper model — or a transcription provider'
   }
-  caps.push({ id: 'voice', name: 'Voice input', what: 'Dictate your message — Space in an empty box, or /voice.', ok: !vp, need })
+  caps.push({ id: 'voice', name: 'Voice input', what: 'Dictate a message — Space in an empty box, or /voice.', ok: !vp, need })
   const chrome = chromeHere()
   const npx = onPath('npx')
   caps.push({

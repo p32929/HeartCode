@@ -22,7 +22,7 @@ const fail = (msg) => {
   console.error(msg)
   process.exit(1)
 }
-if (Number(process.versions.node.split('.')[0]) < 22) fail(`HeartCode needs Node.js 22 or newer (you have ${process.version}): https://nodejs.org`)
+if (Number(process.versions.node.split('.')[0]) < 22) fail(`HeartCode needs Node.js 22 or newer (this is ${process.version}): https://nodejs.org`)
 
 const args = process.argv.slice(2)
 const realHome = process.env.HEART_HOME || path.join(os.homedir(), '.heart')

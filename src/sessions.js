@@ -94,13 +94,13 @@ export function exportChat(chat, format, model = '') {
   if (format === 'md') {
     const body = list.map((e) => {
       const tools = e.tools.map((t) => `<details><summary>${t.name} ${esc(t.args.slice(0, 120))}</summary>\n\n${fence(t.result ?? '')}\n</details>`).join('\n')
-      return [`## ${e.role === 'user' ? 'You' : 'HeartCode'}`, e.text, tools].filter(Boolean).join('\n\n')
+      return [`## ${e.role === 'user' ? 'User' : 'HeartCode'}`, e.text, tools].filter(Boolean).join('\n\n')
     })
     return `# ${title}\n\n_${when}_\n\n${body.join('\n\n')}\n`
   }
   const body = list.map((e) => {
     const tools = e.tools.map((t) => `<details><summary><b>${esc(t.name)}</b> <code>${esc(t.args.slice(0, 160))}</code></summary><pre>${esc(t.result ?? '')}</pre></details>`).join('')
-    return `<section class="${e.role}"><h2>${e.role === 'user' ? 'You' : 'HeartCode'}</h2>${e.text ? `<div class="text">${esc(e.text)}</div>` : ''}${tools}</section>`
+    return `<section class="${e.role}"><h2>${e.role === 'user' ? 'User' : 'HeartCode'}</h2>${e.text ? `<div class="text">${esc(e.text)}</div>` : ''}${tools}</section>`
   })
   return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title>

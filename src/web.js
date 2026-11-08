@@ -336,7 +336,7 @@ export async function testSearxng(url) {
 // go (on 2026-10-31 most LibreY, Whoogle and 4get ones were down or blocked, so they aren't here),
 // and DuckDuckGo is blocked on some networks.
 export const ENGINES = { searxng: mySearxng, searx, duckduckgo, mwmbl, stackoverflow, npm, github }
-export const ENGINE_NAMES = { searxng: 'Your SearXNG', searx: 'Public SearXNG instances', duckduckgo: 'DuckDuckGo', mwmbl: 'Mwmbl', stackoverflow: 'Stack Overflow', npm: 'npm', github: 'GitHub' }
+export const ENGINE_NAMES = { searxng: 'SearXNG (self-hosted)', searx: 'Public SearXNG instances', duckduckgo: 'DuckDuckGo', mwmbl: 'Mwmbl', stackoverflow: 'Stack Overflow', npm: 'npm', github: 'GitHub' }
 // The settings page's order and switches (cfg.search: { searxng, order, off }), read at each search
 // (a change applies at once, also in other HeartCodes). Engines missing from a saved order go after it.
 export function searchSettings() {

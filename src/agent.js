@@ -8,7 +8,7 @@ import path from 'node:path'
 import { est, estMessages, Client, tokensOf, COMPACT_SHARE } from './client.js'
 import { runGuided } from './guided.js'
 import { markUsed, removeResearch, findResearch } from './research.js'
-import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, searchesOutside, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, refusal, noteNamedPaths, sendTodos } from './tools.js'
+import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, searchesOutside, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, refusal, noteNamedPaths, sendTodos, stuckSaid } from './tools.js'
 import { serversNote } from './lsp.js'
 import { newlyEnded, jobLine } from './background.js'
 import { loadHooks, runHooks } from './hooks.js'
@@ -239,12 +239,17 @@ export class Session {
   async subagent(args, signal, id) {
     const task = String(args.prompt ?? args.task ?? '').trim()
     if (!task) return 'error: give the helper its job in "prompt"'
+    // an image named in the job but not given in "images" (a screenshot's path): given, so a model
+    // that can see takes the job; one that can't would answer without looking
+    const named = [...task.matchAll(/(?:^|[\s"'`(])((?:~|\/|\.{0,2}\/)?[\w./-]+\.(?:png|jpe?g|webp|gif))\b/gi)].map((m) => m[1]).filter((f) => fs.existsSync(path.resolve(this.root, f.replace(/^~(?=\/)/, os.homedir()))))
+    const given = [].concat(args.images ?? []).filter(Boolean)
     let images
     try {
-      images = await loadImages(args.images, this, signal)
+      images = await loadImages(given.length || !named.length ? args.images : [...new Set(named)], this, signal)
     } catch (e) {
       if (e.name === 'AbortError') throw e
-      return `error: ${e.message}`
+      if (given.length || !named.length) return `error: ${e.message}`
+      images = [] // only named in the job (one it may not send): the job as it was
     }
     const name = (t) => `${t.provider} ${t.model}`
     const { order, first, all, helpers } = this.helperModels(args, images.length > 0)
@@ -302,6 +307,10 @@ export class Session {
     if (ownFiles?.length) helper.ownFiles = ownFiles.map((f) => path.resolve(this.root, f)) // a part of the plan: changes only its own files
     Object.assign(helper, { isSub: true, research: this.research, ran: this.ran, noResearch: this.noResearch, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
     helper.track = (rel, before) => this.track(rel, before)
+    // a helper that can't see, given screenshots by a tool (a browser): one of your models that can
+    // describes them for its job (it has no helpers of its own to ask)
+    const seers = strat.vision ? [] : (this.team?.() ?? []).filter((x) => x.images)
+    if (seers.length && this.engineFor) helper.describeFor = async (files) => (await this.describeImages(files.map((f) => imageUrl(f)), seers, task, signal, () => prompt('agent/describe-screenshot', { task: clip(task, 1500) }))).trim()
     helper.mcpGate = async () => (await this.#gate(helper), () => {})
     if (this.onEvent) helper.onEvent = (e) => this.onEvent({ ...e, parent: id, helper: label })
     log('agent', `helper "${label}" (${images.length} image(s)): ${task}`)
@@ -350,7 +359,8 @@ export class Session {
 
   // Images for a model that can't see them: your models that can describe each, for the task (the
   // next one when one fails).
-  async describeImages(images, seers, task, signal) {
+  // ask: the request for each (default: an image the user attached).
+  async describeImages(images, seers, task, signal, ask = () => prompt('guided/describe-image', { task })) {
     const out = []
     let by = ''
     for (const [i, url] of images.entries()) {
@@ -360,7 +370,7 @@ export class Session {
         try {
           const { client } = await this.engineFor(seer)
           client.retryIf = (e, attempt) => attempt < 3 && !e.notStarted
-          said = (await client.chat({ messages: [{ role: 'user', content: [{ type: 'text', text: prompt('guided/describe-image', { task }) }, { type: 'image_url', image_url: { url } }] }] }, { signal })).content.trim()
+          said = (await client.chat({ messages: [{ role: 'user', content: [{ type: 'text', text: ask() }, { type: 'image_url', image_url: { url } }] }] }, { signal })).content.trim()
         } catch (e) {
           if (e.name === 'AbortError' || signal?.aborted) throw e
           this.ui.warn(`${seer.model} couldn't look at image ${i + 1}: ${clip(e.message, 120)}`)
@@ -460,7 +470,7 @@ export class Session {
   // It runs after the answer is back (wrapUpLater), beside whatever you do next: its own connection,
   // one wrap-up at a time; what it needs is taken from the task first, before the next one changes it.
   wrapUpLater(task, answer) {
-    const at = { research: this.research, turn: this.chat.turns.at(-1), dirsBefore: this.dirsBefore, ran: this.ran, runs: this.runs }
+    const at = { research: this.research, turn: this.chat.turns.at(-1), dirsBefore: this.dirsBefore, ran: this.ran, runs: this.runs, troubles: this.troubles?.splice(0) ?? [], stuckLeft: (this.chat.todos ?? []).some((t) => t.status === 'stuck'), review: this.lastReview, model: this.client.model, unstuckLearned: this.unstuckLearned }
     const job = (this.wrapping ?? Promise.resolve())
       .then(() => this.wrapUp(task, answer, undefined, at))
       .catch((e) => log('wrapup', `failed: ${e.message}`))
@@ -471,6 +481,16 @@ export class Session {
   // at: the task's own state (wrapUpLater), else this message's
   async wrapUp(task, answer, signal, at = { research: this.research, turn: this.chat.turns.at(-1), dirsBefore: this.dirsBefore, ran: this.ran, runs: this.runs }) {
     if (this.isSub || !this.memory || this.ui.permission === 'plan') return
+    // it struggled (said it was stuck, gave up, was handed over): what blocked it is learned, so the
+    // next task like this starts knowing it. Solved: what got it out; not: what to know or try first
+    // What it learns from: how it ended (the answer, the review's points), not the excuses given on the
+    // way ("I can't browse" would teach giving up); the steps it said it was stuck on, with why.
+    const unsolved = Boolean(at.stuckLeft || at.review?.verdict === 'no' || SAYS_FAILED.test(String(answer ?? '').slice(0, 400)))
+    if (at.troubles?.length && (unsolved || !at.unstuckLearned)) { // solved, and what got it out learned already: not again
+      const steps = [...new Set(at.troubles.filter((t) => t.step !== 'the task' && t.step !== 'handed over').map((t) => `${t.step}: ${t.why}`))].slice(-2)
+      const what = [`${unsolved ? 'Not done' : `Done by ${at.model} after other tries failed`}. Its answer: ${clip(String(answer ?? '').replace(/\s+/g, ' '), 400)}`, at.review?.verdict === 'no' && `The review said: ${clip(at.review.issues.replace(/\s+/g, ' '), 300)}`, steps.length && `Stuck on: ${steps.join(' / ')}`].filter(Boolean).join('\n')
+      await learnFromFixes(this, [{ error: what, context: 'general' }], signal, { unsolved, task }).catch((e) => log('learn', `troubles: ${e.message}`))
+    }
     const pages = at.research ?? []
     const turn = at.turn
     const made = Object.entries(turn?.files ?? {}).filter(([rel, before]) => before === null && fs.existsSync(path.join(this.root, rel))).map(([rel]) => rel)
@@ -877,9 +897,11 @@ async function runNative(s, task, images, signal) {
   s.splitAsked = false // asked whether a plan's parts could run side by side, this message
   s.lookedUp = s.researchAsked = false // searched or read the web this message / asked whether the plan needs it
   // what changed and when it was last checked, this message: a change not run/tested since isn't done
-  Object.assign(s, { changed: new Set(), seq: 0, lastChangeAt: -1, lastCheckAt: -1, reviewedAt: -1, checksSince: 0, spots: new Map() })
+  Object.assign(s, { changed: new Set(), seq: 0, lastChangeAt: -1, lastCheckAt: -1, reviewedAt: -1, checksSince: 0, spots: new Map(), stuckReports: 0, stuckSelf: null, stuckHandovers: 0, troubles: [], unstuck: [], reviewedRan: 0, lastReview: null, gaveUp: new Set(), toldLast: false, unstuckLearned: false })
 
   let empty = 0 // replies in a row with neither text nor tool calls
+  let lastFinal = '' // the last answer it gave (a next one the same, after being told it isn't done: it's stuck)
+  let refusedCan = 0 // replies saying it can't (browse, run…) before trying a tool, this message
   let looping = 0 // replies cut for going into a loop, this message
   let stuck = null // why it's going round in circles (then the next model takes over; nothing stops but Esc)
   // Going round in circles: the next of your models carries on (a different model often gets out of
@@ -888,7 +910,14 @@ async function runNative(s, task, images, signal) {
   // the job goes to your next model.
   const handOver = (why) => {
     const was = client.model
-    if (client.moveOn?.(`${was} ${why}`)) ui.warn(`${was} ${why}; handing over to ${client.model}`)
+    s.gaveUp.add(`${client.provider}/${was}`) // not gone back to this message, nor asked for a second opinion
+    if (client.moveOn?.(`${was} ${why}`, s.gaveUp)) {
+      ui.warn(`${was} ${why}; handing over to ${client.model}`)
+      // the next model sees the whole conversation: told it's taking over, and not to repeat what didn't work
+      s.messages.push({ role: 'user', content: prompt('agent/taken-over', { was, why, plan: (s.chat.todos ?? []).filter((t) => t.status !== 'completed').map((t) => `- ${t.content}${t.why ? ` (stuck: ${t.why})` : ''}`).join('\n') }) })
+      s.stuckReports = 0
+      s.troubles?.push({ model: was, step: 'handed over', why })
+    }
     else if (s.isSub) throw Object.assign(new Error(`${was} ${why}`), { stuck: true })
     else ui.warn(`${was} ${why} — it carries on, told so; Esc stops it`)
   }
@@ -1061,6 +1090,45 @@ async function runNative(s, task, images, signal) {
       return finalAnswer(s, signal)
     }
     empty = 0
+    // "I can't browse / run / see…" with no tool tried this message: it has tools for that. Told what
+    // it has, once; said again without trying, the next of your models takes the task
+    if (!res.toolCalls.length && !s.acted && !s.isSub && CANT.test(res.content)) {
+      log('task', `${client.model} said it can't, without trying a tool (${++refusedCan})`)
+      if (refusedCan === 1) {
+        s.messages.push({ role: 'user', content: prompt('agent/you-can', { mcp: (s.mcp?.names ?? []).join(', ') }) })
+        continue
+      }
+      if (refusedCan === 2) {
+        const was = client.model
+        handOver(`said it can't do it, without trying its tools`)
+        if (client.model !== was) refusedCan = 0 // the next model: told once too
+        continue
+      }
+    }
+    // its answer says it didn't manage ("couldn't", "still not loading", "unable to"): taken as saying
+    // it's stuck: told to change approach, then a second opinion, then the next model (stuckSaid);
+    // after two models took over, its plain account of what blocks it is the answer
+    const sameAfterNo = s.lastReview?.verdict === 'no' && lastFinal && res.content.replace(/\s+/g, ' ').trim().slice(0, 300) === lastFinal.replace(/\s+/g, ' ').trim().slice(0, 300) // a review said no, and it gives the same answer again
+    if (!res.toolCalls.length && s.acted && !s.isSub && !s.toldLast && (sameAfterNo || SAYS_FAILED.test(res.content.slice(0, 400)))) { // told to say plainly what blocks it: that answer is the answer
+      const why = clip(res.content.replace(/\s+/g, ' ').trim(), 200)
+      s.messages.push({ role: 'user', content: await stuckSaid(s, 'the task', why, signal, undefined, true) })
+      if (s.stuckSelf) {
+        handOver(s.stuckSelf)
+        s.stuckSelf = null
+        s.stuckHandovers++
+      }
+      continue
+    }
+    // told it isn't done (open todos, a review's no, its own "couldn't"), and it answers again without
+    // doing anything: the same answer, or one that only promises: the next of your models takes the task
+    const same = (a, b) => a && b && a.replace(/\s+/g, ' ').trim().slice(0, 300) === b.replace(/\s+/g, ' ').trim().slice(0, 300)
+    if (!res.toolCalls.length && !sinceNudge && nudged && !s.isSub && client.rotation && (s.stuckHandovers ?? 0) < 2 && (same(res.content, lastFinal) || PROMISED_MORE.test(res.content) || SAYS_FAILED.test(res.content.slice(0, 400)))) {
+      handOver(`was told it isn't done and answered again without doing anything`)
+      s.stuckHandovers++
+      sinceNudge = true
+      continue
+    }
+    if (!res.toolCalls.length) lastFinal = res.content
     if (!res.toolCalls.length) {
       const more = sinceNudge && ((await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal)))
       showHeld(res.content) // after the review's line
@@ -1142,6 +1210,7 @@ async function runNative(s, task, images, signal) {
       let out = refused ?? (askedWith.has(call.id) ? 'Asked together with the first ask_user call of this reply: its result has this answer too.' : pre ? await pre.running : together.has(call.id) ? await together.get(call.id) : !allowed(s, name) ? `error: the tool ${name} is not allowed here` : args ? await runTool(name, args, s, signal, call.id) : 'error: the tool arguments were not valid JSON')
       if (!refused && args) out += guard.after(name, args, out)
       if (guard.stuck) stuck ??= guard.stuck
+      if (s.stuckSelf) (stuck ??= s.stuckSelf), (s.stuckSelf = null), s.stuckHandovers++ // it said so itself (todo stuck, a third time)
       if (args && !refused) {
         s.seq++
         if (EDITS.has(name) && !failed(out)) {
@@ -1167,6 +1236,13 @@ async function runNative(s, task, images, signal) {
       const checked = !args || refused ? null : name === 'run_command' ? String(args.command ?? '') : name === 'mcp' ? `${args.server} · ${args.tool}` : name === 'agent' ? `helper: ${args.description ?? clip(String(args.prompt ?? ''), 60)}` : name === 'lsp' ? `language server: ${args.action} ${args.file ?? ''}` : null
       if (checked) s.ran?.push({ command: checked, result: clip(String(out).split('\n').filter((l) => l.trim()).slice(0, 2).join(' · '), 160) })
       if (!s.isSub && s.memory && !refused && args) await noteRun(s, name, args, out, signal).catch((e) => log('learn', `run note: ${e.message}`)) // learn from any run that failed then passed
+      // a step it said it was stuck on, now done: what got it out is a lesson
+      if (!s.isSub && s.memory && s.unstuck?.length) {
+        const out = s.unstuck.splice(0)
+        s.troubles = s.troubles.filter((t) => !out.some((u) => u.step === t.step)) // learned here: not again at the wrap-up
+        s.unstuckLearned = true
+        await learnFromFixes(s, out.map((u) => ({ error: `stuck on "${u.step}": ${u.why}`, context: 'general' })), signal, { task: s.task ?? '' }).catch((e) => log('learn', `unstuck: ${e.message}`))
+      }
       // the same call again and again in a row (a weak model going round): told at the third, stopped at the fifth
       const sig = `${name} ${call.function.arguments}`
       inRow = sig === lastCall ? inRow + 1 : 1
@@ -1254,8 +1330,17 @@ export function newGuard() {
     if (repeats >= 10) g.stuck = 'kept making calls it had already made (10 repeats)' // going round, not finding anything new
     return prompt('agent/already-done', { result: was.out, circling: repeats >= 3 })
   }
+  let sameTool = null // the tool (an MCP server's own tool by name) whose calls failed in a row
+  let sameFails = 0
   g.after = (name, a, out) => {
     let note = ''
+    // any other tool (a browser's wait, click…) failing again and again: told at the third to stop and think
+    const tool = name === 'mcp' ? `${a.server} · ${a.tool}` : name
+    if (name !== 'run_command') {
+      sameFails = failed(out) ? (tool === sameTool ? sameFails + 1 : 1) : 0
+      sameTool = tool
+      if (sameFails === 3) note += `\n\n${prompt('agent/same-tool-failing', { tool })}`
+    }
     if (name === 'run_command') {
       const code = Number(/^exit code (-?\d+)/.exec(out)?.[1] ?? 0)
       failing = code ? failing + 1 : 0
@@ -1304,7 +1389,8 @@ async function noteRun(s, name, args, out, signal) {
 // Turn each fixed mistake into one reusable rule and save it (global memory, tagged by the tool it came from). The
 // model writes the rule from the error; a near-duplicate lesson is skipped. Recall is automatic
 // (memory.relevant attaches matching notes to a later message).
-async function learnFromFixes(s, fixed, signal) {
+// unsolved: it blocked a task that wasn't done (the rule: what to know or try first); task: what was asked (found by it later).
+async function learnFromFixes(s, fixed, signal, { unsolved = false, task = '' } = {}) {
   for (const { error, context } of fixed.slice(0, 5)) {
     const tags = [runTool_(context ?? error) || 'general'] // the tool it came from (npm, python3, cargo…)
     const near = s.memory.search(`tag:lesson ${tags.join(' ')}`).find((n) => n.body.toLowerCase().includes(error.replace(/^[^:]*:\s*/, '').toLowerCase().slice(0, 30)))
@@ -1316,7 +1402,7 @@ async function learnFromFixes(s, fixed, signal) {
       s.client.purpose = 'lesson'
       let reply
       try {
-        reply = await s.client.chat({ messages: [{ role: 'user', content: prompt('agent/lesson', { error }) }] }, { signal })
+        reply = await s.client.chat({ messages: [{ role: 'user', content: prompt('agent/lesson', { error, unsolved, task: clip(task, 300) }) }] }, { signal })
       } finally {
         s.client.purpose = was
       }
@@ -1327,7 +1413,7 @@ async function learnFromFixes(s, fixed, signal) {
       if (e.name === 'AbortError') throw e
     }
     if (!rule || rule.length < 10) rule = error.replace(/^[^:]*:\s*/, '') // the model couldn't phrase it: keep the error's own wording
-    const name = s.memory.write({ description: rule, type: 'reference', tags: ['lesson', ...tags], content: `${rule}\n\nLearned on ${new Date().toISOString().slice(0, 10)} after this was caught and fixed while building: ${error}`, scope })
+    const name = s.memory.write({ description: rule, type: 'reference', tags: ['lesson', ...tags], content: `${rule}\n\nLearned on ${new Date().toISOString().slice(0, 10)} ${unsolved ? 'after this blocked a task that was not done' : 'after this was caught and fixed'}${task ? ` (the task: ${clip(task, 200)})` : ' while building'}: ${error}`, scope })
     s.ui.step('learned', `${rule.slice(0, 90)}${scope === 'project' ? ' (this project)' : ''}`)
     log('learn', `saved lesson [[${name}]] (${scope}, #${tags.join(' #')}): ${rule}`)
   }
@@ -1339,7 +1425,14 @@ async function learnFromFixes(s, fixed, signal) {
 // The model said it would do something but stopped without doing it ("let me rewrite…", "I'll fix…"):
 // a next action named, then no tool call. Not matched by explanations ("let me explain", "you can run").
 const PROMISED_MORE =
-  /\b(?:let me|i['’]?ll|i will|i['’]?m going to|i am going to|i need to|i['’]?m about to|next,? i['’]?ll|now,? i['’]?ll)\b[^.!?\n]{0,70}\b(?:do|make|create|add|fix|write|update|change|implement|build|run|rewrite|replace|edit|install|set ?up|finish|continue|proceed|start|redo|retry|try|hand|pass|send|give)\b/i
+  /\b(?:let me|let['’]?s|let us|i['’]?ll|i will|i['’]?m going to|i am going to|i need to|i['’]?m about to|next,? i['’]?ll|now,? i['’]?ll)\b[^.!?\n]{0,70}\b(?:do|make|create|add|fix|write|update|change|implement|build|run|rewrite|replace|edit|install|set ?up|finish|continue|proceed|start|redo|retry|try|hand|pass|send|give|use|open|navigate|click|solve)\b/i
+
+// The start of a final answer saying it didn't manage: "I couldn't…", "unable to…", "still showing…".
+const SAYS_FAILED = /\b(?:could ?n['’]?t|could not|was(?: not|n['’]?t) able to|(?:am|was|i['’]m) unable to|failed to|did(?: not|n['’]?t) (?:manage|succeed|work|load|pass)|not (?:yet )?(?:complete[d]?|finished|solved|possible|loaded)|still (?:in progress|pending|blocked|loading|stuck|showing|failing|not)|has not (?:yet )?(?:complet|finish|load|pass))/i
+
+// "I can't browse the web", "I'm unable to run commands", "I don't have access to…": a model
+// saying it lacks an ability (it has tools for it).
+const CANT = /\b(?:i\s*(?:['’]m|am)\s*(?:unable|not able)\s*to|i\s*(?:can(?:['’]?t| ?not)|do(?:n['’]?t| not))\s*(?:directly\s*)?(?:have\s*(?:the\s*)?(?:ability|access|capabilit|tools?)|browse|access|open|visit|view|see|interact|click|navigate|run|execute|take|solve|use|control))|\bas an ai\b/i
 
 // Is the task really done, or did the model stop early? Open todo items, or (after it did real work)
 // a reply that only promises more, get one nudge to keep going. Then any Stop hook. null = truly done.
@@ -1443,8 +1536,12 @@ const isEmptyDir = (abs) => {
 // a NO goes back to the model to fix. Asked again only once files changed since its last look.
 // Returns what to tell the model, or null.
 export async function review(s, task, answer, signal) {
-  if (s.isSub || !s.changed?.size || s.lastChangeAt <= s.reviewedAt || s.ui.permission === 'plan') return null
+  // no files changed, but it ran things to do the task (a browser, commands, helpers): its answer is
+  // checked against the request too (once per new batch of them)
+  const acted = !s.changed?.size && (s.ran?.length ?? 0) > (s.reviewedRan ?? 0)
+  if (s.isSub || s.ui.permission === 'plan' || (!acted && (!s.changed?.size || s.lastChangeAt <= s.reviewedAt))) return null
   s.reviewedAt = s.lastChangeAt
+  s.reviewedRan = s.ran?.length ?? 0
   const turn = s.chat.turns.at(-1)
   const diffs = []
   let room = 16_000
@@ -1465,7 +1562,8 @@ export async function review(s, task, answer, signal) {
       break
     }
   }
-  if (!diffs.length) return null
+  if (!diffs.length && !acted) return null
+  if (!diffs.length) diffs.push('(no files changed)')
   const plan = (s.chat.todos ?? []).map((t) => `- [${t.status === 'completed' ? 'x' : ' '}] ${t.content}`).join('\n')
   const ran = (s.ran ?? []).slice(-15).map((r) => `- ${clip(r.command.replace(/\s+/g, ' '), 160)} → ${r.result}`).join('\n')
   const ask = prompt('agent/review', { request: requestsOf(s.chat, 1200), emphasis: (s.chat?.choices ?? []).join('; '), plan: plan || '(none)', answer: clip(String(answer ?? ''), 3000), changes: diffs.join('\n\n'), ran: ran || '(nothing)' })
@@ -1489,12 +1587,14 @@ export async function review(s, task, answer, signal) {
       s.ui.stopSpin()
       log('review', `${t.model}: ${said}`)
       if (/^\W*yes\b/i.test(said)) {
+        s.lastReview = { verdict: 'yes' }
         s.ui.event?.({ subtype: 'review', model: `${t.provider}/${t.model}`, verdict: 'yes', issues: '' })
         s.ui.step('review', `${t.model}: looks right`)
         return null
       }
       if (/^\W*no\b/i.test(said)) {
         const issues = said.replace(/^\W*no\b[\s.:—-]*/i, '').trim()
+        s.lastReview = { verdict: 'no', issues }
         s.ui.event?.({ subtype: 'review', model: `${t.provider}/${t.model}`, verdict: 'no', issues })
         s.ui.step('review', `${t.model}: ${clip(issues.split('\n').find((l) => l.trim()) ?? 'problems found', 90)}`)
         return prompt('agent/review-failed', { model: t.model, issues: issues || '(no details given)' })
@@ -1706,14 +1806,14 @@ export function contextReport(s) {
       const text = typeof m.content === 'string' ? m.content : (m.content ?? []).map((p) => p.text ?? '').join(' ')
       const yours = tasks.some((t) => text.startsWith(t))
       yours ? (parts.you += n) : (parts.notes += n)
-      pieces.push({ tokens: n, what: yours ? `your message "${clip(text.split('\n')[0], 50)}"` : `a note to the model "${clip(text.split('\n')[0], 50)}"`, ago })
+      pieces.push({ tokens: n, what: yours ? `a typed message "${clip(text.split('\n')[0], 50)}"` : `a note to the model "${clip(text.split('\n')[0], 50)}"`, ago })
     }
   })
   const toolTokens = tok(tools.map((f) => ({ type: 'function', function: f })))
   const list = [
     { name: 'system prompt', tokens: parts.system },
     { name: `tools (${tools.length})`, tokens: toolTokens },
-    { name: 'your messages', tokens: parts.you },
+    { name: 'typed messages', tokens: parts.you },
     { name: 'notes to the model', tokens: parts.notes, note: 'summaries, guides, reminders, saved notes found' },
     { name: 'model replies', tokens: parts.replies },
     { name: 'tool results', tokens: parts.results, note: `${whole} whole` },

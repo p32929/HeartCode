@@ -9,7 +9,8 @@
 //       stdout: {"type":"system","subtype":"init",…}, {"type":"assistant",…}, {"type":"user",…}
 //               (tool results), {"type":"result",…} after each message; and what the full screen
 //               shows besides, as {"type":"system","subtype":…}: "todos" (the plan: content, status,
-//               by: the model a part went to), "helper" (one at work: tool_use_id, label, model, status;
+//               why: a stuck step's reason, by: the model a part went to), "stuck" (the model says it's
+//               stuck: step, why, count, model), "helper" (one at work: tool_use_id, label, model, status;
 //               "done" at its end), "review" (model, verdict yes/no, issues), "model_switch" (from, to,
 //               reason), "warning" (message), "retry" (attempt, delay_ms, error), "status" (what it's
 //               doing now, as the spinner says it: a running command's latest output line too)
@@ -149,7 +150,7 @@ export async function runHeadless(app, opts) {
   const emit = (obj) => process.stdout.write(JSON.stringify(obj) + '\n')
   const s = await app.session()
   if (!s) {
-    const error = app.allOff() ? "the providers of all your models are switched off: switch one on (heart settings), or pass --model" : 'no model set up: add a provider and choose a model (heart settings), or pass --base-url and --model'
+    const error = app.allOff() ? "the providers of all the models are switched off: switch one on (heart settings), or pass --model" : 'no model set up: add a provider and choose a model (heart settings), or pass --base-url and --model'
     if (out === 'text') process.stderr.write(`heartcode: ${error}\n`)
     else emit({ type: 'result', subtype: 'error_during_execution', is_error: true, result: error, num_turns: 0, session_id: app.chat.id })
     return 1

@@ -31,7 +31,7 @@ export function speedOf(cfg) {
 // what the pill covers (its tooltip)]
 export const HELPER_JOBS = {
   ui: ['UI & visuals', 'websites, app screens, games, animation, 3D, charts', 'Websites and landing pages, app screens, games and animation, 3D, charts and SVG: anything people look at.'],
-  code: ['Code & logic', 'backend, APIs, scripts, automation, fixing bugs, tests, reviewing changes', 'Backend and APIs, scripts and automation, fixing bugs, tests and refactoring. Reviews of the work go to these first, then to your other models.'],
+  code: ['Code & logic', 'backend, APIs, scripts, automation, fixing bugs, tests, reviewing changes', 'Backend and APIs, scripts and automation, fixing bugs, tests and refactoring. Reviews of the work go to these first, then to the other models.'],
   hard: ['Big & hard', 'hard thinking, planning, long tasks with many steps, huge files', 'Planning and architecture, tricky logic, long tasks with many steps, huge files or whole folders.'],
   quick: ['Quick & cheap', 'small jobs: searching and reading code, lookups, small edits', 'Searching and reading code, looking things up, small edits: simple jobs, on a model that answered fast.'],
 }

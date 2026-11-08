@@ -10,7 +10,7 @@ const API = process.env.HEART_TELEGRAM_API || 'https://api.telegram.org' // the 
 export const EVENTS = {
   done: 'A task finished',
   failed: 'A task failed',
-  waiting: 'HeartCode is waiting for you (a question or a permission)',
+  waiting: 'HeartCode is waiting for an answer (a question or a permission)',
 }
 
 async function call(token, method, body = {}, timeout = 15_000) {

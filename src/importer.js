@@ -65,7 +65,7 @@ function skillBodies(root, scope) {
 function skillDup(root, scope, name, body) {
   if (taken(root, scope, name)) return `a skill named ${name} is already there`
   const twin = skillBodies(root, scope).find(([, b]) => same(b, body))
-  return twin ? `the same as your skill ${twin[0]}` : ''
+  return twin ? `the same as the skill ${twin[0]}` : ''
 }
 
 // A markdown command (Claude Code, Codex, OpenCode) → a HeartCode skill you type ("use: me").
@@ -109,7 +109,7 @@ function mcpDup(root, scope, name, cfg) {
   const have = readJson(mcpFile(root, scope), {}).mcpServers ?? {}
   if (have[name]) return `an MCP server named ${name} is already there`
   const twin = Object.entries(have).find(([, c]) => serverKey(c) === serverKey(cfg))
-  return twin ? `the same server as your ${twin[0]}` : ''
+  return twin ? `the same server as ${twin[0]}` : ''
 }
 
 function importMcp(root, scope, name, cfg) {
@@ -189,13 +189,13 @@ export function findImports(root, home = os.homedir()) {
     for (const [rel, file] of filesIn(dir, ['.md'])) {
       const name = safe(rel)
       const { meta, body } = frontMatter(fs.readFileSync(file, 'utf8'))
-      add(`${tool} · ${scope === 'global' ? 'yours' : 'this project'} · commands`, `/${name}`, (meta.description || body.split('\n')[0]).slice(0, 90), () => importCommand(root, scope, name, file), () => skillDup(root, scope, name, body))
+      add(`${tool} · ${scope === 'global' ? 'global' : 'this project'} · commands`, `/${name}`, (meta.description || body.split('\n')[0]).slice(0, 90), () => importCommand(root, scope, name, file), () => skillDup(root, scope, name, body))
     }
   }
   for (const [scope, dir] of [['project', path.join(root, '.gemini', 'commands')], ['global', path.join(home, '.gemini', 'commands')]]) {
     for (const [rel, file] of filesIn(dir, ['.toml'])) {
       const name = safe(rel)
-      add(`Gemini CLI · ${scope === 'global' ? 'yours' : 'this project'} · commands`, `/${name}`, /^description\s*=\s*"([^"]*)"/m.exec(fs.readFileSync(file, 'utf8'))?.[1] ?? '', () => importToml(root, scope, name, file), () => (taken(root, scope, name) ? `a skill named ${name} is already there` : ''))
+      add(`Gemini CLI · ${scope === 'global' ? 'global' : 'this project'} · commands`, `/${name}`, /^description\s*=\s*"([^"]*)"/m.exec(fs.readFileSync(file, 'utf8'))?.[1] ?? '', () => importToml(root, scope, name, file), () => (taken(root, scope, name) ? `a skill named ${name} is already there` : ''))
     }
   }
   const skillSources = [
@@ -212,7 +212,7 @@ export function findImports(root, home = os.homedir()) {
       const file = path.join(dir, e.name, 'SKILL.md')
       if (!e.isDirectory() || !exists(file)) continue
       const { meta, body } = frontMatter(fs.readFileSync(file, 'utf8'))
-      add(`${tool} · ${scope === 'global' ? 'yours' : 'this project'} · skills`, safe(e.name), (meta.description ?? '').slice(0, 90), () => importSkillFolder(root, scope, safe(e.name), path.join(dir, e.name)), () => skillDup(root, scope, safe(e.name), body))
+      add(`${tool} · ${scope === 'global' ? 'global' : 'this project'} · skills`, safe(e.name), (meta.description ?? '').slice(0, 90), () => importSkillFolder(root, scope, safe(e.name), path.join(dir, e.name)), () => skillDup(root, scope, safe(e.name), body))
     }
   }
   const claudeJson = readJson(path.join(home, '.claude.json'), {})
@@ -229,11 +229,11 @@ export function findImports(root, home = os.homedir()) {
   for (const [tool, scope, servers] of mcpSources) {
     for (const [name, cfg] of Object.entries(servers ?? {})) {
       if (!cfg?.command && !cfg?.url && !cfg?.httpUrl) continue
-      add(`${tool} · ${scope === 'global' ? 'yours' : 'this project'} · MCP servers`, name, (cfg.command ? `${cfg.command} ${(cfg.args ?? []).join(' ')}` : (cfg.url ?? cfg.httpUrl)).slice(0, 90), () => importMcp(root, scope, name, cfg), () => mcpDup(root, scope, name, cfg))
+      add(`${tool} · ${scope === 'global' ? 'global' : 'this project'} · MCP servers`, name, (cfg.command ? `${cfg.command} ${(cfg.args ?? []).join(' ')}` : (cfg.url ?? cfg.httpUrl)).slice(0, 90), () => importMcp(root, scope, name, cfg), () => mcpDup(root, scope, name, cfg))
     }
   }
   for (const [tool, file] of [['Claude Code', path.join(home, '.claude', 'CLAUDE.md')], ['Codex', path.join(home, '.codex', 'AGENTS.md')], ['Gemini CLI', path.join(home, '.gemini', 'GEMINI.md')]]) {
-    if (exists(file)) add(`${tool} · yours · instructions`, path.basename(file), `your ${tool} instructions → ~/.heart/HEARTCODE.md`, () => importInstructions(file, tool))
+    if (exists(file)) add(`${tool} · global · instructions`, path.basename(file), `${tool} instructions → ~/.heart/HEARTCODE.md`, () => importInstructions(file, tool))
   }
   const claudeMemory = path.join(home, '.claude', 'projects', root.replace(/[^a-zA-Z0-9]/g, '-'), 'memory')
   const notes = filesIn(claudeMemory, ['.md']).filter(([n]) => n !== 'MEMORY')

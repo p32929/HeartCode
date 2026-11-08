@@ -106,8 +106,17 @@ function newestOf(name) {
 // however it's written (google/gemini-2.5-flash, models/gemini-2.5-flash, gpt-oss:120b ≈
 // gpt-oss-120b): at this provider first; else, among all that list it, the size most say (a
 // proxy or a provider models.dev doesn't know serves the model at its usual size).
+// Remembered per models.dev list (a new list: worked out again): the settings page asks for every
+// model of every provider each time it loads.
+const looked = new WeakMap()
 export function limitsOf(provider, baseUrl, model) {
   if (!table || !model) return null
+  const memo = looked.get(table) ?? looked.set(table, new Map()).get(table)
+  const key = `${provider}\n${baseUrl}\n${model}`
+  if (!memo.has(key)) memo.set(key, lookUpLimits(provider, baseUrl, model))
+  return memo.get(key)
+}
+function lookUpLimits(provider, baseUrl, model) {
   const last = (m) => m.split('/').pop()
   const own = ownBy(provider, baseUrl)
   const found = { own: [], all: [] }

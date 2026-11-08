@@ -89,7 +89,7 @@ export async function runAcp({ makeApp, version, permission = 'ask', input = pro
     if (chat) app.setChat(chat)
     ui.sessionId = app.chat.id
     const s = await app.session()
-    if (!s) throw Object.assign(new Error(app.allOff() ? 'the providers of all your models are switched off: switch one on in heart settings' : 'no model set up: run heart settings to add a provider and choose a model'), { code: -32000 })
+    if (!s) throw Object.assign(new Error(app.allOff() ? 'the providers of all the models are switched off: switch one on in heart settings' : 'no model set up: run heart settings to add a provider and choose a model'), { code: -32000 })
     s.onEvent = (e) => events(ui, s, e)
     sessions.set(ui.sessionId, { app, ui, ctl: null })
     return { app, ui }
@@ -134,7 +134,7 @@ export async function runAcp({ makeApp, version, permission = 'ask', input = pro
       app.working = true // settings changed meanwhile: MCP servers and skills wait for the end of it
       try {
         const s = app.s ?? (await app.session()) // a model chosen again on the settings page
-        if (!s) throw Object.assign(new Error(app.allOff() ? 'the providers of all your models are switched off: switch one on in heart settings' : 'no model set up: run heart settings to add a provider and choose a model'), { code: -32000 })
+        if (!s) throw Object.assign(new Error(app.allOff() ? 'the providers of all the models are switched off: switch one on in heart settings' : 'no model set up: run heart settings to add a provider and choose a model'), { code: -32000 })
         s.onEvent ??= (e) => events(it.ui, s, e)
         const k = /^\/(\S+)\s*([\s\S]*)$/.exec(text)
         const skill = k && app.skills.get(k[1].replace(/^skill:/, '')) // /name or /skill:name, as in the full screen
@@ -219,7 +219,7 @@ function events(ui, s, e) {
     ui.calls = ui.calls.filter((id) => id !== e.id)
     const failed = toolFailed(e.output)
     ui.update({ sessionUpdate: 'tool_call_update', toolCallId: e.id, status: failed ? 'failed' : 'completed', content: [{ type: 'content', content: { type: 'text', text: clip(plain(e.output), 4000) } }] })
-    if (e.name === 'todo') ui.update({ sessionUpdate: 'plan', entries: (s.chat.todos ?? []).map((t) => ({ content: t.content, priority: 'medium', status: t.status })) })
+    if (e.name === 'todo') ui.update({ sessionUpdate: 'plan', entries: (s.chat.todos ?? []).map((t) => ({ content: t.content, priority: 'medium', status: t.status === 'stuck' ? 'in_progress' : t.status })) }) // ACP has no stuck
   }
 }
 

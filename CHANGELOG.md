@@ -2,6 +2,34 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.60 (2026-11-08)
+
+- **Models say when they're stuck, and get help**: a todo step can be marked `stuck` with why; the
+  1st time it's told to change approach, the 2nd another model gives a second opinion (a Big & hard
+  helper first), the 3rd the next model takes over (not another version of the same one, nor one
+  given up on already). An answer that says it didn't manage counts the same; with no model left,
+  it says plainly what blocks it. Headless: `stuck` events, `why` on todos.
+- **No giving up without trying**: "I can't browse / run…" before any tool is used gets a reminder
+  of its tools, then the next model. An answer repeated after "not done" or a review's no hands the
+  task over. The review now also checks tasks that changed no files but ran commands or a browser.
+- **Helpers see what they're asked about**: an image named in a helper's job is attached, so a model
+  that can see takes it; a helper that can't see gets its screenshots described by one that can.
+  The same tool failing three times in a row: told to stop and find out why.
+- **Learns from struggles**: what blocked a task (from how it ended and the review, not from the
+  model's excuses) or what got it unstuck is saved as a lesson; a failed task's lesson is what to
+  check first next time.
+- **Settings, Models page**: helper jobs and narrow columns are icons (names on hover), rankings show
+  the place only, and the table fits the screen on a desktop and a 1280px laptop; the controls in
+  three rows with icons (the list's actions by the title; fail-over and helper settings; filters).
+  Helpers: **Automatic / Manual**, used in list order, by provider or **by score** (best ranked
+  first). A phone gets a dismissible "works best on a desktop".
+- **No more you/your**: the settings page and the CLI use plain labels ("Models", "List").
+- **Settings load fast**: model profiles, models.dev lookups and the saved model lists are kept in
+  memory (read again when their files change) and warmed in the background: the Providers page with
+  2,895 models is ready in about a third of a second (was several seconds).
+- **Model lists**: a provider that answers with a bare list (Typhoon) is read; loading a list waits
+  up to a minute.
+
 ## 0.1.59 (2026-11-07)
 
 - **You see which model does what**: every step names its model (`● web_fetch … · model`), each

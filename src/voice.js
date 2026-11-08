@@ -36,7 +36,7 @@ export function localModel(cfg = {}, { fast = false } = {}) {
 // Why voice can't work here, or null when it can.
 export function voiceProblem(cfg = {}, providers = {}) {
   if (!onPath('ffmpeg')) return 'voice input needs ffmpeg to record (brew install ffmpeg)'
-  if (cfg.provider) return providers[cfg.provider] ? null : `voice.provider "${cfg.provider}" isn't one of your providers`
+  if (cfg.provider) return providers[cfg.provider] ? null : `voice.provider "${cfg.provider}" isn't one of the providers`
   if (!onPath('whisper-cli')) return 'voice input needs whisper-cli (brew install whisper-cpp) and a model, or "voice": { "provider": …, "model": … } in ~/.heart/config.json'
   return localModel(cfg) ? null : 'voice input needs a whisper model: put a ggml-*.bin in ~/.whisper-models, or set "voice": { "model": "/path/to/ggml-….bin" }'
 }

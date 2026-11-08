@@ -209,7 +209,7 @@ class Server {
 
   #signIn(how, signal) {
     const open = this.hub.onSignIn
-    if (!open) throw new Error(`${this.name} needs you to sign in: start heartcode and run /login_mcp ${this.name}`)
+    if (!open) throw new Error(`${this.name} needs a sign-in first: start heartcode and run /login_mcp ${this.name}`)
     return signIn(this.url, how, (link) => open(this.name, link), { signal, oauth: this.cfg.oauth })
   }
 

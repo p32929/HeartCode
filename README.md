@@ -28,6 +28,10 @@ has none, so there's nothing for anyone to poison.
 - When a conversation gets too long for a model, it moves to one of your models with more room
   instead of summarizing things away.
 - When a model goes round in circles, the next one takes over. Only you stop it (Esc).
+- Models are told to say when they're stuck, and believed: first a different approach, then a
+  second opinion from another of your models, then the next model takes over (not another version
+  of the same one). The same happens when a model says "I can't" without trying its tools, or
+  answers again without doing anything after being told it isn't done.
 
 **It works carefully**
 - It asks what you want before it builds, reads the current docs before it uses something, and
@@ -40,7 +44,8 @@ has none, so there's nothing for anyone to poison.
 - Every web page it reads is saved in `.heartcode/research/`.
 - After a task, it saves what's worth knowing as notes (`.heartcode/memory/`) and deletes the junk
   and throwaway files, in the background.
-- A mistake it fixes becomes a lesson it won't repeat.
+- A mistake it fixes becomes a lesson it won't repeat. So does what blocked a task, or what got it
+  unstuck, so the next task like it starts knowing.
 
 **It gets good work out of small and local models**
 - Models that can't call tools are guided one simple question at a time.
@@ -74,7 +79,8 @@ has none, so there's nothing for anyone to poison.
    let HeartCode pick them; without any, it can use any of your models, in your order. Every step
    on screen names the model doing it.
 6. **It checks before it says it's done**: it must have tested what it changed, finished its todo
-   list and made the files it names. Then your next models say yes or no; a no sends it back.
+   list and made the files it names. Then your next models say yes or no (also when it changed no
+   files but ran commands or a browser); a no sends it back.
 7. **It tidies up** in the background: saves notes for next time, removes throwaway files.
 
 ## How to set it up
@@ -111,7 +117,7 @@ key. A running HeartCode picks up your changes right away.
 
 What's in the sidebar:
 
-- **Models**: *Your list* (the models HeartCode uses, in order) and *Providers* (where they come from).
+- **Models**: *List* (the models HeartCode uses, in order) and *Providers* (where they come from).
 - **General**: what it may do without asking, colors, thinking effort, voice input, web search,
   and the *Status bar* (drag and drop what it shows). **Notifications**: Telegram.
 - **Skills**, **MCP servers** and **System prompt**: what HeartCode can do and what it's told.
@@ -128,7 +134,7 @@ On **Models → Providers**:
 
 ### 5. Put your list in order
 
-On **Models → Your list**:
+On **Models → List**:
 
 1. **Sort.** Click *Abilities*, then *Context*: the most capable models come first, the biggest
    context window first among those. Click **Save list**.
@@ -139,9 +145,10 @@ On **Models → Your list**:
    **Use only these** keeps just the ones you see, in that order.
 5. **Helpers** (optional): the models #1 can hand parts of a task to. In the *Helper* column, switch
    a model on and pick what it's good at: **UI & visuals**, **Code & logic**, **Big & hard**,
-   **Quick & cheap** (hover a pill to see what it covers). **Suggest helpers** proposes them from
-   the models that passed **Test all** and the rankings; or set *Helpers* to **picked for you**.
-   *Helpers picked* (beside **Order providers**): in your order, or by your provider ranking.
+   **Quick & cheap** (hover an icon to see what it covers). **Suggest helpers** proposes them from
+   the models that passed **Test all** and the rankings; or set *Helpers* (at the top) to
+   **Automatic**. *Used*: which helper #1 takes first: in your order, by your provider ranking, or
+   **by score** (best placed in LMArena's rankings first).
 
 **Update model info** fetches what each model can do and costs (from models.dev) and its places in
 LMArena's public rankings for coding, web apps and vision, as columns to sort by. A model *not

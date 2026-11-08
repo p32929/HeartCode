@@ -24,11 +24,11 @@ export const LOG_DIR = process.env.HEART_LOG === 'off' ? null : path.resolve(pro
 // The kinds of text log, what each is for, and which topics (log('topic', …)) go in it. A topic not
 // listed goes in debug.
 export const LOG_KINDS = {
-  tools: { label: 'Tools & commands', about: 'what HeartCode did on your machine: each tool call and its result, commands and background commands, MCP calls, files written', topics: ['tool', 'command', 'mcp', 'background', 'lsp', 'format', 'write', 'web', 'research', 'worktree'] },
+  tools: { label: 'Tools & commands', about: 'what HeartCode did on this machine: each tool call and its result, commands and background commands, MCP calls, files written', topics: ['tool', 'command', 'mcp', 'background', 'lsp', 'format', 'write', 'web', 'research', 'worktree'] },
   models: { label: 'Model choices', about: 'why a model answered or didn\'t: fallbacks, retries and quirks found', topics: ['rotate', 'retry', 'quirk'] },
   agent: { label: "Agent's decisions", about: 'why it did what it did: each task and its answer, plan-first, reviews, page checks, helpers and parts, compacting, lessons, the wrap-up', topics: ['task', 'look', 'review', 'compact', 'wrapup', 'learn', 'agent', 'director', 'guided', 'rewind', 'btw', 'parts'] },
   errors: { label: 'Errors', about: 'what went wrong: errors, crashes and warnings, with where they came from', topics: ['error', 'crash', 'warn', 'exit'] },
-  conversation: { label: 'Conversation', about: 'a plain transcript: what you typed, its answers, its questions and your answers', topics: ['input', 'ask', 'answer'] },
+  conversation: { label: 'Conversation', about: 'a plain transcript: the messages typed, the answers, its questions and the replies', topics: ['input', 'ask', 'answer'] },
   debug: { label: 'Debug', about: 'everything else, for a bug report: HTTP, settings, voice, Telegram, sign-ins, tabs, headless and ACP', topics: [] },
 }
 const KIND_OF = Object.fromEntries(Object.entries(LOG_KINDS).flatMap(([k, v]) => v.topics.map((t) => [t, k])))

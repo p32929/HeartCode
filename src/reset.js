@@ -9,13 +9,13 @@ export const RESETS = [
   {
     level: 'settings',
     label: 'Settings',
-    desc: 'permissions, theme, effort, the toggles, the model list, voice; your keys, colors, formatters, prompts, MCP servers and hooks. Your providers, keys and model stay.',
+    desc: 'permissions, theme, effort, the toggles, the model list, voice; keys, colors, formatters, prompts, MCP servers and hooks. Providers, keys and the model stay.',
     files: ['keybindings.json', 'theme.json', 'format.json', 'prompts', 'mcp.json', 'hooks.json'],
   },
   {
     level: 'providers',
     label: 'Settings and providers',
-    desc: 'the above, and your providers with their API keys, MCP sign-ins, what HeartCode learned about each model, prices',
+    desc: 'the above, and the providers with their API keys, MCP sign-ins, what HeartCode learned about each model, prices',
     files: ['config.json', 'mcp-auth.json', 'models', 'prices.json'],
   },
   {

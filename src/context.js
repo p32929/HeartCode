@@ -85,7 +85,7 @@ export function contextSource(p, cfg = {}) {
   if (from === 'server') return `reported by the server${p.server ? ` (${p.server})` : ''}`
   if (from === 'models.dev') return "models.dev's published limit for this model"
   if (from === 'learned') return 'learned from the server refusing or cutting a bigger request'
-  if (from === 'rate') return `your per-minute token cap at this provider, until ${new Date(p.rateCap.until).toLocaleString()}`
+  if (from === 'rate') return `the account's per-minute token cap at this provider, until ${new Date(p.rateCap.until).toLocaleString()}`
   if (LOCAL_SERVERS.includes(p.server)) return `the ${p.server} server doesn't say; assumed`
   return `the server doesn't say; assumed${p.largestAccepted ? `, and seen working up to ${p.largestAccepted} tokens` : ''} (grows as bigger requests work)`
 }

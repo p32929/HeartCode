@@ -5,6 +5,7 @@ import { Client, limitSaid, estMessages } from '../src/client.js'
 import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, TEMP, AUTO_MODEL, isAuto, parseModel, takeIn, whatOf, VERSION, speedOf, jobsOf } from '../src/config.js'
 import { loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
 import { learnFromUsage, LIMIT_MS, RATE_CAP_MS } from '../src/context.js'
+import { loadRankings, rankIn } from '../src/rankings.js'
 import { Session, transcript, contextReport } from '../src/agent.js'
 import { listJobs, getJob, stopJob, removeJob, runningJobs, tailLines, ago as ranFor } from '../src/background.js'
 import { checkUpdate, installKind, UPDATE_COMMANDS, packageDir, whatsNew } from '../src/update.js'
@@ -42,24 +43,24 @@ ${c.bold('usage')}
   heart ~/code/my-app                in that folder (a folder, not a file)
   heart "fix the failing test"       run one task and exit
   heart providers                    list added providers
-  heart models [filter]              what -m takes, one per line: "auto" (your list), then your models
+  heart models [filter]              what -m takes, one per line: "auto" (the list), then each model
                                      as provider/model, #1 first
   heart models --all [filter]        every provider's models (provider/model)
   heart models --json                as JSON (with --all too), for other programs
   heart config                       show the config file
-  heart settings                     change providers, models and settings in your browser
+  heart settings                     change providers, models and settings in the browser
 
 ${c.bold('options')}
   -u, --base-url <url>   use this server for this run (add --save to keep it)
   -m, --model <name>     this model alone for this run (provider/model, or a model of #1's provider);
-                         "auto" (the default): your list, #1 then the next when one fails
+                         "auto" (the default): the list, #1 then the next when one fails
       --fallback-model <name>  after -m's model when it fails (repeatable)
       --api-key <key>    API key for --base-url
   -y, --yes              do everything without asking (the default; through --acp, an editor: ask)
       --ask              ask before every edit and command, this run
       --hide-thinking    the model's thinking: only its last two lines while it thinks (the default; Alt+O shows all of it)
   -C, --cwd <dir>        project folder (default: current folder)
-      --temp             keep nothing: a throwaway settings folder (your providers, model info,
+      --temp             keep nothing: a throwaway settings folder (providers, model info,
                          prices and notes copied in), shared by the --temp runs going on at once
                          and deleted after the last, with its logs; ~/.heart and the project's
                          .heartcode/ aren't touched (their notes and research are read from a copy)
@@ -101,16 +102,16 @@ ${c.bold('in a session')}  attach an image with @path/to/shot.png · /help for c
 // [name, description, takes an argument], by section. /help and the "/" menu are built from it.
 const SECTIONS = [
   ['providers and models', [
-    ['/select_model', 'pick the model(s) for this session: one pins it, several rotate among them, auto = your whole list', true],
+    ['/select_model', 'pick the model(s) for this session: one pins it, several rotate among them, auto = the whole list', true],
   ]],
   ['settings', [
     ['/toggle_thinking', "the model's thinking: its last two lines, or all of it (Alt+O)"],
-    ['/voice', 'say your message (or Space in an empty box, once voice is set up): it shows in the box as you speak, Enter sends it, Esc cancels'],
+    ['/voice', 'dictate a message (or Space in an empty box, once voice is set up): it shows in the box while speaking, Enter sends it, Esc cancels'],
   ]],
   ['session', [
     ['/resume', 'continue an earlier session in this folder'],
     ['/rewind', 'go back to an earlier message: conversation, code or both (Esc Esc); what came after stays in /tree'],
-    ['/tree', "every message on every branch of this session: go to any, the files follow, a summary of what you leave comes along"],
+    ['/tree', "every message on every branch of this session: go to any, the files follow, a summary of the branch left behind comes along"],
     ['/rename', 'name this session (shown in /resume)', true],
     ['/fork', 'go on in a copy of this session (the original stays in /resume)'],
     ['/export', 'save the conversation as Markdown, HTML or JSON', true],
@@ -127,12 +128,12 @@ const SECTIONS = [
     ['/install_skill', 'install a skill from a GitHub repo or a SKILL.md URL (add --project for this folder only)', true],
     ['/doctor', 'check the outside tools HeartCode features need (voice, browser, git) and what to install'],
     ['/update', 'install the newest HeartCode (shows what changed first)'],
-    ['/mcp', 'your MCP servers and whether each needs signing in'],
+    ['/mcp', 'the MCP servers and whether each needs signing in'],
     ['/login_mcp', 'sign in (again) to a remote MCP server', true],
     ['/compact', 'summarize the conversation to free up context (add what to keep)', true],
     ['/clear_chat', 'forget the conversation'],
     ['/reset', "HeartCode's settings (or also providers, or everything) back to the start; asks for a code first"],
-    ['/settings', 'change providers, models, settings, MCP servers, hooks, keys and skills in your browser'],
+    ['/settings', 'change providers, models, settings, MCP servers, hooks, keys and skills in the browser'],
     ['/help', 'this list'],
     ['/tab', 'a new tab (Alt+T): another conversation beside this one · /tab worktree [name]: in its own git worktree · /tab 2: go to tab 2 (Alt+2; Alt+N/P: the next or previous) · Alt+W closes one', true],
     ['/close_tab', 'close this tab (Alt+W); asks first'],
@@ -154,7 +155,7 @@ function keysHelp(keys = {}, mouse = false, voice = false) {
   const forAct = (a) => Object.entries(keys).filter(([, v]) => v === a).map(([k]) => prettyKey(k)).join(' / ')
   const tabs = Object.values(keys).some((v) => /^tab_[1-9]$/.test(v))
   const rows = [
-    [voice ? 'Space' : '', 'voice: listens at once, Enter sends what you said (in an empty box)'],
+    [voice ? 'Space' : '', 'voice: listens at once, Enter sends what was said (in an empty box)'],
     ['Enter', 'send · while it works, queue the message (commands like /help, /cost, /select_model run at once)'],
     ['Option+Enter or Shift+Enter', 'new line in the box (also while it works)'],
     ['Esc', 'while it works: queued messages back into the box, then clears the box, then stops the task (twice)'],
@@ -182,13 +183,13 @@ function keysHelp(keys = {}, mouse = false, voice = false) {
   return rows
 }
 
-const HOWTO = `${c.yellow('No model set up yet.')} Add a provider and choose its models in your browser:
+const HOWTO = `${c.yellow('No model set up yet.')} Add a provider and choose its models in the browser:
 
   ${c.cyan('/settings')}          (or ${c.cyan('heart settings')} in another terminal)
 
 ${c.dim('Ollama, LM Studio or llama.cpp running on this machine is found on its own.')}`
 const NO_MODELS = `${c.yellow('No model chosen yet.')} Choose one on ${c.cyan('/settings')}: a provider's models, click one.`
-const ALL_OFF = `${c.yellow('The providers of all your models are switched off.')} Switch one on on ${c.cyan('/settings')}, or add a model of one that's on.`
+const ALL_OFF = `${c.yellow('The providers of all the models are switched off.')} Switch one on on ${c.cyan('/settings')}, or add a model of one that's on.`
 
 // Choices for commands that take one (also offered in the "/" menu).
 const ARGS = {
@@ -248,10 +249,10 @@ class App {
     // a remote server asks to sign in: its page opens in the browser (and the link is shown)
     if (!this.ui.noUser)
       mcp.onSignIn = (name, url) => {
-        this.ui.print(`${c.info('↗')} ${c.bold(name)} ${c.muted('needs you to sign in; opening your browser…')}\n  ${c.faint(url)}`)
+        this.ui.print(`${c.info('↗')} ${c.bold(name)} ${c.muted('needs a sign-in; opening the browser…')}\n  ${c.faint(url)}`)
         const [cmd, ...args] = process.platform === 'darwin' ? ['open', url] : process.platform === 'win32' ? ['rundll32', 'url.dll,FileProtocolHandler', url] : ['xdg-open', url]
         spawnSync(cmd, args, { stdio: 'ignore' })
-        this.ui.spinner(`waiting for you to sign in to ${name} in the browser · Esc twice to stop`)
+        this.ui.spinner(`waiting for the sign-in to ${name} in the browser · Esc twice to stop`)
       }
     return mcp
   }
@@ -370,7 +371,7 @@ class App {
       const from = failed?.t
       const why = f ? `${failed.t.model} ${f.status === 429 ? 'rate-limited (429)' : `failed (${clip(shortError(f), 50)})`} → ` : ''
       failed = null
-      switched = c.dim(`↻ ${why}${t.provider} · ${t.model} answered${i ? ` (#${i + 1} in your model list)` : ' (#1 again)'}`)
+      switched = c.dim(`↻ ${why}${t.provider} · ${t.model} answered${i ? ` (#${i + 1} in the model list)` : ' (#1 again)'}`)
       ui.event?.({ subtype: 'model_switch', from: from ? `${from.provider}/${from.model}` : null, to: `${t.provider}/${t.model}`, reason: f ? (f.status === 429 ? 'rate-limited (429)' : shortError(f)) : null, place: i + 1 })
       setImmediate(client.announceSwitch)
     }
@@ -555,7 +556,7 @@ class App {
   // leave is kept, the files can follow, and a summary of what you leave can come along.
   async tree() {
     const { ui, chat } = this
-    if (!chat.turns.length && !chat.branches?.length) return ui.print('Nothing here yet: the tree grows as you send messages and go back (/rewind, /tree).')
+    if (!chat.turns.length && !chat.branches?.length) return ui.print('Nothing here yet: the tree grows as messages are sent and rewound (/rewind, /tree).')
     chat.log = ui.log
     const n = (chat.branches?.length ?? 0) + 1
     const it = await ui.pick(`This session${n > 1 ? `, ${n} branches` : ''} · pick a message`, treeItems(chat, ago))
@@ -580,7 +581,7 @@ class App {
     }
     let summarize = false
     if (leaving(chat, it.branch, go.keep) && (this.s || this.cfg.providers[this.cfg.provider])) {
-      const a = await ui.pick('Bring a summary of the messages you leave?', [
+      const a = await ui.pick('Bring a summary of the messages left behind?', [
         { label: 'Yes', desc: 'one request to the model, so this branch knows what was tried there', yes: true },
         { label: 'No', desc: 'they stay in the tree, the model just won\'t know about them' },
       ])
@@ -594,13 +595,13 @@ class App {
     if (summarize) {
       const s = await this.session()
       if (s) {
-        ui.spinner('summarizing the branch you left')
+        ui.spinner('summarizing the branch left behind')
         try {
           const changedThere = leftFiles(left)
           const summary = await s.summarizeBranch(leftText(left, transcript), changedThere, this.signal)
           chat.branchNote = prompt('compact/branch-note', { summary, files: changedThere.join(', '), kept: changedThere.length && !code, restored: changedThere.length && code })
           ui.stopSpin()
-          ui.print(`${c.faint('✻')} ${c.muted(`summary of the branch you left (goes with your next message): ${clip(summary.split('\n').find((l) => l.trim()) ?? '', 120)}`)}`)
+          ui.print(`${c.faint('✻')} ${c.muted(`summary of the branch left behind (goes with the next message): ${clip(summary.split('\n').find((l) => l.trim()) ?? '', 120)}`)}`)
         } catch (e) {
           ui.stopSpin()
           if (e.name === 'AbortError') throw e
@@ -608,7 +609,7 @@ class App {
         }
       }
     }
-    ui.print(c.dim(`${go.edit ? 'edit the message and send it: a new branch' : 'here now'} · the branch you left stays in /tree`))
+    ui.print(c.dim(`${go.edit ? 'edit the message and send it: a new branch' : 'here now'} · the branch left behind stays in /tree`))
     if (go.edit) this.nextInput = it.task
     if (this.s) this.s.client.lastTokens = 0
     this.save()
@@ -634,7 +635,7 @@ class App {
   help() {
     const mine = this.commands().slice(COMMANDS.length)
     const sections = [...SECTIONS]
-    if (mine.length) sections.push(['your skills (type /skill:name)', mine])
+    if (mine.length) sections.push(['skills (type /skill:name)', mine])
     sections.push(['keyboard', keysHelp(this.ui.keys, this.cfg?.mouse !== false, Boolean(this.ui.voiceReady?.()))])
     return helpText(sections)
   }
@@ -699,7 +700,7 @@ class App {
     if (!cfg.providers[cfg.provider] || !cfg.model) return c.dim('no model · /settings to choose one')
     const rot = this.s?.client.rotation
     const now = this.inUse() // the model list's one in use; never one of a provider that's off
-    if (!now) return c.dim('the providers of all your models are off · /settings to switch one on')
+    if (!now) return c.dim('the providers of all the models are off · /settings to switch one on')
     const count = this.sessionModels().length
     // the model answering now; a yellow "↻" before it when it's a fallback (rotated to after one failed)
     const rotated = rot && rot.at > 0
@@ -714,7 +715,7 @@ class App {
     const parts = {
       provider: `${c.brand('●')} ${c.muted(now.provider)}`,
       model,
-      mode: strat ? (strat.actions === 'tools' ? null : c.muted('no tool calls (guided)')) : c.faint('checked at your first message'), // what it can do: known once it's been asked
+      mode: strat ? (strat.actions === 'tools' ? null : c.muted('no tool calls (guided)')) : c.faint('checked at the first message'), // what it can do: known once it's been asked
       thinking: strat?.thinking ? c.think(`thinking · ${effortOf(cfg)}`) + (ui.showThinking ? c.faint(' (all)') : '') : null,
       images: strat?.vision ? c.muted('images') : null,
       ctx: null,
@@ -851,13 +852,26 @@ class App {
     return this.sessionModels()
       .filter((t) => !(t.provider === now?.provider && t.model === now?.model))
       .map((t) => ({ ...t, ...this.abilities(t), jobs: jobsOf(this.cfg.helpers?.[`${t.provider}/${t.model}`]) })) // jobs: ticked as a helper on Your models (what for)
-      .sort(this.byProvider()) // helpers picked in your list's order, or your provider ranking's (Your models)
+      .sort(this.byProvider()) // helpers picked in your list's order, your provider ranking's, or by score (Your models)
   }
 
   // Your models' "Helper order": by your provider ranking, a sort that puts the higher-ranked
   // provider's models first (each provider's in your list's order; providers not ranked after, A to
   // Z); in your list's order, one that keeps it.
+  // By score: the best placed in LMArena's rankings first (its best share of a list: #5 of 200 is 2.5%),
+  // across the lists the helpers are picked by (coding, web apps, long real tasks, hard prompts);
+  // models not in them after, in your list's order.
   byProvider() {
+    if (this.cfg.helperOrder === 'score') {
+      const data = loadRankings()
+      const share = new Map()
+      const of = (t) => {
+        const k = `${t.provider}/${t.model}`
+        if (!share.has(k)) share.set(k, Math.min(...['text:coding', 'webdev:webdev', 'agent:overall', 'text:hard_prompts'].map((l) => rankIn(t.model, l, data)).filter(Boolean).map((r) => r.rank / r.of), Infinity))
+        return share.get(k)
+      }
+      return (a, b) => (of(a) === of(b) ? 0 : of(a) < of(b) ? -1 : 1) // Infinity (not ranked) last; ties keep your order
+    }
     const rank = this.cfg.helperOrder === 'provider' && Array.isArray(this.cfg.providerRank) ? this.cfg.providerRank : null
     if (!rank) return () => 0
     const at = (p) => (rank.includes(p) ? rank.indexOf(p) : rank.length)
@@ -1019,7 +1033,7 @@ class App {
       this.s = null
     }
     const msg = list.length === 1 ? `${c.green('using')} ${c.cyan(list[0].model)} ${c.dim('· pinned for this folder')}` : `${c.green(`using ${list.length} models for this folder`)}: ${c.cyan(list.map((t) => t.model).join(', '))}`
-    if (later) return this.later.push(apply), this.ui.print(`${msg} ${c.dim('· from your next message')}`)
+    if (later) return this.later.push(apply), this.ui.print(`${msg} ${c.dim('· from the next message')}`)
     apply()
     this.ui.print(msg)
     await this.session()
@@ -1036,7 +1050,7 @@ class App {
     }
     const n = this.myModels().length
     const msg = `${c.green('using')} ${c.dim('auto')} ${c.cyan(`(${n} model${n === 1 ? '' : 's'})`)}`
-    if (later) return this.later.push(apply), this.ui.print(`${msg} ${c.dim('· from your next message')}`)
+    if (later) return this.later.push(apply), this.ui.print(`${msg} ${c.dim('· from the next message')}`)
     apply()
     this.ui.print(msg)
     await this.session()
@@ -1055,7 +1069,7 @@ class App {
     const chosen = new Set((cfg.session ?? mine).map(key)) // pre-ticked: this session's set, or all (auto)
     const items = mine.map((t) => ({ label: t.model, t, checked: chosen.has(key(t)), desc: this.modelDesc(t, mine.indexOf(t)) }))
     // first, standing alone: back to auto (Enter on it, whatever is ticked)
-    const auto = { label: 'auto', only: true, auto: true, desc: `your whole list, in its order (${mine.length} model${mine.length === 1 ? '' : 's'})${cfg.session ? ' · forgets what this folder picked' : ' · in use'}` }
+    const auto = { label: 'auto', only: true, auto: true, desc: `the whole list, in its order (${mine.length} model${mine.length === 1 ? '' : 's'})${cfg.session ? ' · forgets what this folder picked' : ' · in use'}` }
     const guessed = mine.some((t) => this.abilities(t).guessed) ? "\n~128k and the like: the window's size is a guess (models.dev doesn't list the model)" : ''
     const picked = await ui.pick('Models for this session', [auto, ...items], { filter, multi: true, body: `Tick several to rotate among them, one to pin it, or choose auto.${guessed}` })
     if (!picked) return
@@ -1085,7 +1099,7 @@ class App {
     const missing = []
     for (const spec of specs) (resolve(spec) ? found : missing).push(resolve(spec) ?? spec)
     if (missing.length || !found.length) {
-      if (missing.length) this.ui.print(c.dim(`not in your models: ${missing.join(', ')} · add on /settings`))
+      if (missing.length) this.ui.print(c.dim(`not in the model list: ${missing.join(', ')} · add on /settings`))
       return this.chooseModel(specs.length === 1 ? specs[0] : '', later)
     }
     return this.setSession(found, later)
@@ -1176,7 +1190,7 @@ async function continueTabs(app, saved) {
   if (!open.length) return
   const many = open.length > 1
   const newest = open.map((t) => t.chat.updated).sort().at(-1)
-  const go = await ui.pick(many ? `Continue where you left off? ${open.length} tabs` : 'Continue your last session here?', [
+  const go = await ui.pick(many ? `Continue where it left off? ${open.length} tabs` : 'Continue the last session here?', [
     { label: many ? `Yes, with its ${open.length} tabs` : 'Yes', desc: `${open.map((t) => `"${t.chat.title}"`).join(', ')} · ${ago(newest)}`, yes: true },
     { label: 'No, start a new session', desc: '/resume finds it later' },
   ], { quiet: true, fixed: true })
@@ -1202,8 +1216,8 @@ async function continueTabs(app, saved) {
 // A continued tab's own model, as it was (unless its provider is gone: then the current one).
 function useModel(app, { provider, model }) {
   if (!provider || !model || (provider === app.cfg.provider && model === app.cfg.model)) return
-  if (!app.cfg.providers[provider]) return app.ui.warn(`this tab used ${provider} · ${model}, but there's no provider "${provider}" now: using your list`)
-  if (app.cfg.providers[provider].off) return app.ui.warn(`this tab used ${provider} · ${model}, but ${provider} is switched off: using your list`)
+  if (!app.cfg.providers[provider]) return app.ui.warn(`this tab used ${provider} · ${model}, but there's no provider "${provider}" now: using the list`)
+  if (app.cfg.providers[provider].off) return app.ui.warn(`this tab used ${provider} · ${model}, but ${provider} is switched off: using the list`)
   Object.assign(app.cfg, { provider, model })
   app.s = null
 }
@@ -1243,7 +1257,7 @@ function applySettings(apps, cfg, what) {
     if (what === 'model' && !app.cfg.session) {
       app.lists = {}
       if (app.s && !(cfg.providers[cfg.provider] && cfg.model)) now(() => ((app.s = null), ui.print(c.dim('settings: no model chosen'))))
-      else if (app.s && !app.myModels().length) now(() => ((app.s = null), ui.print(c.dim('settings: the providers of all your models are switched off'))))
+      else if (app.s && !app.myModels().length) now(() => ((app.s = null), ui.print(c.dim('settings: the providers of all the models are switched off'))))
     }
     // your model list: into the running session now, its next request goes to the new #1
     if (['model', 'setting:rotation'].includes(what) && !app.cfg.session && app.s && cfg.providers[cfg.provider] && cfg.model) {
@@ -1422,7 +1436,7 @@ async function slash(app, line, working = false) {
       const n = app.tabs?.list.length ?? 1
       if (n > 1 || working) {
         const go = await ui.pick(`Quit HeartCode?${working ? ' It is still working: that stops.' : ''}${n > 1 ? ` ${n} tabs are open` : ''}`, [
-          { label: 'Yes, quit', desc: 'they come back next time you start HeartCode here', yes: true },
+          { label: 'Yes, quit', desc: 'they come back the next time HeartCode starts here', yes: true },
           { label: 'No', desc: 'Alt+W closes just this tab' },
         ])
         if (!go?.yes) return
@@ -1439,7 +1453,7 @@ async function slash(app, line, working = false) {
       const home = process.env.HOME
       const tilde = (f) => (home && f.startsWith(home) ? '~' + f.slice(home.length) : f)
       const files = resetPaths(it.level)
-      const what = [...(it.level === 'settings' ? [`the settings in ${tilde(CONFIG_FILE)} (not your providers, keys or model)`] : []), ...files.map(tilde)]
+      const what = [...(it.level === 'settings' ? [`the settings in ${tilde(CONFIG_FILE)} (not the providers, keys or model)`] : []), ...files.map(tilde)]
       ui.print(`${c.warn('!')} ${c.bold(`Reset: ${it.label.toLowerCase()}.`)} ${c.muted("This can't be undone. It removes:")}\n${what.length ? what.map((f) => `  ${c.faint('·')} ${f}`).join('\n') : c.faint('  (nothing there yet)')}`)
       const code = resetCode()
       const typed = await ui.ask(`  Type ${c.bold(code)} to reset ${c.dim('(anything else: no)')}: `)
@@ -1453,7 +1467,7 @@ async function slash(app, line, working = false) {
       settingsPage ??= startSettings({ cfg, root: app.root, onLoginMcp: (name) => signInMcp(app, name, null), apply: (what) => applySettings(app.tabs ? app.tabs.list.map((t) => t.app) : [app], cfg, what) })
       const { url, local, close } = await settingsPage
       openBrowser(local)
-      if (!ui.full) ui.print(`${c.info('↗')} ${c.bold('settings')} ${c.muted(overSsh ? 'open this link in your browser:' : 'opened in your browser:')}\n  ${c.faint(url)}`)
+      if (!ui.full) ui.print(`${c.info('↗')} ${c.bold('settings')} ${c.muted(overSsh ? 'open this link in a browser:' : 'opened in the browser:')}\n  ${c.faint(url)}`)
       // a dialog until it's turned off: nothing else meanwhile, in any tab (Esc turns it off too).
       // Not busy meanwhile: what's changed on the page applies at once, here too (opened while a task
       // works: once it's done).
@@ -1461,7 +1475,7 @@ async function slash(app, line, working = false) {
       if (app.tabs) app.tabs.locked = true
       ui.setMouse(false) // the terminal's own selection for the link: OSC 52 copying fails in some terminals
       try {
-        await ui.pick('The settings page is on', [{ label: 'Turn off', desc: 'stops the page and gives HeartCode back' }], { fixed: true, quiet: true, ctrlC: true, body: `${overSsh ? 'Open this link in your browser:' : "It's open in your browser:"}\n${url}\n\nTo copy it, select it with the mouse.\nWhat you change there applies right away.` })
+        await ui.pick('The settings page is on', [{ label: 'Turn off', desc: 'stops the page and gives HeartCode back' }], { fixed: true, quiet: true, ctrlC: true, body: `${overSsh ? 'Open this link in a browser:' : "It's open in the browser:"}\n${url}\n\nTo copy it, select it with the mouse.\nChanges there apply right away.` })
       } finally {
         ui.setMouse(cfg.mouse !== false)
         if (app.tabs) app.tabs.locked = false
@@ -1493,9 +1507,9 @@ async function slash(app, line, working = false) {
       if (!u.newer) return ui.print(c.dim(`HeartCode ${u.current} is the newest`))
       const kind = installKind()
       const notes = await whatsNew(u.current, u.latest)
-      if (kind === 'git') return ui.showText(`HeartCode ${u.latest} is out (you have ${u.current})`, `${notes || '(no changelog found)'}\n\nThis HeartCode runs from a git checkout (${packageDir}): update it there with git pull.`)
+      if (kind === 'git') return ui.showText(`HeartCode ${u.latest} is out (this is ${u.current})`, `${notes || '(no changelog found)'}\n\nThis HeartCode runs from a git checkout (${packageDir}): update it there with git pull.`)
       const cmd = UPDATE_COMMANDS[kind]
-      ui.showText(`HeartCode ${u.latest} is out (you have ${u.current})`, notes || '(no changelog found)')
+      ui.showText(`HeartCode ${u.latest} is out (this is ${u.current})`, notes || '(no changelog found)')
       if ((await ui.confirm(`Update now with ${c.bold(cmd)}?`, 'command')) !== true) return ui.print(c.dim('not updated'))
       ui.spinner(`running ${cmd}`)
       const r = await runCommand(process.cwd(), cmd, { timeout: 300_000 })
@@ -1520,7 +1534,7 @@ async function slash(app, line, working = false) {
       const was = app.chat.id
       app.setChat(forkChat(app.chat))
       app.save()
-      return ui.print(c.dim(`forked: you're in "${app.chat.name}" now; the original (${was}) stays in /resume`))
+      return ui.print(c.dim(`forked: now in "${app.chat.name}"; the original (${was}) stays in /resume`))
     }
     case 'export': {
       if (!app.chat.turns.length) return ui.print('Nothing to export yet.')
@@ -1565,7 +1579,7 @@ async function slash(app, line, working = false) {
       const answer = app.chat.history.at(-1)?.answer?.trim()
       if (!answer) return ui.print('No answer to copy yet.')
       const how = copyText(answer)
-      return ui.print(c.dim(`copied the last answer (${answer.split('\n').length} lines)${how === 'osc' ? ' if your terminal allows it' : ''}`))
+      return ui.print(c.dim(`copied the last answer (${answer.split('\n').length} lines)${how === 'osc' ? ' if the terminal allows it' : ''}`))
     }
     case 'background': {
       const jobs = listJobs(app.root)
@@ -1585,7 +1599,7 @@ async function slash(app, line, working = false) {
     }
     case 'context': {
       const s = app.s
-      if (!s?.messages?.length) return ui.print('Nothing in the context yet: it fills with your first message.')
+      if (!s?.messages?.length) return ui.print('Nothing in the context yet: it fills with the first message.')
       const r = contextReport(s)
       const share = (n) => (r.window ? `${Math.round((n / r.window) * 100)}%` : '')
       const bar = (n) => c.brand('█'.repeat(r.window ? Math.round((n / r.window) * 40) : 0) || (n ? '▏' : ''))
@@ -1733,7 +1747,7 @@ async function slash(app, line, working = false) {
       const name = cmd.slice(6)
       const k = app.skills.get(name)
       if (k && (k.use === 'me' || k.use === 'both')) return runTask(app, await app.expandSkill(k, args.join(' ')), { signal: app.signal })
-      return ui.print(`unknown skill /skill:${name} ${c.dim('· /help lists your skills')}`)
+      return ui.print(`unknown skill /skill:${name} ${c.dim('· /help lists the skills')}`)
     }
     if (app.skills.has(cmd)) return ui.print(`${c.dim(`/${cmd} is a skill — run it as`)} ${c.cyan(`/skill:${cmd}`)}`) // bare skill name: point to the namespaced form
     return ui.print(`unknown command /${cmd} ${c.dim('· /help lists them')}`)
@@ -1801,7 +1815,7 @@ async function repl(app, f = {}) {
       .catch((e) => (log('error', e.stack), ui.print(c.red(`error: ${e.message}`))))
     return true
   }
-  ui.onWaiting = (question) => notify(cfg, 'waiting', `⏳ Waiting for you · ${path.basename(app.root)}\n${clip(question.replace(/\x1b\[[0-9;]*m/g, '').replace(/\s*›\s*$/, '').replace(/^\?\s*/, '').trim(), 1000)}`) // a question or a permission while it works (Telegram)
+  ui.onWaiting = (question) => notify(cfg, 'waiting', `⏳ Waiting for an answer · ${path.basename(app.root)}\n${clip(question.replace(/\x1b\[[0-9;]*m/g, '').replace(/\s*›\s*$/, '').replace(/^\?\s*/, '').trim(), 1000)}`) // a question or a permission while it works (Telegram)
   ui.isCommand = (l) => app.isCommand(l)
   loadPrices().then(() => ui.render?.()) // models.dev: what each model can do, for the model lists
   ui.voiceConfig = () => ({ voice: cfg.voice, providers: cfg.providers })
@@ -1892,7 +1906,7 @@ async function repl(app, f = {}) {
   else if (f.resume) await app.resume()
   if (f.model) useModel(app, f.model) // a continued tab's own model
   // models this folder picked earlier (/select_model): said, with the way back to your whole list
-  if (app.folderModels && cfg.session?.length) ui.print(`${c.muted('this folder uses')} ${c.cyan(cfg.session.map((t) => t.model).join(', '))} ${c.faint(`(picked earlier) · ${c.cyan('/select_model auto')} for your whole list again`)}`)
+  if (app.folderModels && cfg.session?.length) ui.print(`${c.muted('this folder uses')} ${c.cyan(cfg.session.map((t) => t.model).join(', '))} ${c.faint(`(picked earlier) · ${c.cyan('/select_model auto')} for the whole list again`)}`)
   app.tabs?.onChange?.() // the conversation it opened with
   // a newer HeartCode: asked of npm in the background at every start, said once and kept in the status bar
   if (cfg.updateCheck !== false)
@@ -1900,7 +1914,7 @@ async function repl(app, f = {}) {
       .then((u) => {
         if (!u?.newer) return
         app.update = u
-        ui.print(`${c.green('⬆')} ${c.muted('HeartCode')} ${c.green(u.latest)} ${c.muted(`is out (you have ${u.current})`)} ${c.faint('·')} ${c.cyan('/update')}`)
+        ui.print(`${c.green('⬆')} ${c.muted('HeartCode')} ${c.green(u.latest)} ${c.muted(`is out (this is ${u.current})`)} ${c.faint('·')} ${c.cyan('/update')}`)
         ui.render?.()
       })
       .catch(() => {})
@@ -2036,14 +2050,14 @@ async function main() {
     if (!cfg.providers[f.provider]) throw new Error(`no provider "${f.provider}" (heartcode providers lists them)`)
     if (!f.model) {
       const t = [{ provider: cfg.provider, model: cfg.model }, ...(cfg.rotation?.then ?? [])].find((x) => x.provider === f.provider && x.model)
-      if (!t) throw new Error(`--provider ${f.provider}: none of your models is from it; add -m <model>`)
+      if (!t) throw new Error(`--provider ${f.provider}: no model in the list is from it; add -m <model>`)
       Object.assign(cfg, { ...t, session: [t], pinned: true })
     }
   }
   // --fallback-model: after the model given (as in Claude Code's -p), when it fails
   cfg.fallbacks = (f['fallback-model'] ?? []).map((v) => {
     const t = parseModel(v, cfg.providers, cfg.provider)
-    if (isAuto(v) || !cfg.providers[t.provider]) throw new Error(`--fallback-model ${v}: give provider/model, or a model of ${cfg.provider} (heart models lists yours)`)
+    if (isAuto(v) || !cfg.providers[t.provider]) throw new Error(`--fallback-model ${v}: give provider/model, or a model of ${cfg.provider} (heart models lists them)`)
     return t
   })
   if (f.effort) cfg.effort = f.effort === 'default' ? undefined : f.effort
@@ -2060,7 +2074,7 @@ async function main() {
 
   if (sub === 'settings') {
     const { url, local } = await startSettings({ cfg })
-    console.log(`${c.brand('♥')} HeartCode settings: ${url}\n${c.dim(`${overSsh ? 'open it in your browser' : 'opened in your browser'} · from another device on this network, open the link above · Ctrl+C to stop`)}`)
+    console.log(`${c.brand('♥')} HeartCode settings: ${url}\n${c.dim(`${overSsh ? 'open it in a browser' : 'opened in the browser'} · from another device on this network, open the link above · Ctrl+C to stop`)}`)
     openBrowser(local)
     return new Promise(() => {}) // until Ctrl+C
   }

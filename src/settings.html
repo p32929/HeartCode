@@ -94,6 +94,8 @@
   .theme-btn:hover { color: var(--text); }
   .theme-btn svg { width: 18px; height: 18px; }
   main { padding: 36px 44px 72px; width: 100%; max-width: 1640px; min-width: 0; }
+  @media (max-width: 1500px) { main { padding-left: 24px; padding-right: 24px; } } /* a laptop: the models table fits without scrolling sideways */
+  @media (min-width: 861px) and (max-width: 1400px) { .app { grid-template-columns: 208px minmax(0, 1fr); } main { padding-left: 16px; padding-right: 16px; } } /* a small laptop (1280): a narrower sidebar too */
   .page { display: none; }
   .page.on { display: block; animation: page-in .22s ease-out; }
   @keyframes page-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -308,6 +310,7 @@
   .prov-h .by-name button, .prov-h > button.small { height: 28px; }
   dialog#gone { width: min(560px, 92vw); }
   dialog#h-test { width: min(560px, 92vw); }
+  dialog#small-screen { width: min(420px, calc(100vw - 32px)); }
   dialog#gone h2 { color: var(--err); font-family: inherit; font-size: 18px; }
   dialog#gone::backdrop { background: rgba(0, 0, 0, .75); }
   .hello-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
@@ -428,7 +431,7 @@
   .mt-more-pill button:hover:not(:disabled) { background: var(--hover); }
   .mt-more-pill button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .mt-more-pill button:disabled { color: var(--faint); cursor: default; }
-  .mt, .mt-h.mt-hpick { min-width: 1766px; } /* the columns below, their gaps and padding: the header, the selection bar and the rows line up (the rows are drawn a screenful at a time, so this can't come from them) */
+  .mt, .mt-h.mt-hpick { min-width: 1024px; } /* the columns below, their gaps and padding: the header, the selection bar and the rows line up (the rows are drawn a screenful at a time, so this can't come from them) */
   .mt-h input[type=checkbox], .mtable input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(--brand); cursor: pointer; }
   .mtable li.picked { background: var(--brand-soft); }
   .mt-rules { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 24px; padding: 12px 18px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
@@ -450,8 +453,9 @@
   .pill .again:hover:not(:disabled) { color: var(--text); }
   .pill.on { border-color: var(--accent); background: var(--accent-soft); }
   .pill.on .again { border-left-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-  .mt-h, .mtable li { display: grid; grid-template-columns: 14px 18px 40px minmax(200px, 1fr) 104px 450px 62px 46px 66px 56px 76px 76px 76px 112px 86px 124px; /* the last: Test · Request · Edit · ✕, as wide as they are */ align-items: center; column-gap: 6px; padding: 8px 18px; }
+  .mt-h, .mtable li { display: grid; grid-template-columns: 14px 16px 28px minmax(120px, 1fr) 80px 148px 52px 26px 26px 26px 44px 44px 44px 94px 74px 104px; /* the last: Test · Request · Edit · ✕, as wide as they are */ align-items: center; column-gap: 4px; padding: 8px 12px; }
   .mt-h button.mid, .mtable .mid { text-align: center; }
+  @media (min-width: 861px) and (max-width: 1400px) { .mt-h, .mtable li { padding-left: 6px; padding-right: 6px; } .mt, .mt-h.mt-hpick { min-width: 1012px; } } /* a small laptop (1280): narrower rows */
   .mt-h > :nth-child(15), .mtable .try { padding-left: 12px; } /* Works?: a little room after the right-aligned price */
   .mtable li .acts { justify-content: flex-start; }
   .mt-h { border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 500; color: var(--faint); padding-top: 10px; padding-bottom: 10px; background: var(--panel2); }
@@ -480,14 +484,13 @@
   .hp .sw { display: inline-block; width: 30px; height: 18px; margin: 0 4px 0 0; }
   .hp .sw i::after { width: 12px; height: 12px; }
   .hp .sw input:checked + i::after { transform: translateX(12px); }
-  .mtable li .hp .jp { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line-strong); background: transparent; font-size: 11.5px; font-weight: 400; color: var(--faint); white-space: nowrap; cursor: pointer; transition: background .15s, color .15s, border-color .15s, transform .1s; }
+  .mtable li .hp .jp { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; padding: 0; border-radius: 7px; border: 1px solid var(--line-strong); background: transparent; color: var(--faint); cursor: pointer; transition: background .15s, color .15s, border-color .15s, transform .1s; }
+  .mtable li .hp .jp .icon { width: 14px; height: 14px; }
   .mtable li .hp .jp:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
   .mtable li .hp .jp:active:not(:disabled) { transform: scale(.95); }
   .mtable li .hp .jp:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .mtable li .hp .jp.on { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--text); font-weight: 500; }
-  .mtable li .hp .jp.on::before { content: '✓'; color: var(--accent); font-weight: 700; }
+  .mtable li .hp .jp.on { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
   .mtable li .hp .jp.sug { border-style: dashed; border-color: var(--accent); color: var(--accent); }
-  .mtable li .hp .jp.sug::before { content: '+'; font-weight: 700; }
   .mtable li .hp.off .jp:not(.sug) { opacity: .6; }
   /* the helper suggestions, waiting for a yes: beside the list's buttons */
   .hsug { display: inline-flex; align-items: center; gap: 6px; padding: 2px 3px 2px 10px; border: 1px dashed var(--accent); border-radius: 10px; background: var(--accent-soft); color: var(--text); white-space: nowrap; }
@@ -511,6 +514,7 @@
   .mtable .try.going .msg { animation: pulse 1.4s ease-in-out infinite; }
   @media (prefers-reduced-motion: reduce) { .mtable .try.going .msg { animation: none; } }
   .mtable .rk { color: var(--muted); }
+  .mt-h .icon { width: 15px; height: 15px; vertical-align: -3px; } /* a column named by its icon (its name on hover) */
   .mtable .rk b { color: var(--text); font-weight: 600; margin-right: 5px; }
   .mtable .rk.top b { color: inherit; }
   .mtable .rk.top { color: var(--ok); font-weight: 600; }
@@ -566,16 +570,23 @@
   .mt-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .h-order { display: inline-flex; align-items: center; gap: 8px; margin-right: 4px; }
   .h-order .mt-setl { white-space: nowrap; }
+  .h-order select { height: 30px; padding-top: 0; padding-bottom: 0; font-size: 12.5px; width: auto; } /* as tall as the buttons beside it */
   .mt-actions .seg { height: 32px; }
   .mt-actions .seg label { padding: 0 11px; font-size: 12.5px; }
   .mt-sets { display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 12px 18px 4px; } /* with the filters below: one toolbar, 8px between its two lines */
-  .mt-mode-sets { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+  .mt-mode-sets { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
   .mt-set { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .mt-setl { font-size: 12.5px; font-weight: 600; color: var(--muted); white-space: nowrap; }
-  .mt-setc { display: flex; align-items: center; gap: 8px; }
+  .mt-setl { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+  .mt-setl .icon { width: 14px; height: 14px; color: var(--faint); }
+  .mt-div { width: 1px; height: 22px; background: var(--line-strong); margin: 0 4px; } /* between the fail-over settings and the helpers' */
+  .mt-mode-sets .h-order select { height: 34px; }
+  .mt-mode-sets .seg { height: 34px; }
+  .mt-mode-sets .seg label { padding: 0 11px; font-size: 12.5px; }
+  @media (min-width: 861px) and (max-width: 1400px) { .mt-mode-sets { column-gap: 6px; } .mt-mode-sets .seg label { padding: 0 7px; font-size: 12px; } .mt-div { margin: 0; } .mt-setc input[type=number], .mt-setc input.tries { width: 42px; } } /* a small laptop (1280): the settings stay on one line */
+  .mt-setc { display: flex; align-items: center; gap: 6px; }
   .mt-setc select { width: auto; min-width: 0; height: 34px; padding-top: 0; padding-bottom: 0; line-height: 32px; }
-  .mt-setc input[type=number] { width: 56px; height: 34px; }
-  .mt-setc input.tries { width: 56px; }
+  .mt-setc input[type=number] { width: 50px; height: 34px; }
+  .mt-setc input.tries { width: 50px; }
   .mt-setc input[type=number] { appearance: textfield; -moz-appearance: textfield; text-align: center; } /* typed: no spinner taking the digits' room */
   .mt-setc input[type=number]::-webkit-inner-spin-button, .mt-setc input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   .mt-setc .unit { color: var(--muted); font-size: 13px; }
@@ -621,6 +632,9 @@
   .mtable li .acts button.danger:hover:not(:disabled) { color: var(--err); }
   .f-tog { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; font-size: 13px; cursor: pointer; user-select: none; }
   .f-tog:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 60%, var(--panel)); }
+  .f-tog .icon { width: 14px; height: 14px; color: var(--faint); }
+  .f-tog:has(input:checked) .icon { color: var(--accent); }
+  @media (max-width: 1860px) { .mt-setl .lt, .f-tog .lt, .hbar button .lt { display: none; } .f-tog { padding: 0 9px; } .hbar button.ghost { border-color: var(--line-strong); } } /* a laptop: the controls' icons only (each says what it is on hover): three rows still */
   .f-tog input { position: absolute; width: 1px; height: 1px; opacity: 0; margin: 0; pointer-events: none; } /* the pill is the switch; the box stays for the keyboard */
   .f-tog:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
   .f-tog { position: relative; color: var(--muted); }
@@ -714,7 +728,7 @@
     nav a.on::before { display: none; } /* a strip of tabs: the highlighted one is enough */
     nav a .count, .using, .nav-group { display: none; }
     .theme-btn { top: 10px; right: 12px; }
-    .mt-line { width: 100%; }
+    .mt-line { width: 100%; flex-wrap: wrap; } /* its buttons go to a second line, not past the screen's edge */
     .mt-line button.primary { margin-left: auto; }
     main { padding: 20px 16px 60px; }
     .steps { grid-template-columns: 1fr; }
@@ -860,7 +874,7 @@
     <!-- Providers & models -->
     <section class="page" id="page-providers">
       <div class="head">
-        <div><h1>Providers</h1><p class="lead">Click a model to add it to your list, or tick several. HeartCode tries your list in order: #1 first, the next when one fails.</p></div>
+        <div><h1>Providers</h1><p class="lead">Click a model to add it to the list, or tick several. HeartCode tries the list in order: #1 first, the next when one fails.</p></div>
         <div class="head-actions"><button id="p-mine" type="button"></button><button class="primary" id="p-open">+ Add a provider</button></div>
       </div>
       <div class="steps" id="steps"></div>
@@ -883,18 +897,18 @@
 
     <!-- Your models: all at once, sortable -->
     <section class="page" id="page-models">
-      <div class="head"><div><h1>Your models</h1><p class="lead" id="mt-lead"></p></div><div class="mt-actions" id="mt-actions"></div></div>
+      <div class="head"><div><h1>Models</h1><p class="lead" id="mt-lead"></p></div><div class="mt-actions" id="mt-actions"></div></div>
       <div class="card mt-card" id="mt"></div>
     </section>
 
     <!-- Notifications -->
     <section class="page" id="page-notify">
-      <div class="head"><div><h1>Notifications</h1><p class="lead">A message on your phone when HeartCode finishes a task, fails, or needs you, so you can step away while it works.</p></div></div>
+      <div class="head"><div><h1>Notifications</h1><p class="lead">A phone message when HeartCode finishes a task, fails, or needs an answer: no need to watch it work.</p></div></div>
       <div class="cols">
         <div class="stack">
           <div class="card">
             <h2>Telegram</h2>
-            <p class="sub">Through a bot of your own: only you get its messages.</p>
+            <p class="sub">Through a private bot: only its owner gets its messages.</p>
             <div id="tg-setup"></div>
           </div>
         </div>
@@ -910,10 +924,10 @@
 
     <!-- Logging -->
     <section class="page" id="page-logging">
-      <div class="head"><div><h1>Logs</h1><p class="lead">What HeartCode writes down, for finding out what went wrong. Off unless you switch it on.</p></div><div class="disk" id="l-disk"></div></div>
+      <div class="head"><div><h1>Logs</h1><p class="lead">What HeartCode writes down, for finding out what went wrong. Off until switched on.</p></div><div class="disk" id="l-disk"></div></div>
       <div class="card">
         <div class="kinds-top">
-          <div><h2 style="margin:0">What to log</h2><p class="sub" style="margin:4px 0 0">Each kind on its own, all off unless you switch one on. A running HeartCode takes a change in at once. Written to <span class="mono" id="l-where"></span>, a folder per run.</p></div>
+          <div><h2 style="margin:0">What to log</h2><p class="sub" style="margin:4px 0 0">Each kind on its own, all off until switched on. A running HeartCode takes a change in at once. Written to <span class="mono" id="l-where"></span>, a folder per run.</p></div>
           <button class="small" id="l-alloff">All off</button>
         </div>
         <div class="kinds" id="l-kinds"></div>
@@ -921,7 +935,7 @@
           <label for="l-days"><b>Keep logs for</b></label>
           <input type="number" id="l-days" min="1" max="3650" step="1" value="3">
           <span>days</span>
-          <span class="muted">Older ones (every kind) are deleted when HeartCode starts, and right away when you change this. API keys are never written.</span>
+          <span class="muted">Older ones (every kind) are deleted when HeartCode starts, and right away when this changes. API keys are never written.</span>
         </div>
       </div>
       <div class="card reqs-card">
@@ -943,16 +957,16 @@
 
     <!-- General: one column, a card per topic, every setting saved as it changes -->
     <section class="page" id="page-general">
-      <div class="head"><div><h1>General</h1><p class="lead">How HeartCode works for you. Every change saves on its own, and a running HeartCode picks it up right away.</p></div></div>
+      <div class="head"><div><h1>General</h1><p class="lead">How HeartCode works. Every change saves on its own, and a running HeartCode picks it up right away.</p></div></div>
       <div class="settings-col">
         <div class="card">
           <h2>Permissions</h2>
-          <p class="sub">What HeartCode may do without asking you first. <span class="mono">Shift+Tab</span> in HeartCode switches between these too.</p>
+          <p class="sub">What HeartCode may do without asking first. <span class="mono">Shift+Tab</span> in HeartCode switches between these too.</p>
           <div class="choices three" id="g-perm"></div>
         </div>
         <div class="card">
           <h2>Terminal colors</h2>
-          <p class="sub">Your own colors on top of one: theme.json in <a href="#files">Advanced → Files</a>.</p>
+          <p class="sub">Custom colors on top of one: theme.json in <a href="#files">Advanced → Files</a>.</p>
           <div class="choices four" id="g-theme"></div>
         </div>
         <div class="card">
@@ -972,7 +986,7 @@
         </div>
         <div class="card">
           <h2>Voice input</h2>
-          <p class="sub">Press Space in an empty input box (or type /voice) and talk: your words show in the box as you speak, and Enter sends them. Esc cancels.</p>
+          <p class="sub">Press Space in an empty input box (or type /voice) and talk: the words show in the box while speaking, and Enter sends them. Esc cancels.</p>
           <div class="setting">
             <label class="t" for="v-src"><b>Transcribe with</b><span id="v-src-about"></span></label>
             <select id="v-src"></select>
@@ -988,7 +1002,7 @@
         </div>
         <div class="card">
           <h2>External tools</h2>
-          <p class="sub">Some features need a tool on your machine. Ready ones are ticked; the rest say what to install.</p>
+          <p class="sub">Some features need a tool on this machine. Ready ones are ticked; the rest say what to install.</p>
           <div id="g-caps"></div>
         </div>
         <div class="card wide">
@@ -1033,7 +1047,7 @@
       <div class="k-install r-bar">
         <div class="seg" id="r-kinds" role="radiogroup" aria-label="Kind of prompt"></div>
         <input type="search" id="r-search" placeholder="Search all prompts" aria-label="Search all prompts">
-        <label class="f-tog" title="Only the prompts you changed"><input type="checkbox" id="r-mine">Changed by you</label>
+        <label class="f-tog" title="Only the changed prompts"><input type="checkbox" id="r-mine">Changed</label>
       </div>
       <div class="md">
         <div class="list"><div class="items" id="r-items"></div></div>
@@ -1043,7 +1057,7 @@
 
     <!-- MCP servers -->
     <section class="page" id="page-mcp">
-      <div class="head"><div><h1>MCP servers</h1><p class="lead">Programs that give the model more tools: a browser, a database, your issue tracker. Off: HeartCode doesn't start it or offer it to the model.</p></div><button class="primary" id="c-open">+ Add a server</button></div>
+      <div class="head"><div><h1>MCP servers</h1><p class="lead">Programs that give the model more tools: a browser, a database, an issue tracker. Off: HeartCode doesn't start it or offer it to the model.</p></div><button class="primary" id="c-open">+ Add a server</button></div>
       <div class="stack">
         <div class="card" id="c-list"></div>
         <details class="card" id="c-raw"><summary style="cursor:pointer;font-weight:600">Edit mcp.json directly</summary><p class="sub" style="margin-top:10px">For what the form doesn't have: environment variables (<span class="mono">"env"</span>), headers, and so on.</p><div id="c-file"></div></details>
@@ -1052,7 +1066,7 @@
 
     <!-- Skills -->
     <section class="page" id="page-skills">
-      <div class="head"><div><h1>Skills</h1><p class="lead">Ready-made prompts. You type one as <span class="mono">/skill:name</span>, or the model uses it when it fits.</p></div><div class="head-actions"><button id="k-import">Import from other tools</button><button class="primary" id="k-new">+ New skill</button></div></div>
+      <div class="head"><div><h1>Skills</h1><p class="lead">Ready-made prompts, typed as <span class="mono">/skill:name</span>, or used by the model when it fits.</p></div><div class="head-actions"><button id="k-import">Import from other tools</button><button class="primary" id="k-new">+ New skill</button></div></div>
       <div class="k-install" id="k-install-card" title="A GitHub repo (owner/repo or its link) or a link to a SKILL.md. Same as /install_skill in HeartCode; installed for every project.">
         <span class="k-install-l">Install a skill</span>
         <input type="text" id="k-url" placeholder="owner/repo, a GitHub link, or a SKILL.md link" spellcheck="false" aria-label="GitHub repo or SKILL.md link">
@@ -1083,7 +1097,7 @@
     <div class="hint">Empty: as found (models.dev, the server, or what HeartCode learns). Measure asks the server.</div>
     <label class="opt"><div class="t"><b>Tool calls</b><span>Reads, edits and runs things itself. Off: HeartCode guides it step by step.</span></div><span class="sw"><input type="checkbox" id="ms-tools"><i></i></span></label>
     <label class="opt"><div class="t"><b>Thinking</b><span>Thinks before it answers (the effort setting applies).</span></div><span class="sw"><input type="checkbox" id="ms-thinking"><i></i></span></label>
-    <label class="opt"><div class="t"><b>Images</b><span>Reads screenshots and pictures you send.</span></div><span class="sw"><input type="checkbox" id="ms-images"><i></i></span></label>
+    <label class="opt"><div class="t"><b>Images</b><span>Reads screenshots and pictures.</span></div><span class="sw"><input type="checkbox" id="ms-images"><i></i></span></label>
     <label class="opt"><div class="t"><b>Streaming</b><span>Its reply shows as it's written. Off: all at once at the end.</span></div><span class="sw"><input type="checkbox" id="ms-stream"><i></i></span></label>
     <div class="actions"><button id="ms-cancel" type="button">Cancel</button><button class="primary" id="ms-save" type="button">Save</button></div>
   </form>
@@ -1100,7 +1114,7 @@
   <input type="password" id="p-key" autocomplete="off" placeholder="paste it here (none for a server on this machine, like Ollama)">
   <div class="hint">Kept in config.json on this machine. This page only shows its first and last characters.</div>
   <div id="p-more" hidden>
-    <label class="opt" style="margin-top:16px"><div class="t"><b>Load its model list</b><span>On: its models are asked from the provider. Off: never asked; only the models you add by name show (the box next to its name).</span></div><span class="sw"><input type="checkbox" id="p-list-on"><i></i></span></label>
+    <label class="opt" style="margin-top:16px"><div class="t"><b>Load its model list</b><span>On: its models are asked from the provider. Off: never asked; only the models added by name show (the box next to its name).</span></div><span class="sw"><input type="checkbox" id="p-list-on"><i></i></span></label>
     <div class="actions" id="p-added"></div>
   </div>
   <div class="actions"><button class="danger" id="p-delete" hidden>Delete provider</button><span class="spacer"></span><button id="p-cancel">Cancel</button><button class="primary" id="p-save">Add provider</button></div>
@@ -1124,10 +1138,15 @@
   <div class="actions"><span class="spacer"></span><button id="imp-cancel" type="button">Cancel</button><button class="primary" id="imp-go" type="button">Import selected</button></div>
 </dialog>
 <dialog id="h-test" aria-labelledby="h-test-title">
-  <h2 id="h-test-title">Test your models first</h2>
-  <p class="sub">Helpers are picked from the models that answer a short test. None of yours has answered one yet.</p>
+  <h2 id="h-test-title">Test the models first</h2>
+  <p class="sub">Helpers are picked from the models that answer a short test. None has answered one yet.</p>
   <p class="sub" id="h-test-cost"></p>
   <div class="actions"><span class="spacer"></span><button id="h-test-no" type="button" class="ghost">Cancel</button><button id="h-test-go" type="button" class="primary">Test all, then pick</button></div>
+</dialog>
+<dialog id="small-screen" aria-labelledby="small-screen-title">
+  <h2 id="small-screen-title">Works best on a desktop</h2>
+  <p class="sub">This page has wide tables (models, their abilities and tests). On a phone they need a lot of sideways scrolling. Everything still works here.</p>
+  <div class="actions"><span class="spacer"></span><button id="small-screen-ok" type="button" class="primary">Got it</button></div>
 </dialog>
 <dialog id="gone" aria-labelledby="gone-title">
   <h2 id="gone-title">Disconnected</h2>
@@ -1153,7 +1172,7 @@
 <dialog id="pr" aria-labelledby="pr-title">
   <form>
     <h2 id="pr-title">Order providers</h2>
-    <p class="sub">Drag the providers into order, best first. Your models are then sorted by it.</p>
+    <p class="sub">Drag the providers into order, best first. Models are then sorted by it.</p>
     <ol id="pr-list"></ol>
     <div class="actions"><button id="pr-cancel" type="button">Cancel</button><button class="primary" id="pr-save" type="button">Save</button></div>
   </form>
@@ -1236,6 +1255,15 @@ const ICON = {
   terminal: 'M4 17l6-5-6-5M12 19h8',
   upload: 'M12 21V9M7 14l5-5 5 5M5 3h14',
   arrow: 'M5 12h14M13 6l6 6-6 6',
+  code: 'M16 18l6-6-6-6M8 6l-6 6 6 6',
+  monitor: 'M3 4h18v12H3zM8 20h8M12 16v4',
+  tag: 'M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8zM7 7h.01',
+  pause: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM10 9v6M14 9v6',
+  hourglass: 'M6 2h12M6 22h12M7 2c0 5 10 6 10 10S7 17 7 22M17 2c0 5-10 6-10 10s10 5 10 10',
+  zap: 'M13 2L3 14h9l-1 8 10-12h-9z',
+  mountain: 'M3 20L9.5 9l4 6.5 2.5-4 5 8.5z',
+  image: 'M3 5h18v14H3zM8.5 11a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 19',
+  bulb: 'M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V16h8v-1.3A7 7 0 0 0 12 2z',
 }
 const ic = (name, cls = '') => {
   const el = document.createElement('span')
@@ -1257,7 +1285,7 @@ const BUTTON_ICONS = [
   [/^test|^send a test/i, 'play', 'k-test'], [/^request|^show the raw/i, 'eye', 'k-info'], [/^edit|^set up/i, 'pencil', 'k-edit'],
   [/^remove|^delete|^disconnect/i, 'trash', 'k-del'], [/^stop/i, 'stop', 'k-del'], [/^refresh|^retry|^get from models|^look it up|^reset/i, 'refresh', 'k-refresh'],
   [/^provider ranking/i, 'bars', 'k-info'], [/^clear|^select none/i, 'x', 'k-info'], [/^invert/i, 'swap', 'k-info'], [/^connect|^sign in/i, 'link', 'k-test'],
-  [/^your models/i, 'list', 'k-info'], [/^collapse|^expand/i, 'list', 'k-info'], [/^turn off/i, 'x', 'k-del'],
+  [/^models \(/i, 'list', 'k-info'], [/^order providers/i, 'bars', 'k-info'], [/^update model info/i, 'refresh', 'k-refresh'], [/^collapse|^expand/i, 'list', 'k-info'], [/^turn off/i, 'x', 'k-del'],
 ]
 // card titles: their icon and color
 const TITLE_ICONS = [
@@ -1291,6 +1319,16 @@ new MutationObserver(() => {
   queueMicrotask(() => ((decorating = false), decorate()))
 }).observe(document.documentElement, { childList: true, subtree: true, characterData: true })
 // the sidebar's parts and the pages' titles: their tiles
+// a phone (or a narrow window): said once that the page is made for a desktop; dismissed, not again in this browser
+addEventListener('DOMContentLoaded', () => {
+  let seen = false
+  try { seen = localStorage.getItem('heart-small-screen-ok') === '1' } catch {}
+  if (seen || !matchMedia('(max-width: 860px)').matches) return
+  const d = $('small-screen')
+  $('small-screen-ok').onclick = () => d.close()
+  d.addEventListener('close', () => { try { localStorage.setItem('heart-small-screen-ok', '1') } catch {} })
+  d.showModal()
+})
 addEventListener('DOMContentLoaded', () => {
   for (const a of document.querySelectorAll('nav a[data-page]')) {
     const [name, tone] = PART[a.dataset.page] ?? ['list', 'slate']
@@ -1383,11 +1421,11 @@ const DOING = {
   '/api/provider/delete': 'Deleting the provider',
   '/api/provider/list': 'Saving the model list setting',
   '/api/provider/on': 'Switching the provider',
-  '/api/order': 'Saving your models',
-  '/api/mcp/login': 'Signing in — your browser will open',
+  '/api/order': 'Saving the models',
+  '/api/mcp/login': 'Signing in — a browser window will open',
   '/api/telegram/connect': 'Checking the token with Telegram',
   '/api/telegram/test': 'Sending a test message',
-  '/api/search/test': 'Trying a search on your SearXNG',
+  '/api/search/test': 'Trying a search on SearXNG',
   '/api/rankings': null, // with models.dev, in its strip
   '/api/models-dev': null, // its own strip
 }
@@ -1463,7 +1501,7 @@ function showPage() {
 addEventListener('hashchange', showPage)
 // A sidebar item with several pages (data-tabs): a tab bar on top of each of them. Each page keeps
 // its own address (#providers, #statusbar, #files…), so links to one still open it.
-const TAB_NAMES = { models: 'Your list', providers: 'Providers', general: 'Settings', statusbar: 'Status bar', logging: 'Logs', files: 'Files' }
+const TAB_NAMES = { models: 'List', providers: 'Providers', general: 'Settings', statusbar: 'Status bar', logging: 'Logs', files: 'Files' }
 const TAB_COUNTS = { providers: 'n-providers' } // a count shown on the tab, not the sidebar item
 for (const a of document.querySelectorAll('nav a[data-tabs]')) {
   const tabs = a.dataset.tabs.split(' ')
@@ -1606,7 +1644,7 @@ function openForm(p = null) {
   $('p-form').querySelector('.sub').hidden = Boolean(p)
   if (p) {
     $('p-list-on').checked = p.list
-    put($('p-added'), p.added.length ? [h('span', { className: 'muted', style: 'font-size:13px', textContent: `${p.added.length} model${p.added.length === 1 ? '' : 's'} you added by name` }), h('button', { className: 'small danger', textContent: 'Forget them', onclick: () => ($('p-form').close(), clearAdded(p)) })] : [])
+    put($('p-added'), p.added.length ? [h('span', { className: 'muted', style: 'font-size:13px', textContent: `${p.added.length} model${p.added.length === 1 ? '' : 's'} added by name` }), h('button', { className: 'small danger', textContent: 'Forget them', onclick: () => ($('p-form').close(), clearAdded(p)) })] : [])
   }
   drawPresets()
   $('p-form').showModal()
@@ -1615,7 +1653,7 @@ function openForm(p = null) {
 const closeForm = () => $('p-form').close()
 $('p-delete').onclick = () => {
   const p = editing
-  if (!p || !confirm(`Delete the provider "${p.name}"? Its models leave your list too.`)) return
+  if (!p || !confirm(`Delete the provider "${p.name}"? Its models leave the list too.`)) return
   closeForm()
   act('/api/provider/delete', { name: p.name }, `deleted ${p.name}`)
 }
@@ -1702,7 +1740,7 @@ $('m-search').oninput = (e) => ((modelQuery = e.target.value), (searchOpen = tru
 const kTok = (n) => (n >= 1e6 ? `${Number((n / 1e6).toFixed(2))}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n))
 const usd = (x) => (x === 0 ? 'free' : `$${x < 0.01 ? x.toFixed(4) : x < 1 ? x.toFixed(3).replace(/0$/, '') : x.toFixed(2)}`)
 // where what a model can do comes from (the Your models table)
-const FROM = { 'models.dev': 'from models.dev', you: 'set by you', tested: 'tested' }
+const FROM = { 'models.dev': 'from models.dev', you: 'set by hand', tested: 'tested' }
 // Test: one short message to the model, to see that it really answers (the key, access to it, its
 // name, the server). The result stays under it until the page is reloaded.
 const TRIES = {} // "provider/model" → { going } | { ok, ms, reply, at } | { ok: false, status, error, at } (from the server)
@@ -1712,8 +1750,8 @@ const MEANS = {
   works: 'it answered',
   400: '400: the provider refused the request as sent (often: a model that isn\'t a chat model)',
   401: '401: the key isn\'t accepted',
-  402: '402: it needs payment or credits on your account',
-  403: '403: no access to this model with your plan or key',
+  402: '402: it needs payment or credits on the account',
+  403: '403: no access to this model with this plan or key',
   404: '404: the provider has no model by this name',
   408: '408: the provider timed out',
   410: '410: the model was taken down',
@@ -1735,7 +1773,7 @@ const outcome = (r) => (!r || r.going ? null : r.ok ? 'works' : r.status ? Strin
 function triedCell(t) {
   const r = TRIES[keyOf(t)]
   const secs = (r?.ms != null ? ` · ${(r.ms / 1000).toFixed(1)}s` : '') + (r?.at ? ` · tested ${new Date(r.at).toLocaleString()}` : '')
-  const [cls, text, about] = !r ? ['', 'not tested', 'send it a short message to see that it really answers (your key, access to it, its name)']
+  const [cls, text, about] = !r ? ['', 'not tested', 'send it a short message to see that it really answers (the key, access to it, its name)']
     : r.going ? ['going', 'testing…', 'sending it a short message']
     : r.ok && r.toolsOk === false ? ['ok', `✓ ${(r.ms / 1000).toFixed(1)}s · ✗ tools`, `it answers ("${r.reply}"), but it couldn't do a small job with a tool, so it's a poor choice for work: ${r.toolsWhy}${secs}`]
     : r.ok ? ['ok', `✓ ${(r.ms / 1000).toFixed(1)}s`, `works: it answered "${r.reply}"${r.toolsOk ? ', and did a small job with a tool' : ''}${secs}`]
@@ -1836,7 +1874,7 @@ function showRun(run) {
 // models.dev looked up again: one model (its Retry), or all of yours with their rankings (Update model info)
 const retry = (t) => h('button', { className: 'small', textContent: 'Retry', title: 'look it up in models.dev again', onclick: (e) => (e.stopPropagation(), lookUp(t)) })
 async function lookUp(t) {
-  job('models.dev', { where: ['catalog', 'table'], what: t ? `Looking up ${t.model} in models.dev` : 'Updating your models: models.dev and LMArena', detail: t ? 'context, tool calls, thinking, images' : 'context, tool calls, thinking, images, price; scores' })
+  job('models.dev', { where: ['catalog', 'table'], what: t ? `Looking up ${t.model} in models.dev` : 'Updating the models: models.dev and LMArena', detail: t ? 'context, tool calls, thinking, images' : 'context, tool calls, thinking, images, price; scores' })
   if (!t) (lookingUp = true), mineSoon()
   const [r, scored] = await Promise.all([act('/api/models-dev', t ? { provider: t.provider, model: t.model } : {}), t ? null : act('/api/rankings', {})])
   if (!t) (lookingUp = false), mineSoon()
@@ -1854,8 +1892,8 @@ function openSetup(t) {
   $('ms-title').textContent = t.model
   $('ms-from').textContent = {
     assumed: "models.dev doesn't know this model. Tell HeartCode what it can do; until then it assumes tool calls, streaming and a ~128k window.",
-    'models.dev': 'From models.dev. Change anything that isn\'t right for how you reach it.',
-    you: 'Set by you.',
+    'models.dev': 'From models.dev. Change anything that isn\'t right for how it\'s reached.',
+    you: 'Set by hand.',
     tested: 'From an earlier test. Change anything that isn\'t right.',
   }[x.source] ?? ''
   $('ms-context').value = x.set?.context ?? ''
@@ -1967,17 +2005,17 @@ function drawProviders(s) {
   const none = !s.providers.length
   // the steps: always on the page (nothing jumps when one is done), ticked off as you go
   put($('steps'), [
-    ['Add a provider', 'the service with your models', s.providers.length ? 'done' : 'now'],
+    ['Add a provider', 'the service with the models', s.providers.length ? 'done' : 'now'],
     ['Choose models', 'click one, or tick several and add them', order.length ? 'done' : s.providers.length ? 'now' : ''],
-    ['Start HeartCode', 'heart, in your project', order.length ? 'now' : ''],
+    ['Start HeartCode', 'heart, in a project folder', order.length ? 'now' : ''],
   ].map(([t, d, cls], i) => h('div', { className: 'step ' + cls }, h('span', { className: 'num', textContent: cls === 'done' ? '✓' : i + 1 }), h('div', {}, h('b', { textContent: t }), d))))
   $('steps').hidden = order.length > 0 // the first start only
   $('p-work').hidden = none
   // your list, at the top: how many, and the way to its page (the order, what to do when one fails)
   const shown = shownOrder()
   $('p-mine').hidden = !shown.length
-  $('p-mine').textContent = `Your models (${shown.length}) →`
-  $('p-mine').title = shown.length ? `HeartCode uses ${shown[0].provider} · ${shown[0].model}. Open the Your models page: the order, and what happens when one fails` : ''
+  $('p-mine').textContent = `Models (${shown.length}) →`
+  $('p-mine').title = shown.length ? `HeartCode uses ${shown[0].provider} · ${shown[0].model}. Open Models: the order, and what happens when one fails` : ''
   fillHeight()
 
   // every provider's models, A to Z; one click adds it (the first one becomes #1). Built
@@ -2100,7 +2138,7 @@ function showRow(provider, id, said) {
 // Off your list, the one in use too: the next one becomes #1, or none is left (asked first, then).
 const removeMine = (provider, id) => {
   const rest = S.order.filter((t) => t.provider !== provider || t.model !== id)
-  if (!rest.length && !confirm(`Take off ${id}? It's your only model: HeartCode then has none to use until you choose one.`)) return
+  if (!rest.length && !confirm(`Take off ${id}? It's the only model: HeartCode then has none to use until one is chosen.`)) return
   return saveOrder(rest, !rest.length ? `${id} removed: no model chosen now` : placeOf(provider, id) === 0 ? `${id} removed: HeartCode now uses ${rest[0].provider} · ${rest[0].model}` : `${id} removed`)
 }
 const addModel = (provider, id) => {
@@ -2119,7 +2157,7 @@ const withOff = (shown) => {
   return [...S.order.map((t) => (isOff(t.provider) ? t : rest.next().value)).filter(Boolean), ...rest]
 }
 function rowTail(provider, id) {
-  if (placeOf(provider, id) >= 0 && isOff(provider)) return h('span', { className: 'tag', textContent: 'in your list · off', title: `${provider} is switched off: HeartCode skips its models (and Your models doesn't show them) until it's on` })
+  if (placeOf(provider, id) >= 0 && isOff(provider)) return h('span', { className: 'tag', textContent: 'in the list · off', title: `${provider} is switched off: HeartCode skips its models (and Models doesn't show them) until it's on` })
   const at = shownOrder().findIndex((t) => t.provider === provider && t.model === id) // its place among the ones HeartCode uses
   const now = inUse()
   return now?.provider === provider && now.model === id ? h('span', { className: 'tag brand', textContent: `#${at + 1} in use` }) : at >= 0 ? h('span', { className: 'tag brand', textContent: `#${at + 1} fallback` }) : h('span', { className: 'add', textContent: S.order.length ? '+ Add' : 'Use' })
@@ -2214,9 +2252,9 @@ $('hello-close').onclick = () => $('hello').close()
 // every model added to a provider by name forgotten; the ones in your list leave it too
 async function clearAdded(p) {
   const inList = S.order.filter((t) => t.provider === p.name && p.added.includes(t.model))
-  if (!confirm(`Forget the ${p.added.length} model${p.added.length === 1 ? '' : 's'} you added to ${p.name}?${inList.length ? ` ${inList.length} of them ${inList.length === 1 ? 'is' : 'are'} in your list and will leave it.` : ''}`)) return
+  if (!confirm(`Forget the ${p.added.length} model${p.added.length === 1 ? '' : 's'} added to ${p.name} by name?${inList.length ? ` ${inList.length} of them ${inList.length === 1 ? 'is' : 'are'} in the list and will leave it.` : ''}`)) return
   if (inList.length && !(await saveOrder(S.order.filter((t) => !inList.includes(t))))) return
-  act('/api/provider/added', { name: p.name, all: true }, `${p.name}: the models you added are forgotten`)
+  act('/api/provider/added', { name: p.name, all: true }, `${p.name}: the models added by name are forgotten`)
 }
 const CAT_ROW = 40 // a model's row: its name, and what it can do beside it
 // The models ticked (provider → Set of ids): kept while you search, so ones ticked for one search
@@ -2251,7 +2289,7 @@ function drawPicks() {
   const take = () => {
     const off = new Set(toTake.map(keyOf))
     const rest = S.order.filter((t) => !off.has(keyOf(t)))
-    if (!confirm(`Take ${toTake.length} model${toTake.length === 1 ? '' : 's'} off your list?${!rest.length ? ' None is left then: HeartCode has no model to use until you choose one.' : keyOf(rest[0]) !== keyOf(S.order[0]) ? ` HeartCode then uses ${rest[0].provider} · ${rest[0].model}.` : ''}`)) return
+    if (!confirm(`Take ${toTake.length} model${toTake.length === 1 ? '' : 's'} off the list?${!rest.length ? ' None is left then: HeartCode has no model to use until one is chosen.' : keyOf(rest[0]) !== keyOf(S.order[0]) ? ` HeartCode then uses ${rest[0].provider} · ${rest[0].model}.` : ''}`)) return
     PICKED_CAT.clear()
     saveOrder(rest, `${toTake.length} removed`)
   }
@@ -2261,8 +2299,8 @@ function drawPicks() {
     h('span', { className: 'n', textContent: `${all.length} selected` }),
     h('button', { className: 'small ghost', textContent: 'Clear', onclick: () => (PICKED_CAT.clear(), drawPicks()) }),
     h('button', { className: 'small', textContent: `Test ${all.length}`, title: 'send each ticked model "Hello" and see which answer', onclick: () => helloAll(all) }),
-    toTake.length ? h('button', { className: 'small danger', textContent: `Remove ${toTake.length} from your list`, onclick: take }) : null,
-    toAdd.length ? h('button', { className: 'small primary', textContent: `Add ${toAdd.length} to your list`, onclick: () => (PICKED_CAT.clear(), saveOrder([...S.order, ...toAdd], `${toAdd.length} added: your list has ${S.order.length + toAdd.length} models`)) }) : null)
+    toTake.length ? h('button', { className: 'small danger', textContent: `Remove ${toTake.length} from the list`, onclick: take }) : null,
+    toAdd.length ? h('button', { className: 'small primary', textContent: `Add ${toAdd.length} to the list`, onclick: () => (PICKED_CAT.clear(), saveOrder([...S.order, ...toAdd], `${toAdd.length} added: the list has ${S.order.length + toAdd.length} models`)) }) : null)
   if (was !== $('picks').hidden) fillHeight() // the list gives it room
 }
 function buildCatalog(s) {
@@ -2280,7 +2318,7 @@ function buildCatalog(s) {
       h('button', { className: 'mrow', 'data-provider': p.name, 'data-model': id, onclick: () => (placeOf(p.name, id) === undefined ? addModel(p.name, id) : removeMine(p.name, id)) },
         h('span', { className: 'id', title: id }, id, canCell(m.details?.[id], S.order[placeOf(p.name, id)])),
         isFree(m.details?.[id]) ? h('span', { className: 'tag ok', textContent: 'free', title: `${p.name}'s model list says $0` }) : null,
-        own ? h('span', { className: 'tag', textContent: 'not in its list' }) : p.added.includes(id) ? h('span', { className: 'tag', textContent: 'added by you' }) : null,
+        own ? h('span', { className: 'tag', textContent: 'not in its list' }) : p.added.includes(id) ? h('span', { className: 'tag', textContent: 'added by name' }) : null,
         rowTail(p.name, id))
     // its tick box (to add or take off several at once), and one you added: ✕ forgets it (it leaves your list too)
     const tick = (id) => h('input', { type: 'checkbox', className: 'pick', checked: pickedOf(p.name).has(id), 'data-model': id, 'aria-label': `select ${id}`, onchange: (e) => (e.target.checked ? pickedOf(p.name).add(id) : pickedOf(p.name).delete(id), drawPicks()) })
@@ -2288,7 +2326,7 @@ function buildCatalog(s) {
       h('button', { className: 'small try', textContent: 'Test', title: `send ${id} "Hello" and see what was sent and what came back`, onclick: () => hello(p.name, id) }),
       !p.added.includes(id) ? null :
       h('button', { className: 'forget', textContent: '✕', title: 'forget this model', 'aria-label': `forget ${id}`, onclick: async () => {
-        if (placeOf(p.name, id) !== undefined && !confirm(`Forget ${id}? It leaves your list too.`)) return
+        if (placeOf(p.name, id) !== undefined && !confirm(`Forget ${id}? It leaves the list too.`)) return
         if (placeOf(p.name, id) !== undefined) await saveOrder(S.order.filter((t) => t.provider !== p.name || t.model !== id), `${id} removed`)
         act('/api/provider/added', { name: p.name, model: id, remove: true }, `forgot ${id}`)
       } }))
@@ -2299,7 +2337,7 @@ function buildCatalog(s) {
       const id = box.value.trim()
       if (!id) return
       const at = placeOf(p.name, id)
-      if (at !== undefined) return showRow(p.name, id, `${id} is already in your list (#${at + 1})`)
+      if (at !== undefined) return showRow(p.name, id, `${id} is already in the list (#${at + 1})`)
       if (listed.has(id) || yours.includes(id)) return showRow(p.name, id, `${p.name} already has ${id}: click it to add it`)
       box.value = ''
       addModel(p.name, id)
@@ -2321,7 +2359,7 @@ function buildCatalog(s) {
           h('span', { className: 'tag inlist' }),
           h('span', { className: 'meta mono', textContent: p.baseUrl, title: `${p.baseUrl} · key ${p.key || 'none'}` })),
         h('form', { className: 'by-name', onsubmit: addByName },
-          h('input', { type: 'text', name: 'name', placeholder: 'model name', 'aria-label': `add a model to ${p.name} by its name`, title: `a model's exact name: added to your list, also one ${p.name} doesn't list` }),
+          h('input', { type: 'text', name: 'name', placeholder: 'model name', 'aria-label': `add a model to ${p.name} by its name`, title: `a model's exact name: added to the list, also one ${p.name} doesn't list` }),
           h('button', { className: 'small', textContent: 'Add' })),
         h('button', { className: 'small', textContent: 'Edit', title: 'its address and key, its model list, delete it', onclick: () => openForm(p) })),
       // what's listed first; loading and errors under it (the models already shown stay where they are)
@@ -2337,7 +2375,7 @@ function buildCatalog(s) {
       m.off && !ids.length ? h('div', { className: 'cat-note', textContent: "Its list is off: add a model by its name, in the box above." }) : null,
       m.loading ? h('div', { className: 'cat-note', textContent: 'Loading its models…' }) : null)
   }))
-  if (freeOnly && !$('p-list').querySelector('section')) put($('p-list'), h('div', { className: 'cat-note', textContent: "None of your providers lists a model at $0. (A provider whose model list has no prices can't say what's free: Free only leaves those out.)" }))
+  if (freeOnly && !$('p-list').querySelector('section')) put($('p-list'), h('div', { className: 'cat-note', textContent: "No provider lists a model at $0. (A provider whose model list has no prices can't say what's free: Free only leaves those out.)" }))
 }
 // --- Your models page: the list as a table; sorted by several columns at once (each a tie-break
 // for the ones before it), the sort kept in this browser ---
@@ -2349,7 +2387,7 @@ const can = (t) => ({ tools: t.tested ? t.tested.mode === 'tools' : t.known?.too
 const COLS = {
   model: { label: 'Model', first: 'up', get: (t) => t.model, words: ['A→Z', 'Z→A'] },
   // a provider's priority: your ranking's first is the highest
-  provider: { label: 'Provider', first: 'down', get: (t) => -(RANKED.get(t.provider) ?? 1e6), words: ['your ranking, reversed', 'your ranking'] },
+  provider: { label: 'Provider', first: 'down', get: (t) => -(RANKED.get(t.provider) ?? 1e6), words: ['the ranking, reversed', 'the ranking'] },
   context: { label: 'Context', first: 'down', get: (t) => t.tested?.context ?? t.known?.context ?? null, words: ['smallest first', 'biggest first'] },
   abilities: { label: 'Abilities', first: 'down', get: (t) => Object.values(can(t)).filter(Boolean).length, words: ['fewest first', 'most first'] },
   tools: { label: 'Tools', first: 'down', get: (t) => can(t).tools, words: ['without first', 'with first'] },
@@ -2477,7 +2515,7 @@ let filterBar = null
 function filterBarOf(order, counts = {}) {
   if (!filterBar) {
     let typing = 0
-    const toggle = (key, label, about) => h('label', { className: 'f-tog', title: about }, h('input', { type: 'checkbox', 'data-f': key, onchange: (e) => setFilter({ [key]: e.target.checked }) }), label)
+    const toggle = (key, label, about, icon) => h('label', { className: 'f-tog', title: `${label}: ${about}` }, h('input', { type: 'checkbox', 'data-f': key, 'aria-label': label, onchange: (e) => setFilter({ [key]: e.target.checked }) }), ic(icon), h('span', { className: 'lt', textContent: label }))
     filterBar = h('div', { className: 'mt-filters' },
       h('label', { className: 'f-search' },
         h('span', { className: 'f-icon', 'aria-hidden': 'true', textContent: '⌕' }),
@@ -2487,11 +2525,11 @@ function filterBarOf(order, counts = {}) {
       h('select', { className: 'f-context', 'aria-label': 'Filter by context window', onchange: (e) => setFilter({ context: Number(e.target.value) }) },
         CONTEXTS.map(([v, l]) => h('option', { value: v, textContent: v ? `Context ${l}` : l }))),
       h('span', { className: 'f-togs' },
-        toggle('tools', 'Tools', 'only models that call tools'),
-        toggle('thinking', 'Thinking', 'only models that think'),
-        toggle('images', 'Images', 'only models that see images'),
-        toggle('free', 'Free', 'only models that cost nothing, in and out'),
-        toggle('helpers', 'Helpers', 'only your helpers (the models #1 can start for side jobs), and the ones suggested')))
+        toggle('tools', 'Tools', 'only models that call tools', 'wrench'),
+        toggle('thinking', 'Thinking', 'only models that think', 'bulb'),
+        toggle('images', 'Images', 'only models that see images', 'image'),
+        toggle('free', 'Free', 'only models that cost nothing, in and out', 'tag'),
+        toggle('helpers', 'Helpers', 'only the helpers (the models #1 can start for side jobs), and the ones suggested', 'sparkles')))
   }
   const bar = filterBar
   const focused = (el) => document.activeElement === el
@@ -2551,38 +2589,45 @@ function drawMine(s) {
   // Save list: the models HeartCode uses become the ones shown, in the order shown. Filtered: only
   // those (asked first; the others stay under Providers, to add back any time)
   const saveList = () => {
-    if (filtered && !confirm(`HeartCode will use only these ${n(view.length)}, in this order.\n\nThe other ${n(order.length - view.length)} stay under Providers: add any back whenever you like.`)) return
+    if (filtered && !confirm(`HeartCode will use only these ${n(view.length)}, in this order.\n\nThe other ${n(order.length - view.length)} stay under Providers: add any back at any time.`)) return
     return keep(view)
   }
   const removePicked = () => {
     const rest = order.filter((t) => !PICKED.has(keyOf(t)))
     const k = order.length - rest.length
-    if (!confirm(`Take ${k} model${k === 1 ? '' : 's'} off your list?${!rest.length ? ' None is left then: HeartCode has no model to use until you choose one.' : rest[0] !== order[0] ? ` HeartCode then uses ${rest[0].provider} · ${rest[0].model}.` : ''} (They stay under their providers.)`)) return
+    if (!confirm(`Take ${k} model${k === 1 ? '' : 's'} off the list?${!rest.length ? ' None is left then: HeartCode has no model to use until one is chosen.' : rest[0] !== order[0] ? ` HeartCode then uses ${rest[0].provider} · ${rest[0].model}.` : ''} (They stay under their providers.)`)) return
     PICKED.clear()
     saveOrder(withOff(rest), `${k} removed${rest.length ? '' : ': no model chosen now'}`)
   }
   const pickedList = order.filter((t) => PICKED.has(keyOf(t)))
 
   // --- the page's header: how a model is picked (left), what's known about the models (right) ---
-  $('mt-lead').textContent = 'The models HeartCode uses, in your order: #1 answers, the next one when it fails.'
+  $('mt-lead').textContent = 'The models HeartCode uses, in order: #1 answers, the next one when it fails.'
   const busy = locked()
   $('mt-actions').inert = busy
   // the order helpers are picked in when #1 starts them: your list's, or your provider ranking's
   const helperOrder = (by) => api('/api/helper-order', { by, rank: RANK }).then((r) => ((S.helperOrder = r.helperOrder), drawMine(S)), (e) => toast(e.message, true))
-  const orderBy = h('span', { className: 'h-order' }, h('span', { className: 'mt-setl', textContent: 'Helpers picked' }),
-    h('div', { className: 'seg', role: 'radiogroup', 'aria-label': 'The order helpers are picked in' },
-      [['own', 'in your order', 'when #1 starts helpers, it picks from them in your list\'s order (the first one that fits the job)'], ['provider', 'by provider', 'when #1 starts helpers, it picks from them by your provider ranking (Order providers), each provider\'s in your list\'s order. Your list itself stays as it is']].map(([v, t, about]) =>
+  // who chooses the helpers: HeartCode (from the tests and the rankings, again when those change) or you
+  const chooser = h('label', { className: 'h-order', title: 'Automatic: HeartCode chooses the helpers and what each is for, from the models that answered their test and the rankings, and again whenever those change. Manual: switched on and given their jobs by hand in the Helper column.' },
+    h('span', { className: 'mt-setl' }, ic('sparkles'), h('span', { className: 'lt', textContent: 'Helpers' })),
+    h('select', { id: 'h-auto', onchange: (e) => setAuto(e.target.value === 'auto', e.target) },
+      [['auto', 'Automatic'], ['manual', 'Manual']].map(([v, t]) => h('option', { value: v, textContent: t, selected: (S.helpersAuto ? 'auto' : 'manual') === v }))))
+  const orderBy = h('span', { className: 'h-order', title: 'Used: the order #1 takes helpers in' }, h('span', { className: 'mt-setl' }, ic('bars'), h('span', { className: 'lt', textContent: 'Used' })),
+    h('div', { className: 'seg', role: 'radiogroup', 'aria-label': 'The order helpers are used in' },
+      [['own', 'in list order', 'when #1 starts a helper, it takes the first one that fits the job, in the list\'s order'], ['provider', 'by provider', 'when #1 starts a helper, it takes them by the provider ranking (Order providers), each provider\'s in the list\'s order. The list itself stays as it is'], ['score', 'by score', 'when #1 starts a helper, it takes the best ranked first: its best place in LMArena\'s public rankings for coding, web apps, long real tasks and hard prompts (Update model info). Models not ranked come after, in the list\'s order']].map(([v, t, about]) =>
         h('label', { className: (S.helperOrder ?? 'own') === v ? 'on' : '', title: about },
-          h('input', { type: 'radio', name: 'helper-order', checked: (S.helperOrder ?? 'own') === v, onchange: () => helperOrder(v) }), t))))
+          h('input', { type: 'radio', name: 'helper-order', checked: (S.helperOrder ?? 'own') === v, disabled: v === 'provider' && !order.some((t) => t.provider !== order[0]?.provider), onchange: () => helperOrder(v) }), t))))
   put($('mt-actions'),
-    order.some((t) => t.provider !== order[0]?.provider) ? orderBy : null, // one provider: nothing to order by
-    ((why) => h('span', { title: why ?? '' }, h('button', { className: 'small', textContent: 'Order providers', disabled: Boolean(why), title: why ? '' : 'drag your providers into order; the Provider column sorts by it', onclick: openRanking })))( // disabled: why, on a span (a disabled button shows no tooltip in every browser)
-      !order.some((t) => t.provider !== order[0]?.provider) ? 'All your models are from one provider: nothing to order' : null),
-    h('button', { className: 'small', textContent: 'Update model info', disabled: !order.length, title: `what each model can do (context, tools, thinking, images, price) from models.dev, and its places in LMArena's public rankings (coding, web apps, vision${S.rankings ? `; rankings from ${new Date(S.rankings.fetched).toLocaleDateString()}` : ''})`, onclick: () => lookUp() }))
+    ((why) => h('span', { title: why ?? '' }, h('button', { className: 'small', textContent: 'Order providers', disabled: Boolean(why), title: why ? '' : 'drag the providers into order; the Provider column sorts by it', onclick: openRanking })))( // disabled: why, on a span (a disabled button shows no tooltip in every browser)
+      !order.some((t) => t.provider !== order[0]?.provider) ? 'All the models are from one provider: nothing to order' : null),
+    h('button', { className: 'small', textContent: 'Update model info', disabled: !order.length, title: `what each model can do (context, tools, thinking, images, price) from models.dev, and its places in LMArena's public rankings (coding, web apps, vision${S.rankings ? `; rankings from ${new Date(S.rankings.fetched).toLocaleDateString()}` : ''})`, onclick: () => lookUp() }),
+    h('button', { className: 'small', textContent: filtered ? `Test ${n(shown.length)}` : 'Test all', disabled: testingAll || !shown.length, title: `send ${filtered ? 'the models shown' : 'each model'} a short message to see which really answer, and how fast`, onclick: () => tryAll(filtered ? shown : order) }),
+    // not on the helpers' view: they're not a list to keep only
+    filtered && FILTER.helpers ? null : h('button', { className: 'small primary', textContent: filtered ? `Use only these ${n(view.length)}` : 'Save list', disabled: !view.length || order.length < 2, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : 'save the list as shown: HeartCode uses them in this order (#1 first)', onclick: saveList }))
 
-  // --- the list's settings: one line, a short label beside each control ---
+  // --- row 2, the list's settings: when a model fails (left), the helpers (right); an icon and a short label each ---
   const ro = s.rotation
-  const cell = (label, about, ...control) => h('label', { className: 'mt-set', title: about }, h('span', { className: 'mt-setl', textContent: label }), h('span', { className: 'mt-setc' }, ...control))
+  const cell = (icon, label, about, ...control) => h('label', { className: 'mt-set', title: `${label}: ${about}` }, h('span', { className: 'mt-setl' }, ic(icon), h('span', { className: 'lt', textContent: label })), h('span', { className: 'mt-setc' }, ...control))
   // a whole number setting (seconds), with its limits from the server (SPEED_LIMITS)
   const LIMITS = { replyStart: [5, 600], replyIdle: [10, 1800] }
   const num = (name, label, said) => h('input', { type: 'number', className: 'tries', 'aria-label': label, min: LIMITS[name][0], max: LIMITS[name][1], value: S.settings[name], onchange: (e) => {
@@ -2591,43 +2636,40 @@ function drawMine(s) {
     if (!(v >= lo && v <= hi)) return (e.target.value = S.settings[name]), toast(`a whole number, ${lo} to ${hi}`, true)
     act('/api/setting', { name, value: v }, said(v))
   } })
-  const secsCell = (label, name, about, unit, said) => cell(label, about, num(name, label, said), h('span', { className: 'unit', textContent: unit }))
+  const secsCell = (icon, label, name, about, unit, said) => cell(icon, label, about, num(name, label, said), h('span', { className: 'unit', textContent: unit }))
   const settings = h('div', { className: 'mt-sets', inert: busy },
     h('div', { className: 'mt-mode-sets' },
-      cell('If one fails', ro.on === 'retries' ? 'a rate limit or outage: that model gets that many tries in all before the next one; any other error moves on at once' : "any error moves on at once, to the next model (after an error from its provider: another provider's first)",
+      cell('swap', 'If one fails', ro.on === 'retries' ? 'a rate limit or outage: that model gets that many tries in all before the next one; any other error moves on at once' : "any error moves on at once, to the next model (after an error from its provider: another provider's first)",
         h('select', { onchange: (e) => saveOrder(S.order, 'saved', { on: e.target.value }) },
           [['failure', 'go to the next'], ['retries', 'retry it first']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.on === v }))),
         ro.on === 'retries' ? h('input', { type: 'number', className: 'tries', 'aria-label': 'tries', title: 'tries of the same model first (rate limits, outages)', min: 1, max: 20, value: ro.retries, onchange: (e) => saveOrder(S.order, 'saved', { retries: Number(e.target.value) }) }) : null),
-      secsCell('Give up after', 'replyStart', "a model that hasn't started answering (text, thinking or a tool call) in this many seconds counts as failed (a streamed reply: a model set up without streaming waits for its whole reply)", 'sec', (v) => `a model that hasn't started answering in ${v}s counts as failed`),
-      secsCell('Stalled after', 'replyIdle', 'a reply that stops sending anything for this many seconds is stalled: tried again, or the next model', 'sec', (v) => `a reply silent for ${v}s counts as stalled`),
-      cell('Tests wait', 'how long a test waits for each answer',
+      secsCell('clock', 'Give up', 'replyStart', "a model that hasn't started answering (text, thinking or a tool call) in this many seconds counts as failed (a streamed reply: a model set up without streaming waits for its whole reply)", 's', (v) => `a model that hasn't started answering in ${v}s counts as failed`),
+      secsCell('pause', 'Stalled', 'replyIdle', 'a reply that stops sending anything for this many seconds is stalled: tried again, or the next model', 's', (v) => `a reply silent for ${v}s counts as stalled`),
+      cell('hourglass', 'Tests wait', 'how long a test waits for each answer',
         h('input', { type: 'number', className: 'tries', min: 1, max: 600, step: 1, value: S.settings.testTimeout ?? 10, 'aria-label': 'Test timeout in seconds', onchange: (e) => {
           const v = Math.round(Number(e.target.value))
           if (!(v >= 1 && v <= 600)) return (e.target.value = S.settings.testTimeout ?? 10), toast('a whole number of seconds, 1 to 600', true)
           act('/api/setting', { name: 'testTimeout', value: v }, `tests wait ${v} second${v === 1 ? '' : 's'} for an answer`)
-        } }), h('span', { className: 'unit', textContent: 'sec' })),
-      cell('New message to', 'the model a new message goes to first',
+        } }), h('span', { className: 'unit', textContent: 's' })),
+      cell('send', 'New message', 'the model a new message goes to first: #1, or the last one that worked',
         h('select', { onchange: (e) => saveOrder(S.order, 'saved', { next: e.target.value }) },
-          [['first', '#1'], ['stay', 'the last that worked']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.next === v })))),
-      cell('Helpers', 'who picks the helpers (the Helper column): HeartCode, from the models that answered their test and the rankings, again whenever those change; or you, with the pills',
-        h('select', { id: 'h-auto', onchange: (e) => setAuto(e.target.value === 'auto', e.target) },
-          [['auto', 'picked for you'], ['manual', 'you pick']].map(([v, t]) => h('option', { value: v, textContent: t, selected: (S.helpersAuto ? 'auto' : 'manual') === v }))))))
+          [['first', '#1'], ['stay', 'last working']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.next === v })))),
+      h('span', { className: 'mt-div', 'aria-hidden': 'true' }),
+      chooser, orderBy))
 
   // --- beside the filters: what's shown · what you do with it (the sorts show in the column heads) ---
   const line = h('div', { className: 'mt-line' },
-    h('span', { className: 'count', title: SORT.length ? `sorted by ${SORT.map(({ key, dir }) => `${COLS[key].label} ${COLS[key].words[dir === 'up' ? 0 : 1]}`).join(', then ')}; ties keep your order` : '' }, filtered ? [h('b', { textContent: n(shown.length) }), ` of ${n(order.length)}`] : [h('b', { textContent: n(order.length) }), ` model${order.length === 1 ? '' : 's'}`]),
-    filtering() || SORT.length ? h('button', { className: 'small ghost', textContent: 'Clear', title: 'every filter and the sort off: your whole list, in your order', onclick: clearView }) : null,
-    order.length > 1 ? drawHelperBar() : null,
-    h('button', { className: 'small', textContent: filtered ? `Test ${n(shown.length)}` : 'Test all', disabled: testingAll || !shown.length, title: `send ${filtered ? 'the models shown' : 'each model'} a short message to see which really answer, and how fast`, onclick: () => tryAll(filtered ? shown : order) }),
-    // not on the helpers' view: they're not a list to keep only
-    filtered && FILTER.helpers ? null : h('button', { className: 'small primary', textContent: filtered ? `Use only these ${n(view.length)}` : 'Save list', disabled: !view.length || order.length < 2, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : 'save your list as shown: HeartCode uses them in this order (#1 first)', onclick: saveList }))
+    h('span', { className: 'count', title: SORT.length ? `sorted by ${SORT.map(({ key, dir }) => `${COLS[key].label} ${COLS[key].words[dir === 'up' ? 0 : 1]}`).join(', then ')}; ties keep the list order` : '' }, filtered ? [h('b', { textContent: n(shown.length) }), ` of ${n(order.length)}`] : [h('b', { textContent: n(order.length) }), ` model${order.length === 1 ? '' : 's'}`]),
+    filtering() || SORT.length ? h('button', { className: 'small ghost', textContent: 'Clear', title: 'every filter and the sort off: the whole list, in order', onclick: clearView }) : null,
+    order.length > 1 ? drawHelperBar() : null)
 
   // --- the table ---
   const all = view.length > 0 && view.every((t) => PICKED.has(keyOf(t)))
-  const head = (key, align) => {
+  // icon: a narrow column named by an icon (its name in the tooltip)
+  const head = (key, align, icon) => {
     const at = SORT.findIndex((x) => x.key === key)
-    return h('button', { type: 'button', className: (at >= 0 ? 'on ' : '') + (align || ''), title: `sort by ${COLS[key].label.toLowerCase()} (after the ones already sorted by) · click again: reversed · again: off`, onclick: (e) => clickSort(key, e.currentTarget) },
-      COLS[key].label, at >= 0 ? h('span', { className: 'dir', textContent: ` ${SORT[at].dir === 'up' ? '↑' : '↓'}${SORT.length > 1 ? at + 1 : ''}` }) : '')
+    return h('button', { type: 'button', className: (at >= 0 ? 'on ' : '') + (align || ''), 'aria-label': COLS[key].label, title: `${icon ? `${COLS[key].label}: ` : ''}sort by ${COLS[key].label.toLowerCase()} (after the ones already sorted by) · click again: reversed · again: off`, onclick: (e) => clickSort(key, e.currentTarget) },
+      icon ? ic(icon) : COLS[key].label, at >= 0 ? h('span', { className: 'dir', textContent: ` ${SORT[at].dir === 'up' ? '↑' : '↓'}${SORT.length > 1 ? at + 1 : ''}` }) : '')
   }
   const selectAll = h('input', { type: 'checkbox', checked: all, indeterminate: PICKED.size > 0 && !all, title: all ? 'select none' : 'select all shown', 'aria-label': 'select all shown', onchange: () => (all ? PICKED.clear() : view.forEach((t) => PICKED.add(keyOf(t))), (lastPicked = null), drawMine(S)) })
   // the columns' names; with models selected, what to do with them instead (the checkbox stays)
@@ -2640,7 +2682,7 @@ function drawMine(s) {
           h('button', { className: 'small ghost', textContent: 'Invert', title: "select the ones shown that aren't selected, unselect the ones that are", onclick: () => (view.forEach((t) => (PICKED.has(keyOf(t)) ? PICKED.delete(keyOf(t)) : PICKED.add(keyOf(t)))), (lastPicked = null), drawMine(S)) }),
           h('button', { className: 'small ghost', textContent: 'Select none', onclick: () => (PICKED.clear(), drawMine(S)) })))
     : h('div', { className: 'mt mt-h' }, h('span'), selectAll,
-        h('span', { textContent: '#', title: 'its place in your list' }), head('model'), head('provider'), h('span', { textContent: 'Helper', title: '#1 can hand a part of a task to a helper. Switch a model on, and pick what it\'s good at (hover a pill to see what it covers): #1 is told, and picks by it. None switched on: helpers run on the model that answers.' }), head('context', 'num'), head('tools', 'mid'), head('thinking', 'mid'), head('images', 'mid'), head('coding', 'num'), head('web', 'num'), head('vision', 'num'), head('price', 'num'), head('works'), h('span', { className: 'num', textContent: '' }))
+        h('span', { textContent: '#', title: 'its place in the list' }), head('model'), head('provider'), h('span', { textContent: 'Helper', title: '#1 can hand a part of a task to a helper. Switch a model on, and pick what it\'s good at: UI & visuals, Code & logic, Big & hard, Quick & cheap (hover an icon to see what it covers): #1 is told, and picks by it. None switched on: helpers run on the model that answers.' }), head('context', 'num'), head('tools', 'mid', 'wrench'), head('thinking', 'mid', 'bulb'), head('images', 'mid', 'image'), head('coding', 'num', 'code'), head('web', 'num', 'globe'), head('vision', 'num', 'eye'), head('price', 'num'), head('works'), h('span', { className: 'num', textContent: '' }))
   const table = view.length ? h('ol', { className: 'mtable' + (view.length < 2 || busy ? '' : ' drag') }) : null
   // ticked or not; with Shift, every row from the last one ticked to this one
   const pick = (i, e) => {
@@ -2683,7 +2725,7 @@ function drawMine(s) {
             h('button', { type: 'button', className: 'mt-more-l', 'aria-label': 'scroll the table left', title: 'more columns to the left', onclick: (e) => slide(e.currentTarget, -1) }, '‹'),
             h('span', { textContent: 'More columns' }),
             h('button', { type: 'button', className: 'mt-more-r', 'aria-label': 'scroll the table right', title: 'more columns to the right (or Shift + scroll, or swipe)', onclick: (e) => slide(e.currentTarget, 1) }, '›'))))
-      : empty('No models in your list yet. ', h('a', { href: '#providers', textContent: 'Choose some under Providers' }), '.'))
+      : empty('No models in the list yet. ', h('a', { href: '#providers', textContent: 'Choose some under Providers' }), '.'))
   if (typing && document.activeElement !== typing) {
     typing.focus({ preventScroll: true })
     if (caret !== null && typing.setSelectionRange) typing.setSelectionRange(caret, caret)
@@ -2712,15 +2754,15 @@ const yes = (v) => h('span', { className: (v ? 'yes' : 'no') + ' mid', textConte
 const RANK_OF = { coding: 'coding', web: 'web apps (WebDev)', vision: 'vision' }
 const rankCell = (t, k) => {
   const r = t.ranks?.[k]
-  if (!r) return h('span', { className: 'num rk', textContent: '–', title: S.rankings ? `not in LMArena's ${RANK_OF[k]} ranking` : 'no scores yet: Update model info, at the top' })
-  return h('span', { className: 'num rk' + (r.rank / r.of <= 0.1 ? ' top' : ''), title: `${r.score != null ? `score ${r.score}${r.votes ? ` from ${r.votes.toLocaleString()} votes` : ''}, ` : ''}#${r.rank} of ${r.of} models in LMArena's ${RANK_OF[k]} ranking (as "${r.as}")${r.score == null ? '. Update model info for the scores' : ''}` },
-    r.score != null ? h('b', { textContent: r.score }) : '', `#${r.rank}`)
+  if (!r) return h('span', { className: 'num rk', textContent: '–', title: S.rankings ? `${COLS[k].label}: not in LMArena's ${RANK_OF[k]} ranking` : 'no scores yet: Update model info, at the top' })
+  return h('span', { className: 'num rk' + (r.rank / r.of <= 0.1 ? ' top' : ''), title: `${COLS[k].label}: ${r.score != null ? `score ${r.score}${r.votes ? ` from ${r.votes.toLocaleString()} votes` : ''}, ` : ''}#${r.rank} of ${r.of} models in LMArena's ${RANK_OF[k]} ranking (as "${r.as}")${r.score == null ? '. Update model info for the scores' : ''}` },
+    `#${r.rank}`)
 }
 const src = (t) => {
   const x = t.tested
   if (!x) return h('div', { className: 'src', textContent: 'looking it up…' })
   if (x.source === 'assumed') return h('div', { className: 'src warn', title: "models.dev doesn't know it: Retry, or set up what it can do" }, 'not found', retry(t), h('button', { className: 'small', textContent: 'Set up', onclick: () => openSetup(t) }))
-  return h('div', { className: 'src' }, Object.keys(x.set ?? {}).length ? 'set by you' : x.source === 'models.dev' ? 'models.dev' : FROM[x.source], h('button', { className: 'small', textContent: 'Edit', onclick: () => openSetup(t) }))
+  return h('div', { className: 'src' }, Object.keys(x.set ?? {}).length ? 'set by hand' : x.source === 'models.dev' ? 'models.dev' : FROM[x.source], h('button', { className: 'small', textContent: 'Edit', onclick: () => openSetup(t) }))
 }
 // a row of the table: one model of your list, in the order shown (at: its place in your order)
 const money = (x) => (x == null ? '–' : x === 0 ? '$0' : usd(x))
@@ -2777,25 +2819,27 @@ function helperCell(t, at) {
   const sug = HSUG?.[k] ?? []
   const busy = locked()
   return h('span', { className: 'hp' + (jobs ? '' : ' off') },
-    h('span', { className: SAVING.has(`${k}|on`) ? 'saving' : '', title: jobs ? 'a helper: #1 can start it for side jobs (click: not a helper)' : Object.keys(helpers()).length ? 'not a helper (click: #1 can start it for side jobs)' : 'no helpers ticked: #1 can start any of your models (click: only the ones you tick)' },
+    h('span', { className: SAVING.has(`${k}|on`) ? 'saving' : '', title: jobs ? 'a helper: #1 can start it for side jobs (click: not a helper)' : Object.keys(helpers()).length ? 'not a helper (click: #1 can start it for side jobs)' : 'no helpers ticked: #1 can start any model in the list (click: only ticked ones)' },
       sw({ checked: Boolean(jobs), disabled: busy, 'aria-label': `${t.model} is a helper`, onchange: (e) => setHelper(k, e.target.checked ? (jobs ?? []) : null, 'on') })),
     Object.entries(S.jobs ?? {}).map(([j, [label, , covers]]) => {
       const has = Boolean(jobs?.includes(j))
       const sugd = !has && sug.includes(j)
-      const pill = h('button', { type: 'button', className: 'jp' + (has ? ' on' : sugd ? ' sug' : '') + (SAVING.has(`${k}|${j}`) ? ' saving' : ''), disabled: busy, 'aria-pressed': String(has), 'aria-label': `${label}: ${covers}`, onclick: () => setHelper(k, has ? jobs.filter((x) => x !== j) : [...(jobs ?? []), j], j) }, label)
+      const pill = h('button', { type: 'button', className: 'jp' + (has ? ' on' : sugd ? ' sug' : '') + (SAVING.has(`${k}|${j}`) ? ' saving' : ''), disabled: busy, 'aria-pressed': String(has), 'aria-label': `${label}: ${covers}`, onclick: () => setHelper(k, has ? jobs.filter((x) => x !== j) : [...(jobs ?? []), j], j) }, ic(JOB_ICON[j]))
       // what the pill means, and what a click does here
       return withTip(pill, () => [
-        at === 0 ? h('div', { className: 'tcover', textContent: '#1 answers you; as a helper it\'s started when another of your models is answering.' }) : null,
-        h('div', { className: 'tjob', textContent: label }),
+        at === 0 ? h('div', { className: 'tcover', textContent: '#1 answers; as a helper it\'s started when another model is answering.' }) : null,
+        h('div', { className: 'tjob', textContent: `${label}${has ? ' · picked' : sugd ? ' · suggested' : ''}` }),
         h('div', { className: 'tcover', textContent: covers }),
         sugd ? h('div', { className: 'tcover', textContent: `Suggested from ${SUGGEST_WHY[j]}.` }) : null,
-        S.helpersAuto && has ? h('div', { className: 'tcover', textContent: 'Picked for you, from the rankings and the tests.' }) : null,
-        h('div', { className: 'thint', textContent: (has ? `Click: ${t.model} isn't picked for this any more` : `Click: #1 gives these jobs to ${t.model}${jobs ? '' : ' (it becomes a helper)'}`) + (S.helpersAuto ? ' · from then on, you pick' : '') }),
+        S.helpersAuto && has ? h('div', { className: 'tcover', textContent: 'Chosen automatically, from the rankings and the tests.' }) : null,
+        h('div', { className: 'thint', textContent: (has ? `Click: ${t.model} isn't picked for this any more` : `Click: #1 gives these jobs to ${t.model}${jobs ? '' : ' (it becomes a helper)'}`) + (S.helpersAuto ? ' · from then on: Manual' : '') }),
       ])
     }))
 }
+// each job's icon (its name and what it covers: the tooltip)
+const JOB_ICON = { ui: 'monitor', code: 'code', hard: 'mountain', quick: 'zap' }
 // what each pill's suggestions go by (said in its tooltip)
-const SUGGEST_WHY = { ui: 'its place in the top half of the web-app ranking (LMArena)', code: 'its place in the top half of the coding ranking (LMArena)', hard: 'it thinks with a context of 128k or more, or its place in the top half of the ranking for long real tasks or the hardest prompts (LMArena)', quick: 'its test: as fast as the middle one of yours or faster (or nothing else fits it)' }
+const SUGGEST_WHY = { ui: 'its place in the top half of the web-app ranking (LMArena)', code: 'its place in the top half of the coding ranking (LMArena)', hard: 'it thinks with a context of 128k or more, or its place in the top half of the ranking for long real tasks or the hardest prompts (LMArena)', quick: 'its test: as fast as the middle one or faster (or nothing else fits it)' }
 // Helpers are picked from the models that answered their test: how many did
 const working = () => S.order.filter((t) => TRIES[keyOf(t)]?.ok && !TRIES[keyOf(t)].going).length
 // No test yet: ask before testing them all (each gets a short message, which a paid model charges for);
@@ -2805,7 +2849,7 @@ function testFirst(then) {
   const n = (x) => x.toLocaleString()
   const paid = S.order.filter((t) => t.price && (t.price.input > 0 || t.price.output > 0)).length
   const unknown = S.order.filter((t) => !t.price).length
-  $('h-test-cost').textContent = `Test all sends each of your ${n(S.order.length)} models a short message. ${paid ? `${n(paid)} of them aren't free: each charges for its few tokens. ` : ''}${unknown ? `${n(unknown)} have no price we know of, and may charge too. ` : ''}When it's done, helpers are ${then === 'suggest' ? 'suggested' : 'picked'} from the ones that worked.`
+  $('h-test-cost').textContent = `Test all sends each of the ${n(S.order.length)} models a short message. ${paid ? `${n(paid)} of them aren't free: each charges for its few tokens. ` : ''}${unknown ? `${n(unknown)} have no price we know of, and may charge too. ` : ''}When it's done, helpers are ${then === 'suggest' ? 'suggested' : 'picked'} from the ones that worked.`
   $('h-test-go').onclick = () => {
     $('h-test').close()
     afterTests = then
@@ -2838,7 +2882,7 @@ async function suggestNow(b) {
   if (b) b.disabled = false
   if (!r) return
   HSUG = Object.keys(r.suggest).length ? r.suggest : null
-  if (!HSUG) return toast(working() ? 'Nothing more to suggest' : 'None of your models worked in the test: nothing to pick from', !working())
+  if (!HSUG) return toast(working() ? 'Nothing more to suggest' : 'No model worked in the test: nothing to pick from', !working())
   setFilter({ helpers: true }) // your helpers and the suggested ones, together: not lost among the rest
 }
 // The toolbar's helpers part: suggestions waiting (take all · dismiss), or Suggest helpers and Clear
@@ -2847,7 +2891,7 @@ function drawHelperBar() {
   helperBar ??= h('span', { className: 'hbar' })
   const order = S.order
   const n = Object.keys(helpers()).length
-  const busy = (b) => Object.assign(b, { disabled: true, textContent: 'Saving…' })
+  const busy = (b) => Object.assign(b, { disabled: true, textContent: 'Saving…' }) // its icon and label give way
   put(helperBar,
     HSUG ? h('span', { className: 'hsug', title: 'shown dashed in the Helper column: click one to take just that' }, ic('sparkles'),
       h('span', { textContent: `${Object.keys(HSUG).length} suggested` }),
@@ -2860,12 +2904,12 @@ function drawHelperBar() {
         saveHelpers(next, [], `${took.length} model${took.length === 1 ? ' is a helper' : 's are helpers'} now`).then(() => drawMine(S))
       } }),
       h('button', { className: 'small ghost', textContent: 'Dismiss', onclick: () => ((HSUG = null), drawMine(S)) })) : null,
-    !HSUG && !S.helpersAuto ? h('button', { className: 'small', title: working() ? `suggest helpers from the ${working()} models that answered their test (their provider switched on), each with what it's good at that it doesn't have yet (from the rankings, its test, thinking and context): you see them first, then take them or not` : 'suggest helpers: your models are tested first (helpers are picked from the ones that answer)', onclick: (e) => (working() ? suggestNow(e.currentTarget) : testFirst('suggest')) }, ic('sparkles'), 'Suggest helpers') : null,
-    !HSUG && n ? h('button', { className: 'small ghost', textContent: 'Clear helpers', title: `none of your models a helper (${n} now): #1 can then start any of your models again, as before`, onclick: (e) => {
-      if (!confirm(`Clear your ${n} helper${n === 1 ? '' : 's'}? #1 can then start any of your models again, as before.`)) return
+    !HSUG && !S.helpersAuto ? h('button', { className: 'small', title: working() ? `suggest helpers from the ${working()} models that answered their test (their provider switched on), each with what it's good at that it doesn't have yet (from the rankings, its test, thinking and context): shown first, to take or not` : 'suggest helpers: the models are tested first (helpers are picked from the ones that answer)', onclick: (e) => (working() ? suggestNow(e.currentTarget) : testFirst('suggest')), 'aria-label': 'Suggest helpers' }, ic('sparkles'), h('span', { className: 'lt', textContent: 'Suggest helpers' })) : null,
+    !HSUG && n ? h('button', { className: 'small ghost', 'aria-label': 'Clear helpers', title: `Clear helpers: no model a helper (${n} now): #1 can then start any model again, as before`, onclick: (e) => {
+      if (!confirm(`Clear the ${n} helper${n === 1 ? '' : 's'}? #1 can then start any model again, as before.`)) return
       busy(e.currentTarget)
-      saveHelpers({}, [], 'no helpers: #1 can start any of your models again').then(() => (FILTER.helpers ? setFilter({ helpers: false }) : drawMine(S))) // no helpers left to show only
-    } }) : null)
+      saveHelpers({}, [], 'no helpers: #1 can start any model again').then(() => (FILTER.helpers ? setFilter({ helpers: false }) : drawMine(S))) // no helpers left to show only
+    } }, ic('x'), h('span', { className: 'lt', textContent: 'Clear helpers' })) : null)
   return helperBar
 }
 
@@ -2878,12 +2922,12 @@ function tableRow(t, at, pick) {
   // where what it can do comes from, when that's worth a look: not known to models.dev (a guess), or set by you
   const tag = !x ? h('span', { className: 'tag', textContent: '…', title: 'looking it up in models.dev' })
     : x.source === 'assumed' ? h('button', { type: 'button', className: 'tag warn', textContent: 'unknown', title: "models.dev doesn't know it: what it can do is a guess. Click to set it up", onclick: () => openSetup(t) })
-    : Object.keys(x.set ?? {}).length ? h('button', { type: 'button', className: 'tag', textContent: 'edited', title: 'what it can do: set by you (click to change)', onclick: () => openSetup(t) }) : null
+    : Object.keys(x.set ?? {}).length ? h('button', { type: 'button', className: 'tag', textContent: 'edited', title: 'what it can do: set by hand (click to change)', onclick: () => openSetup(t) }) : null
   const busy = locked()
   return h('li', { className: 'in' + (picked ? ' picked' : '') + (isOff(t.provider) ? ' off' : ''), 'data-key': `${t.provider}/${t.model}`, title: isOff(t.provider) ? `${t.provider} is switched off: HeartCode skips this model until it's on` : '' },
     h('span', { className: 'grip', textContent: '⋮⋮', 'aria-hidden': 'true' }),
     h('input', { type: 'checkbox', checked: picked, disabled: busy, 'aria-label': `select ${t.model}`, title: 'select (Shift: and every row up to the last one selected)', onclick: (e) => (e.preventDefault(), pick(e)) }),
-    h('span', { className: 'n', textContent: `#${at + 1}`, title: SORT.length || filtering() ? 'its place in your list' : '' }),
+    h('span', { className: 'n', textContent: `#${at + 1}`, title: SORT.length || filtering() ? 'its place in the list' : '' }),
     h('span', { className: 'm' }, h('span', { className: 'name', textContent: t.model, title: t.model }), tag),
     h('span', { className: 'p', textContent: isOff(t.provider) ? `${t.provider} · off` : t.provider, title: t.provider }),
     helperCell(t, at),
@@ -2896,7 +2940,7 @@ function tableRow(t, at, pick) {
       h('button', { type: 'button', className: 'small ghost ib k-test row-test', disabled: going || busy, title: going ? 'testing…' : 'Test: send it a short message to see that it really answers', 'aria-label': `test ${t.model}`, onclick: () => tryModel(t) }, ic(going ? 'clock' : 'play')),
       h('button', { type: 'button', className: 'small ghost ib k-info', title: 'Request: send it "Hello" and see exactly what was sent and what came back', 'aria-label': `raw request to ${t.model}`, onclick: () => hello(t.provider, t.model) }, ic('eye')),
       h('button', { type: 'button', className: 'small ghost ib k-edit', disabled: busy, title: 'Edit what it can do: context, tool calls, thinking, images (or look it up in models.dev again)', 'aria-label': `edit ${t.model}`, onclick: () => openSetup(t) }, ic('pencil')),
-      h('button', { type: 'button', className: 'small ghost ib k-del', disabled: busy, title: 'Remove it from your list (it stays under its provider)', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) }, ic('trash'))))
+      h('button', { type: 'button', className: 'small ghost ib k-del', disabled: busy, title: 'Remove it from the list (it stays under its provider)', 'aria-label': `remove ${t.model}`, onclick: () => removeMine(t.provider, t.model) }, ic('trash'))))
 }
 
 // your list changed: the rows and counts it touches, in place
@@ -2910,7 +2954,7 @@ function markCatalog() {
     const n = S.order.filter((t) => t.provider === sec.dataset.provider).length
     const tag = sec.querySelector('.inlist')
     tag.hidden = !n
-    tag.textContent = `${n} in your list${inUse()?.provider === sec.dataset.provider ? ' · in use' : ''}`
+    tag.textContent = `${n} in the list${inUse()?.provider === sec.dataset.provider ? ' · in use' : ''}`
   }
   drawPicks()
 }
@@ -2918,12 +2962,12 @@ function markCatalog() {
 function drawUsing(s) {
   const o = s.order.filter((t) => !isOff(t.provider))
   $('using').hidden = page() === 'providers' // there it's on the page itself
-  put($('using'), o.length ? [h('span', { className: 'k', textContent: 'HeartCode uses' }), h('b', { textContent: o[0].model }), h('span', { className: 'k', textContent: `${o[0].provider}${o.length > 1 ? ` · ${o.length - 1} fallback${o.length > 2 ? 's' : ''}` : ''}` })] : s.order.length ? [h('span', { className: 'k', textContent: 'The providers of all your models are switched off' }), h('a', { href: '#providers', textContent: 'Switch one on' })] : [h('span', { className: 'k', textContent: 'No model chosen yet' }), h('a', { href: '#providers', textContent: 'Choose one' })])
+  put($('using'), o.length ? [h('span', { className: 'k', textContent: 'HeartCode uses' }), h('b', { textContent: o[0].model }), h('span', { className: 'k', textContent: `${o[0].provider}${o.length > 1 ? ` · ${o.length - 1} fallback${o.length > 2 ? 's' : ''}` : ''}` })] : s.order.length ? [h('span', { className: 'k', textContent: 'The providers of all the models are switched off' }), h('a', { href: '#providers', textContent: 'Switch one on' })] : [h('span', { className: 'k', textContent: 'No model chosen yet' }), h('a', { href: '#providers', textContent: 'Choose one' })])
 }
 
 // --- General ---
 const PERM_INFO = { all: ['Everything', 'Edits files and runs commands without asking'], commands: ['Edits only', 'Edits files; asks before running commands'], ask: ['Ask first', 'Asks before every edit and command'] }
-const THEME_INFO = { dark: ["Your terminal's background", ['#1f2328', '#d4d4d8', '#ff6b9d', '#7aa2f7']], light: ['White background', ['#fafbfc', '#24292f', '#d6336c', '#0969da']], midnight: ['Deep blue background', ['#1a1b26', '#c0caf5', '#ff7ab2', '#7aa2f7']], mono: ['No colors: bold and dim', ['#000000', '#bbbbbb', '#ffffff', '#777777']] }
+const THEME_INFO = { dark: ["The terminal's background", ['#1f2328', '#d4d4d8', '#ff6b9d', '#7aa2f7']], light: ['White background', ['#fafbfc', '#24292f', '#d6336c', '#0969da']], midnight: ['Deep blue background', ['#1a1b26', '#c0caf5', '#ff7ab2', '#7aa2f7']], mono: ['No colors: bold and dim', ['#000000', '#bbbbbb', '#ffffff', '#777777']] }
 const TOGGLE_INFO = { autoCompact: 'Compact long conversations', director: 'Let the model set things up', format: 'Format files after edits', lsp: 'Language server checks', updateCheck: 'Check for updates', mouse: 'HeartCode takes the mouse' }
 function choices(id, list, cur, name) {
   put($(id), list.map(([v, title, desc, colors]) => h('label', { className: 'choice' + (v === cur ? ' on' : '') },
@@ -2965,9 +3009,9 @@ function drawVoice(s) {
   put($('v-src'), h('option', { value: '', textContent: 'This machine (whisper-cli)' }), names.map((n) => h('option', { value: n, textContent: `${n} (its transcription API)` })))
   $('v-src').value = v.provider && names.includes(v.provider) ? v.provider : ''
   const remote = Boolean($('v-src').value)
-  $('v-src-about').textContent = remote ? 'Sent to that provider to turn into text: fast, needs its key.' : 'Runs on your computer: private, free, slower. Needs whisper-cli and a model.'
+  $('v-src-about').textContent = remote ? 'Sent to that provider to turn into text: fast, needs its key.' : 'Runs on this computer: private, free, slower. Needs whisper-cli and a model.'
   $('v-model-about').textContent = remote ? 'Its speech-to-text model, like whisper-large-v3 (Groq) or whisper-1 (OpenAI).' : 'A whisper model file (ggml-….bin). Empty: the best one in ~/.whisper-models.'
-  $('v-lang-about').textContent = remote ? 'What you speak, like en or bn. Empty: worked out from what you say.' : 'What you speak, like en or bn; auto works it out. Empty: English.'
+  $('v-lang-about').textContent = remote ? 'The language spoken, like en or bn. Empty: worked out from the speech.' : 'The language spoken, like en or bn; auto works it out. Empty: English.'
   $('v-model').placeholder = remote ? 'whisper-large-v3' : 'auto'
   $('v-lang').placeholder = remote ? 'auto' : 'en'
   for (const [id, k] of [['v-model', 'model'], ['v-lang', 'language']]) if (document.activeElement !== $(id)) $(id).value = v[k] ?? ''
@@ -2988,7 +3032,7 @@ $('v-lang').onchange = () => saveVoice('voice language saved')
 // is typed in its own row: a box with Test and Add while there's none (or Change was pressed), else the
 // address with Change, Test and Remove.
 const ENGINE_INFO = {
-  searxng: 'Your own instance: private, and no other site\'s limits. Its JSON API is used when it has it on.',
+  searxng: 'A self-hosted instance: private, and no other site\'s limits. Its JSON API is used when it has it on.',
   searx: 'Many engines at once, through public instances from searx.space. Broad; some instances are busy.',
   duckduckgo: 'Broad results from its HTML page. Blocked on some networks.',
   mwmbl: 'An open, non-profit index of its own. Fast; smaller than the big engines.',
@@ -2996,11 +3040,11 @@ const ENGINE_INFO = {
   npm: 'Packages: for libraries and tools. Up to 3 results.',
   github: 'Repositories: for projects and examples. Up to 3 results.',
 }
-const wsInput = h('input', { type: 'text', placeholder: 'http://192.168.1.10:8888 or https://search.example.com', spellcheck: false, autocomplete: 'off', 'aria-label': 'Your SearXNG address' })
+const wsInput = h('input', { type: 'text', placeholder: 'http://192.168.1.10:8888 or https://search.example.com', spellcheck: false, autocomplete: 'off', 'aria-label': 'SearXNG address' })
 let wsEditing = false
 const wsCancel = () => ((wsEditing = false), wsInput.blur(), drawSearch(S))
 const wsSave = async (url) => {
-  const r = await act('/api/search', { searxng: url }, url.trim() ? 'your SearXNG saved: it is asked first' : 'your SearXNG removed')
+  const r = await act('/api/search', { searxng: url }, url.trim() ? 'SearXNG saved: it is asked first' : 'SearXNG removed')
   if (r) (wsEditing = false), wsInput.blur(), S && drawSearch(S)
 }
 const wsTest = async (url) => {
@@ -3061,9 +3105,9 @@ function drawNotify(s) {
   const focused = document.activeElement === $('tg-token')
   if (!t.connected) {
     put($('tg-setup'), h('ol', { className: 'tg-steps' },
-      h('li', {}, 'In Telegram, open ', h('a', { href: 'https://t.me/BotFather', target: '_blank', rel: 'noopener', textContent: '@BotFather' }), ', send ', h('span', { className: 'mono', textContent: '/newbot' }), ', pick a name, and copy the token it gives you.'),
+      h('li', {}, 'In Telegram, open ', h('a', { href: 'https://t.me/BotFather', target: '_blank', rel: 'noopener', textContent: '@BotFather' }), ', send ', h('span', { className: 'mono', textContent: '/newbot' }), ', pick a name, and copy the token it gives.'),
       h('li', {}, tokenRow('Paste the token here')),
-      h('li', { className: t.bot ? '' : 'muted' }, t.bot ? ['Open ', h('a', { href: `https://t.me/${t.bot}`, target: '_blank', rel: 'noopener', textContent: `@${t.bot}` }), ' and press ', h('b', { textContent: 'Start' }), ' (or send it any message), then ', h('button', { className: 'small', type: 'button', textContent: 'Find my chat', onclick: () => tgConnect(true) })] : 'Then press Start in your bot, so HeartCode knows where to send.')))
+      h('li', { className: t.bot ? '' : 'muted' }, t.bot ? ['Open ', h('a', { href: `https://t.me/${t.bot}`, target: '_blank', rel: 'noopener', textContent: `@${t.bot}` }), ' and press ', h('b', { textContent: 'Start' }), ' (or send it any message), then ', h('button', { className: 'small', type: 'button', textContent: 'Find the chat', onclick: () => tgConnect(true) })] : 'Then press Start in the bot, so HeartCode knows where to send.')))
     $('tg-token').value = typed
     if (focused) $('tg-token').focus()
   } else {
@@ -3083,13 +3127,13 @@ function drawNotify(s) {
 const TG_EVENT_INFO = {
   done: 'The task, how long it took, and the answer.',
   failed: 'The task and the error.',
-  waiting: 'The question or permission it stopped at, so you can come back and answer.',
+  waiting: 'The question or permission it stopped at, to come back to and answer.',
 }
 async function tgConnect(again = false) {
   const token = again === true ? '' : $('tg-token')?.value.trim()
   const r = await act('/api/telegram/connect', { token })
   if (!r) return
-  toast(r.found ? `Connected: sending to ${r.found}` : r.telegram?.bot ? `Token works. Now press Start in @${r.telegram.bot}, then Find my chat` : 'Saved')
+  toast(r.found ? `Connected: sending to ${r.found}` : r.telegram?.bot ? `Token works. Now press Start in @${r.telegram.bot}, then Find the chat` : 'Saved')
 }
 
 // --- Logging: the two switches, how much of each request; the requests logged (live) ---
@@ -3288,7 +3332,7 @@ async function openReq(r) {
     h('div', { className: 'l1', style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, resultTag(d), h('b', { className: 'mono', textContent: d.model }), placeTag(d)),
     h('dl', { className: 'kv' },
       row('When', new Date(d.at).toLocaleString()), row('Provider', d.provider), row('Address', d.url),
-      row('Where in your list', d.of > 1 ? `#${d.place} of ${d.of}${d.place > 1 ? ' (a fallback: the ones before it failed)' : ''}` : null),
+      row('Where in the list', d.of > 1 ? `#${d.place} of ${d.of}${d.place > 1 ? ' (a fallback: the ones before it failed)' : ''}` : null),
       row('For', d.purpose === 'test' ? 'testing the model' : d.purpose === 'btw' ? 'a /btw question' : 'the conversation'), row('Tab', d.tab),
       row('Took', secs(d.ms)), row('First token after', secs(d.firstTokenMs)), row('Tokens', tokensOf(d.usage)), row('Finished because', d.finishReason),
       row('HTTP status', d.status), row('File', `${S?.logs.requests ?? ''}/${r.run}/${r.file}`)),
@@ -3325,7 +3369,7 @@ const PROMPT_KINDS = [
   ['agent', 'Notes & replies', 'What HeartCode adds or answers while the model works', (p) => !p.title && p.id.startsWith('agent/') && !p.id.startsWith('agent/tool-')],
   ['guided', 'Guided mode', 'For models without tool calls: they write their actions as text', (p) => !p.title && p.id.startsWith('guided/')],
   ['compact', 'Summaries', 'Compacting a long conversation into a summary', (p) => p.id.startsWith('compact/')],
-  ['tests', 'Tests', 'What Test asks your models', (p) => p.id.startsWith('tests/')],
+  ['tests', 'Tests', 'What Test asks the models', (p) => p.id.startsWith('tests/')],
 ]
 // a prompt's name to read: "output-cut" → "Output cut", a tool's by the tool's own name ("tool-read_file" → "read_file")
 const promptName = (p) => {
@@ -3347,20 +3391,20 @@ function drawPrompts(s) {
     const all = s.prompts.filter(is)
     return h('label', { className: v === promptKind && !promptQuery ? 'on' : '', title: about },
       h('input', { type: 'radio', name: 'r-kind', checked: v === promptKind, onchange: () => ((promptKind = v), (promptQuery = $('r-search').value = ''), (SEL.prompts = null), drawPrompts(S)) }),
-      t, h('span', { className: 'r-count', textContent: String(all.length) }), all.some((p) => p.changed) ? h('span', { className: 'dot', title: 'some changed by you' }) : null)
+      t, h('span', { className: 'r-count', textContent: String(all.length) }), all.some((p) => p.changed) ? h('span', { className: 'dot', title: 'some changed' }) : null)
   }))
   const aboutOf = (p) => promptParts(p).about || (p.id.startsWith('agent/tool-') ? `What the model is told the ${promptName(p)} tool does` : '')
-  const item = (p) => ({ id: p.id, title: promptName(p), sub: aboutOf(p), badge: p.changed ? h('span', { className: 'tag brand', textContent: 'yours' }) : null, p })
+  const item = (p) => ({ id: p.id, title: promptName(p), sub: aboutOf(p), badge: p.changed ? h('span', { className: 'tag brand', textContent: 'changed' }) : null, p })
   const shown = s.prompts.filter(match)
   const groups = promptQuery ? PROMPT_KINDS.map(([, t, , is]) => ({ title: t, items: shown.filter(is).map(item) })) : [{ items: shown.map(item) }]
   masterDetail('prompts', $('r-items'), $('r-detail'), groups, (x) => {
-    if (!x) return h('div', { className: 'card' }, h('h2', { textContent: promptMine ? 'None changed yet' : 'No prompt matches' }), h('p', { className: 'sub', textContent: promptMine ? "You're using HeartCode's prompts as they come. Change one and save it: it shows here." : 'Try other words, or clear the search.' }))
+    if (!x) return h('div', { className: 'card' }, h('h2', { textContent: promptMine ? 'None changed yet' : 'No prompt matches' }), h('p', { className: 'sub', textContent: promptMine ? "HeartCode's prompts are used as they come. A prompt changed and saved shows here." : 'Try other words, or clear the search.' }))
     const p = x.p
     const { vars } = promptParts(p)
     const about = aboutOf(p)
     const kind = kindOf(p)
     const ta = editor('prompts', p.id, p.text)
-    const undo = h('button', { className: 'ghost', textContent: 'Undo my changes', onclick: () => (saved('prompts', p.id), drawPrompts(S)) })
+    const undo = h('button', { className: 'ghost', textContent: 'Undo the changes', onclick: () => (saved('prompts', p.id), drawPrompts(S)) })
     const unsaved = h('span', { className: 'tag need', textContent: 'not saved' })
     const dirty = () => {
       const changed = DRAFTS.prompts[p.id] !== undefined
@@ -3383,9 +3427,9 @@ function drawPrompts(s) {
       h('div', { className: 'k-head' },
         h('h2', { textContent: promptName(p) }),
         h('span', { className: 'tag brand', textContent: kind?.[1] ?? '' }),
-        h('span', { className: 'tag', textContent: p.changed ? 'yours' : "HeartCode's" }),
+        h('span', { className: 'tag', textContent: p.changed ? 'changed' : "HeartCode's" }),
         unsaved),
-      h('div', { className: 'k-path mono', textContent: p.changed ? `${p.id} · yours in ${s.home}/prompts/${p.id.split('/')[0]}.md` : p.id }),
+      h('div', { className: 'k-path mono', textContent: p.changed ? `${p.id} · changed, in ${s.home}/prompts/${p.id.split('/')[0]}.md` : p.id }),
       about ? [h('label', { className: 'f', textContent: 'What it is' }), h('p', { className: 'r-about', textContent: about })] : null,
       vars.length ? [h('label', { className: 'f', textContent: 'Placeholders' }),
         h('div', { className: 'r-vars', onmouseleave: () => (hint.textContent = HINT) }, vars.map(({ v, text }) => h('button', { className: 'r-var mono', textContent: `{{${v}}}`, 'aria-label': `Put {{${v}}} in the prompt${text ? `: ${text}` : ''}`, onmouseenter: () => show(v, text), onfocus: () => show(v, text), onclick: () => insert(v) }))),
@@ -3396,7 +3440,7 @@ function drawPrompts(s) {
         h('button', { className: 'primary', textContent: 'Save', onclick: () => saveItem('prompts', p.id, '/api/prompt', { id: p.id, text: ta.value }, 'saved: used from the next message') }),
         undo,
         h('span', { className: 'spacer' }),
-        p.changed ? h('button', { textContent: "Reset to HeartCode's", onclick: () => confirm("Put HeartCode's prompt back? Yours is deleted.") && saveItem('prompts', p.id, '/api/prompt', { id: p.id, text: null }, "HeartCode's prompt again") }) : null))
+        p.changed ? h('button', { textContent: "Reset to HeartCode's", onclick: () => confirm("Put HeartCode's prompt back? The changed one is deleted.") && saveItem('prompts', p.id, '/api/prompt', { id: p.id, text: null }, "HeartCode's prompt again") }) : null))
   }, { tabs: false })
 }
 
@@ -3429,7 +3473,7 @@ function drawMcp(s) {
   put($('c-list'), h('h2', { textContent: 'Servers' }), h('p', { className: 'sub', textContent: 'Remote ones (a URL) may need signing in; local ones don\'t. Tick a flag off to start it without that flag; switch a server off to keep it without using it.' }),
     s.mcp.length ? s.mcp.map((m) => h('div', { className: 'opt mcp-row' },
       tile(m.remote ? 'globe' : m.name.includes('chrome') || m.name.includes('browser') ? 'globe' : m.name.includes('computer') ? 'cpu' : 'plug', m.on ? 'teal' : 'gray'),
-      h('div', { className: 't' }, h('b', {}, m.name, ' ', h('span', { className: 'tag', textContent: m.from }), m.remote ? authTag(m.auth) : null), m.description ? h('span', { textContent: m.description }) : null, h('div', { className: 'mono muted', style: 'word-break:break-all;margin-top:3px', textContent: m.what }), m.from === 'yours' && !m.remote ? mcpFlags(m) : null),
+      h('div', { className: 't' }, h('b', {}, m.name, ' ', h('span', { className: 'tag', textContent: m.from === 'yours' ? 'custom' : m.from }), m.remote ? authTag(m.auth) : null), m.description ? h('span', { textContent: m.description }) : null, h('div', { className: 'mono muted', style: 'word-break:break-all;margin-top:3px', textContent: m.what }), m.from === 'yours' && !m.remote ? mcpFlags(m) : null),
       m.remote ? h('button', { className: 'small', textContent: m.auth === 'in' ? 'Sign in again' : 'Sign in', onclick: () => act('/api/mcp/login', { name: m.name }, `signed in to ${m.name}`) }) : null,
       m.from === 'yours' ? h('button', { className: 'small danger', textContent: 'Remove', onclick: () => confirm(`Remove the MCP server ${m.name}?`) && act('/api/mcp/remove', { name: m.name }, `removed ${m.name}`) }) : null,
       sw({ checked: m.on, 'aria-label': `${m.name} on`, onchange: (e) => act('/api/mcp/toggle', { name: m.name, on: e.target.checked }, `${m.name}: ${e.target.checked ? 'on' : 'off'}`) }))) : h('div', { className: 'empty', textContent: 'No MCP servers.' }))
@@ -3440,8 +3484,8 @@ function drawMcp(s) {
 }
 
 // --- skills: a form (name, who uses it, what it's for, the prompt); SKILL.md is made from it ---
-const USES = [['both', 'You and the model', 'type /skill:name, or the model uses it when it fits'], ['me', 'Only you', 'only when you type /skill:name'], ['model', 'Only the model', "when it fits; you don't type it"], ['always', 'Always on', 'in every message: how to work, not a task']]
-const USE_TAG = { both: 'you + model', me: 'only you', model: 'model', always: 'always on' } // who uses it, in a word or two (the list and the panel)
+const USES = [['both', 'Typed or the model', 'typed as /skill:name, or used by the model when it fits'], ['me', 'Only typed', 'only when typed as /skill:name'], ['model', 'Only the model', 'when it fits; not typed'], ['always', 'Always on', 'in every message: how to work, not a task']]
+const USE_TAG = { both: 'typed + model', me: 'typed only', model: 'model', always: 'always on' } // who uses it, in a word or two (the list and the panel)
 function parseSkill(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text)
   const out = { description: '', use: 'both', extra: [], body: (m ? m[2] : text).replace(/^\s*\n/, '') }
@@ -3458,8 +3502,8 @@ const NEW = { name: '', description: '', use: 'both', extra: [], body: '' }
 function newSkill() {
   const f = skillForm('+new', NEW, { isNew: true })
   const first = !S.skills.length
-  put($('k-form'), h('h2', { id: 'k-title', textContent: first ? 'Make your first skill' : 'New skill' }),
-    first ? h('p', { className: 'sub', textContent: 'A skill is a prompt you use again and again, like "review this" or "write the release notes". Skills from Claude Code and others: /import in HeartCode.' }) : null,
+  put($('k-form'), h('h2', { id: 'k-title', textContent: first ? 'Make the first skill' : 'New skill' }),
+    first ? h('p', { className: 'sub', textContent: 'A skill is a prompt used again and again, like "review this" or "write the release notes". Skills from Claude Code and others: /import in HeartCode.' }) : null,
     f.el,
     h('div', { className: 'actions' },
       h('button', { textContent: 'Cancel', onclick: () => $('k-form').close() }),
@@ -3485,10 +3529,10 @@ function skillForm(id, start, { isNew, readOnly }) {
   const uses = h('div', {}, h('div', { className: 'seg', role: 'radiogroup', 'aria-label': 'Who uses it' }, USES.map(([v, t, sub]) => h('label', { className: d.use === v ? 'on' : '', title: sub },
     h('input', { type: 'radio', name: `use-${id}`, checked: d.use === v, disabled: readOnly, onchange: () => ((d.use = v), touch(), (useAbout.textContent = sub), uses.querySelectorAll('.seg label').forEach((c) => c.classList.toggle('on', c.querySelector('input').checked))) }),
     t))), useAbout)
-  const body = grow(h('textarea', { className: 'editor', spellcheck: false, readOnly, value: d.body, placeholder: 'What the model should do. $ARGUMENTS is what you type after /skill:name: "/skill:review the login page" gives "the login page".', oninput: (e) => ((d.body = e.target.value), touch()) }), 220)
+  const body = grow(h('textarea', { className: 'editor', spellcheck: false, readOnly, value: d.body, placeholder: 'What the model should do. $ARGUMENTS is the text typed after /skill:name: "/skill:review the login page" gives "the login page".', oninput: (e) => ((d.body = e.target.value), touch()) }), 220)
   return { d, el: [
     h('div', { className: 'row' },
-      isNew ? h('div', { className: 'grow' }, h('label', { className: 'f', textContent: "Name: you'll type /skill:name" }), field('name', { placeholder: 'review' })) : null,
+      isNew ? h('div', { className: 'grow' }, h('label', { className: 'f', textContent: 'Name: typed as /skill:name' }), field('name', { placeholder: 'review' })) : null,
       h('div', { className: 'grow', style: 'flex:3' }, h('label', { className: 'f', textContent: 'What it does (the model reads this to know when to use it)' }), about)),
     h('label', { className: 'f', textContent: 'Who uses it' }), uses,
     h('label', { className: 'f', textContent: 'The prompt' }), body,
@@ -3554,8 +3598,8 @@ function drawSkills(s) {
     if (e.key === 'Enter') install()
   }
   $('k-import').onclick = openImport
-  masterDetail('skills', $('k-items'), $('k-detail'), [{ title: mine.length && theirs.length ? 'Yours' : '', items: mine.map(item) }, { title: 'From projects', items: theirs.map(item) }], (x) => {
-    if (!x) return h('div', { className: 'card' }, h('h2', { textContent: 'No skills yet' }), h('p', { className: 'sub', textContent: 'A skill is a prompt you use again and again, like "review this" or "write the release notes". Make one with + New skill, install one above, or bring them from Claude Code and others with Import from other tools.' }))
+  masterDetail('skills', $('k-items'), $('k-detail'), [{ title: mine.length && theirs.length ? 'Custom' : '', items: mine.map(item) }, { title: 'From projects', items: theirs.map(item) }], (x) => {
+    if (!x) return h('div', { className: 'card' }, h('h2', { textContent: 'No skills yet' }), h('p', { className: 'sub', textContent: 'A skill is a prompt used again and again, like "review this" or "write the release notes". Make one with + New skill, install one above, or bring them from Claude Code and others with Import from other tools.' }))
     const k = x.k
     const f = skillForm(k.name, parseSkill(k.text), { readOnly: !k.mine })
     const files = k.files ?? []
@@ -3563,7 +3607,7 @@ function drawSkills(s) {
       h('div', { className: 'k-head' },
         h('h2', { className: 'mono', textContent: '/skill:' + k.name }),
         h('span', { className: 'tag brand', textContent: USE_TAG[k.use] ?? k.use, title: (USES.find(([v]) => v === k.use) ?? [])[2] ?? '' }),
-        h('span', { className: 'tag', textContent: k.mine ? 'yours' : 'from a project: read only' }),
+        h('span', { className: 'tag', textContent: k.mine ? 'custom' : 'from a project: read only' }),
         files.length ? h('span', { className: 'tag', textContent: `${files.length} file${files.length === 1 ? '' : 's'}` }) : null),
       h('div', { className: 'k-path mono', textContent: k.path ?? '' }),
       f.el,
@@ -3746,7 +3790,7 @@ showPage()
 drawPresets()
 if (!token) put($('page-providers'), h('h1', { textContent: 'Open the link HeartCode printed' }), h('p', { className: 'lead', textContent: 'It has the key to this page: /settings in HeartCode, or heart settings.' }))
 else {
-  job('state', { where: ['page'], what: 'Loading your settings', detail: 'providers, models, logging, prompts, MCP servers, skills' })
+  job('state', { where: ['page'], what: 'Loading the settings', detail: 'providers, models, logging, prompts, MCP servers, skills' })
   api('/api/state').then(render, (e) => toast(e.message, true)).finally(() => job('state'))
     .then(() => api('/api/tests', {}))
     .then(({ results, run }) => (Object.assign(TRIES, results), showRun(run)))

@@ -82,7 +82,7 @@ export function treeItems(chat, ago = (x) => x) {
       const files = Object.keys(n.turn.files ?? {}).length
       items.push({
         label: `${lead}${fork ? (i === kids.length - 1 ? '└─ ' : '├─ ') : ''}${n.turn.task.split('\n')[0].slice(0, 70)}`,
-        desc: [ago(n.turn.at), files && `${files} file${files > 1 ? 's' : ''}`, here && '● you are here', !here && n.ends && '◆ end of a branch'].filter(Boolean).join(' · '),
+        desc: [ago(n.turn.at), files && `${files} file${files > 1 ? 's' : ''}`, here && '● current', !here && n.ends && '◆ end of a branch'].filter(Boolean).join(' · '),
         depth: d,
         task: n.turn.task,
         branch: mine.branch,

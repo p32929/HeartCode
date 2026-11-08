@@ -137,7 +137,7 @@ class Notes {
   // Keeps MEMORY.md in step with the notes.
   changed() {
     fs.mkdirSync(this.dir, { recursive: true })
-    const what = this.scope === 'global' ? 'The notes HeartCode keeps about you, for every project' : "This project's notes, kept by HeartCode"
+    const what = this.scope === 'global' ? 'The notes HeartCode keeps about the user, for every project' : "This project's notes, kept by HeartCode"
     fs.writeFileSync(path.join(this.dir, 'MEMORY.md'), `# Memory\n\n${what}. Each line links to a note.\n\n${this.index(Infinity) || '(no notes yet)'}\n`)
   }
 }

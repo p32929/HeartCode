@@ -54,11 +54,11 @@ const DETAILS = ['full', 'summary']
 // Files in ~/.heart the page edits as text: [name, what it is, JSON?]
 const FILES = [
   ['mcp.json', 'MCP servers: programs that give the model more tools', true, '{\n  "mcpServers": {\n    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] },\n    "docs": { "url": "https://mcp.example.com/mcp" }\n  }\n}'],
-  ['hooks.json', 'Your commands, run before or after the model uses a tool (one can block it)', true, '{\n  "hooks": {\n    "PreToolUse": [\n      { "matcher": "run_command", "hooks": [{ "type": "command", "command": "./check-command.sh" }] }\n    ]\n  }\n}'],
-  ['keybindings.json', 'Your own keys: an action, or a /command to send', true, '{\n  "alt+g": "cycle_permissions",\n  "alt+r": "/rewind"\n}'],
-  ['theme.json', 'Your own colors, on top of the theme you chose', true, '{\n  "brand": "#ff6b9d",\n  "background": "#101014"\n}'],
+  ['hooks.json', 'Commands run before or after the model uses a tool (one can block it)', true, '{\n  "hooks": {\n    "PreToolUse": [\n      { "matcher": "run_command", "hooks": [{ "type": "command", "command": "./check-command.sh" }] }\n    ]\n  }\n}'],
+  ['keybindings.json', 'Custom keys: an action, or a /command to send', true, '{\n  "alt+g": "cycle_permissions",\n  "alt+r": "/rewind"\n}'],
+  ['theme.json', 'Custom colors, on top of the chosen theme', true, '{\n  "brand": "#ff6b9d",\n  "background": "#101014"\n}'],
   ['format.json', 'The formatter to run on each kind of file HeartCode writes', true, '{\n  ".go": "gofmt -w {file}",\n  ".py": "ruff format {file}"\n}'],
-  ['HEARTCODE.md', 'Your instructions for every project (like AGENTS.md, for all of them)', false, '- Answer briefly.\n- Use pnpm, not npm.'],
+  ['HEARTCODE.md', 'Instructions for every project (like AGENTS.md, for all of them)', false, '- Answer briefly.\n- Use pnpm, not npm.'],
 ]
 // The prompts the page edits: every section of these files (prompts/*.md); the system prompts first.
 const PROMPT_FILES = ['agent', 'guided', 'compact', 'tests']
@@ -87,7 +87,7 @@ function setPrompt(file, name, text) {
   else own.set(name, text.trim())
   if (!own.size) return fs.rmSync(f, { force: true })
   fs.mkdirSync(path.dirname(f), { recursive: true })
-  fs.writeFileSync(f, `# ${file}.md: your changes to HeartCode's prompts (the settings page; prompts/README.md in HeartCode)\n\n` + [...own].map(([n, t]) => `## ${n}\n\n${t}\n`).join('\n'))
+  fs.writeFileSync(f, `# ${file}.md: changes to HeartCode's prompts (the settings page; prompts/README.md in HeartCode)\n\n` + [...own].map(([n, t]) => `## ${n}\n\n${t}\n`).join('\n'))
 }
 
 // MCP servers: yours (mcp.json), each on or off (an entry with neither command nor url only switched off a
@@ -150,8 +150,16 @@ const LIST_V = 2 // how a saved list was read (2: airforce's cents, Cloudflare's
 // browser, whose storage is per address (a new port each time)
 const PREFS = path.join(HOME, 'settings-page.json')
 const PREF_KEYS = ['catSort', 'freeOnly', 'folded', 'sort', 'sorts', 'rank', 'filters']
+// The saved lists (a MB or more): kept in memory, read again only when the file changes
+let lists = null
+const readLists = () => {
+  const st = fs.statSync(LISTS, { throwIfNoEntry: false })
+  const at = st ? `${st.mtimeMs}:${st.size}` : ''
+  if (lists?.at !== at) lists = { at, all: readJson(LISTS, {}) }
+  return lists.all
+}
 function forgetList(...names) {
-  const all = readJson(LISTS, {})
+  const all = { ...readLists() }
   if (!names.some((n) => n in all)) return
   for (const n of names) delete all[n]
   writeJson(LISTS, all)
@@ -456,7 +464,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     rankings: ranked && { fetched: ranked.fetched, source: ranked.source },
     rotation: (({ then, ...opts }) => opts)(rotationOf(cfg)),
     helpers: helpersOf(cfg.helpers), // { 'provider/model': [jobs] }
-    helperOrder: cfg.helperOrder === 'provider' ? 'provider' : 'own', // the order helpers are picked in: your list's, or your provider ranking's
+    helperOrder: cfg.helperOrder === 'provider' || cfg.helperOrder === 'score' ? cfg.helperOrder : 'own', // the order helpers are picked in: your list's, your provider ranking's, or by their rankings
     helpersAuto: cfg.helpersAuto === true, // picked for you (pickHelpers), again whenever what's known changes: the models #1 may start as helpers, and what you picked each for
     jobs: HELPER_JOBS,
     settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), logs: kindsOn(cfg), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg), testTimeout: Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10, ...speedOf(cfg) },
@@ -579,7 +587,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       const p = cfg.providers[name]
       if (!p) throw new Error(`no provider "${name}"`)
       if (p.list === false) return { models: [], details: {}, off: true }
-      const lists = readJson(LISTS, {})
+      const lists = readLists()
       let saved = lists[name]?.baseUrl === p.baseUrl && lists[name].models?.length && lists[name].v === LIST_V ? lists[name] : null // an empty one, or one read the old way: asked again
       if (!saved) {
         const entries = await new Client({ baseUrl: p.baseUrl, apiKey: p.apiKey }).modelEntries()
@@ -592,7 +600,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
           description: m.description ? String(m.description).slice(0, 400) : undefined,
           price: listedPrice(m),
         }])) }
-        writeJson(LISTS, { ...readJson(LISTS, {}), [name]: saved })
+        writeJson(LISTS, { ...readLists(), [name]: saved })
       }
       await loadPrices().catch(() => null)
       // and what's known now: its test or setup, and models.dev
@@ -635,11 +643,12 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       save('setting:helpers')
       return { helpers: helpersOf(cfg.helpers), helpersAuto: false } // only these: the page saves a click at once, and the whole state of a long list takes seconds
     },
-    // the order helpers are picked in: 'own' (your list's) or 'provider' (your provider ranking's, each
+    // the order helpers are picked in: 'own' (your list's), 'provider' (your provider ranking's, each
     // provider's in your list's order; rank: the ranking as the page has it, kept for HeartCode to use)
+    // or 'score' (best placed in LMArena's rankings first)
     'POST /api/helper-order': ({ by, rank }) => {
-      cfg.helperOrder = by === 'provider' ? 'provider' : undefined
-      cfg.providerRank = cfg.helperOrder && (Array.isArray(rank) ? rank.filter((x) => typeof x === 'string') : readJson(PREFS, {}).rank)
+      cfg.helperOrder = by === 'provider' || by === 'score' ? by : undefined
+      cfg.providerRank = cfg.helperOrder === 'provider' ? (Array.isArray(rank) ? rank.filter((x) => typeof x === 'string') : readJson(PREFS, {}).rank) : undefined
       save('setting:helperOrder')
       return { helperOrder: cfg.helperOrder ?? 'own' }
     },
@@ -821,19 +830,19 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     // it gets a first message saying so.
     'POST /api/telegram/connect': async ({ token }) => {
       const tk = String(token ?? '').trim() || cfg.telegram?.token
-      if (!tk) throw new Error('paste the token @BotFather gave you')
+      if (!tk) throw new Error('paste the token from @BotFather')
       if (!/^\d+:[\w-]{20,}$/.test(tk)) throw new Error("that doesn't look like a bot token (it's like 123456789:AAH…, from @BotFather)")
       const r = await connect(tk)
       const chat = r.chats[0]
       const was = cfg.telegram?.token === tk ? cfg.telegram : {}
       cfg.telegram = { ...was, token: tk, bot: r.bot, ...(chat ? { chatId: chat.id, chatName: chat.name } : { chatId: undefined, chatName: undefined }), on: was.on ?? true }
       save('setting:telegram')
-      if (chat) await sendTelegram(cfg.telegram, "✅ HeartCode is connected. You'll get a message here when a task finishes, fails, or waits for you.")
+      if (chat) await sendTelegram(cfg.telegram, "✅ HeartCode is connected. A message comes here when a task finishes, fails, or waits for an answer.")
       return { ...state(), found: chat?.name ?? null }
     },
     'POST /api/telegram/test': async () => {
       if (!tgReady({ ...cfg.telegram, on: true })) throw new Error('connect Telegram first')
-      await sendTelegram(cfg.telegram, '🔔 A test from HeartCode\'s settings: notifications reach you.')
+      await sendTelegram(cfg.telegram, '🔔 A test from HeartCode\'s settings: notifications arrive.')
       return state()
     },
     'POST /api/telegram/set': ({ on, event, value }) => {
@@ -876,7 +885,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     },
     'POST /api/search/test': async ({ searxng }) => {
       const u = String(searxng ?? '').trim() || searchSettings().searxng
-      if (!u) throw new Error('type your SearXNG address first')
+      if (!u) throw new Error('type the SearXNG address first')
       const n = await testSearxng(/^https?:\/\//i.test(u) ? u : `https://${u}`).catch((e) => {
         throw new Error(`${u} didn't answer a search: ${e.cause?.code || e.message}`)
       })
@@ -954,7 +963,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       if (fs.existsSync(file) && !readJson(file, null)) throw new Error("mcp.json isn't valid JSON: fix it first")
       const data = readJson(file, null) ?? {}
       const c = data.mcpServers?.[name]
-      if (!c?.command) throw new Error(`no local MCP server "${name}" of yours`)
+      if (!c?.command) throw new Error(`no added local MCP server "${name}"`)
       flag = String(flag ?? '').trim().replace(/\s+/g, ' ')
       const words = flag.split(' ')
       if (!/^-/.test(words[0]) || words.length > 2) throw new Error('a flag starts with - (and may have one value: --port 3000)')
@@ -972,7 +981,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     'POST /api/mcp/remove': ({ name }) => {
       const file = path.join(HOME, 'mcp.json')
       const data = readJson(file, null)
-      if (!data?.mcpServers?.[name]) throw new Error(`no server "${name}" of yours`)
+      if (!data?.mcpServers?.[name]) throw new Error(`no added server "${name}"`)
       delete data.mcpServers[name]
       writeJson(file, data)
       changed('mcp')
@@ -1023,7 +1032,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       return state()
     },
     'POST /api/skill/delete': ({ name }) => {
-      if (!removeSkill(name)) throw new Error(`no skill "${name}" of yours`)
+      if (!removeSkill(name)) throw new Error(`no added skill "${name}"`)
       changed('skill')
       return state()
     },
@@ -1133,10 +1142,25 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       loadPrices().then(() => {
         for (const t of state().order) testNews(`${t.provider}/${t.model}`, t)
       test(state().order) // any without a profile yet
+      warm()
       })
       resolve({ url, local, server, close: () => (watcher?.close(), server.closeAllConnections?.(), server.close()) })
     })
   })
+}
+
+// The saved model lists' models, looked up once in the background (their profiles, models.dev's word),
+// a few hundred at a time so the page isn't held up: then the Providers page loads at once.
+function warm() {
+  const all = Object.entries(readLists()).flatMap(([name, l]) => (l.models ?? []).map((id) => [name, l.baseUrl, id]))
+  const step = (i) => {
+    for (const [name, baseUrl, id] of all.slice(i, i + 300)) {
+      loadProfile(new Client({ baseUrl, model: id }))
+      limitsOf(name, baseUrl, id)
+    }
+    if (i + 300 < all.length) setImmediate(() => step(i + 300))
+  }
+  step(0)
 }
 
 // This machine's IPv4 addresses on its networks (Wi-Fi, Ethernet, a VPN), not the loopback one

@@ -175,6 +175,13 @@ export function fitFor(messages, can, model) {
 // usage in a stream, the thinking sent back, the tools' full schemas, images.
 export const QUIRKS = ['noTemperature', 'noEffort', 'noThoughts', 'noStreamUsage', 'noReasoningBack', 'simpleSchemas', 'noImages', 'noParallel']
 
+// A model's name without its version: its date, "latest", "preview" ("mistral-large-2411" → "mistral-large").
+export const family = (m) => {
+  let f = String(m).split('/').pop().toLowerCase()
+  for (let was; was !== f; ) (was = f), (f = f.replace(/[-_:@.]?(latest|preview|exp|\d{4}(-\d{2}){0,2}|\d{6,8})$/, ''))
+  return f
+}
+
 export class Client {
   constructor({ baseUrl, apiKey, model, provider, timeout = 600_000 } = {}) {
     this.provider = provider // its name in config.json, for the requests log
@@ -220,9 +227,24 @@ export class Client {
   }
   // The model in use answers but gives nothing usable (agent.js: empty replies, again and again):
   // the next one in the list takes over. False when there's no list.
-  moveOn(why) {
+  // Another version of the same model (voxtral-small-latest → voxtral-small-2507) would likely do the
+  // same: skipped for the next one in your order, while there is one.
+  // avoid: models ("provider/model") given up on already (this message): not gone back to; false when
+  // every other model is one of them.
+  moveOn(why, avoid = new Set()) {
     if (!this.rotation) return false
-    this.#next(why)
+    const r = this.rotation
+    const n = r.list.length
+    const was = family(r.list[r.at].model)
+    const ok = (t) => !avoid.has(`${t.provider}/${t.model}`) && t !== r.list[r.at]
+    let k = 1
+    while (k < n && (family(r.list[(r.at + k) % n].model) === was || !ok(r.list[(r.at + k) % n]))) k++
+    if (k === n) { // only versions of this model (or ones given up on) left: the first of those not given up on
+      k = 1
+      while (k < n && !ok(r.list[(r.at + k) % n])) k++
+      if (k === n) return false
+    }
+    this.#next(why, () => (r.at + k) % n)
     return true
   }
   #next(why, pick) {
@@ -353,15 +375,15 @@ export class Client {
     return (await this.#fetch(url, init, { timeout })).json()
   }
 
-  async listModels(timeout = 10_000) {
+  async listModels(timeout = 60_000) {
     return (await this.modelEntries(timeout)).map((m) => m.id ?? m.name)
   }
   // The server's own entries for its models ({ id, owned_by, context_length, pricing… }, as it sends them).
-  async modelEntries(timeout = 10_000) {
+  async modelEntries(timeout = 60_000) {
     const data = await this.#json(this.baseUrl + '/models', undefined, timeout)
     // { result: [...] } (Cloudflare's shape): there the id is an internal one and the name is the model's
     if (Array.isArray(data.result)) return data.result.filter((m) => m?.name).map((m) => ({ ...m, id: m.name }))
-    return (data.data ?? data.models ?? []).filter((m) => m && (m.id ?? m.name))
+    return (Array.isArray(data) ? data : (data.data ?? data.models ?? [])).filter((m) => m && (m.id ?? m.name)) // a bare list too (Typhoon)
   }
 
   // Best effort: asks the server how big the loaded context window is.
@@ -397,7 +419,7 @@ export class Client {
       },
       async () => {
         const d = await this.#json(this.baseUrl + '/models')
-        const m = (d.data ?? d.models ?? []).find((x) => x.id === this.model || x.name === this.model)
+        const m = (Array.isArray(d) ? d : (d.data ?? d.models ?? [])).find((x) => x.id === this.model || x.name === this.model)
         return { size: n(windowOf(m)), server: m?.owned_by === 'vllm' || m?.max_model_len ? 'vllm' : null }
       },
       async () => ({ size: n(windowOf(await this.#json(`${this.baseUrl}/models/${encodeURIComponent(this.model)}`))), server: null }),
@@ -444,7 +466,7 @@ export class Client {
         return text
       }
     })()
-    return { error: `${res.status}: ${String(why).slice(0, 300)}${said?.rate ? ' (a per-minute cap on your account, not the window)' : ''}` }
+    return { error: `${res.status}: ${String(why).slice(0, 300)}${said?.rate ? ' (a per-minute cap on the account, not the window)' : ''}` }
   }
 
   // Returns { content, reasoning, toolCalls, usage, finishReason, thinking }.
