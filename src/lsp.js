@@ -6,7 +6,7 @@
 // back to the model with the edit's result. The settings page (General → Features) turns that off.
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawnCmd, killTree } from './spawn.js'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { log } from './log.js'
 import { HOME, readJson, writeJson } from './config.js'
@@ -45,7 +45,7 @@ const words = (cmd) => [...String(cmd).matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].m
 class Server {
   constructor(spec, argv, root) {
     Object.assign(this, { spec, root, next: 1, pending: new Map(), docs: new Map(), diags: new Map(), waiters: new Set(), dead: false })
-    this.child = spawn(argv[0], argv.slice(1), { cwd: root, stdio: ['pipe', 'pipe', 'ignore'], detached: process.platform !== 'win32' })
+    this.child = spawnCmd(argv[0], argv.slice(1), { cwd: root, stdio: ['pipe', 'pipe', 'ignore'], detached: process.platform !== 'win32' })
     let buf = Buffer.alloc(0)
     this.child.stdout.on('data', (d) => {
       buf = Buffer.concat([buf, d])
@@ -176,10 +176,7 @@ class Server {
   stop() {
     if (this.dead) return
     this.dead = true
-    try {
-      if (process.platform !== 'win32') process.kill(-this.child.pid, 'SIGTERM')
-      else this.child.kill()
-    } catch {}
+    if (!killTree(this.child.pid)) try { this.child.kill() } catch {}
   }
 }
 

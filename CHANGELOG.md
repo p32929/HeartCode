@@ -2,6 +2,38 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.62 (2026-11-10)
+
+- **"Done" is checked, not taken on trust**: a web page or game that was changed is opened in a real
+  browser by HeartCode itself before "done" is accepted; errors, a blank page or a canvas that draws
+  nothing send the model back with screenshots (a canvas showing one flat color now counts as
+  broken). Saying "done" again without changing anything doesn't pass.
+- **Better models take over**: a model that times out or errors, goes round in circles, says it's
+  stuck or keeps failing the browser check hands the task to the best-ranked of your models
+  (LMArena) not tried yet, not just the next in your list (often a much smaller one). Your #1 still
+  starts every message. Helpers are picked best-ranked first by default (Used: by score).
+- **Fixes don't lose earlier work**: the changes tool lists a file's earlier versions from every
+  conversation in the project (versions, version: N). A changed file much smaller than an earlier
+  version stops "done" until what was lost is checked, and the review checks that what earlier
+  messages asked for still works. Rules: a fix keeps everything working; never rewrite a whole
+  working file to fix part of it; judge by what's on screen, not values inside the program.
+- **One agent or several**: a plan of several steps asks whether to work on it with several agents
+  at once. With several, parts that stand alone run side by side, and a part no model is sure of
+  (compare) is done by the two best-ranked models, each in a copy of the project; HeartCode checks
+  both and another model picks the better one.
+- **The screen stays tidy**: "waiting for" shows once; a plan shows 3 steps (Alt+L or /todos for all
+  of it); thinking shows 2 lines (Alt+O for all); the same call made again shows once with ×N.
+- **Works on Windows**: npm start installs from source (paths from file URLs were /C:/…); MCP
+  servers, language servers and npm/npx (.cmd files) start through cmd.exe with proper quoting; a
+  stopped command, server or background job takes its whole process tree with it; formatters and
+  ffmpeg are found with their .exe/.cmd; voice records from the microphone (DirectShow); the model
+  is told the shell its commands really run in.
+- **Settings page**: Save list is always there and saves the list exactly as shown, keeping the
+  sort and filters; Clear sort in one click; Suggest helpers only marks the suggestions (no
+  filtering; the Helpers filter is gone); plain-language tooltips on the Models settings; Give up,
+  Stalled and Tests wait can't contradict each other (Tests wait and Stalled ≥ Give up: the one you
+  set stays, the other moves, and the page says why).
+
 ## 0.1.61 (2026-11-09)
 
 - **No more hours of "not answering" after a connection dies**: requests go over HeartCode's own

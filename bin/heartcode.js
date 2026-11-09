@@ -5,7 +5,7 @@ import { Client, limitSaid, estMessages } from '../src/client.js'
 import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, TEMP, AUTO_MODEL, isAuto, parseModel, takeIn, whatOf, VERSION, speedOf, jobsOf } from '../src/config.js'
 import { loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
 import { learnFromUsage, LIMIT_MS, RATE_CAP_MS } from '../src/context.js'
-import { loadRankings, rankIn } from '../src/rankings.js'
+import { loadRankings, scoreOf } from '../src/rankings.js'
 import { Session, transcript, contextReport } from '../src/agent.js'
 import { listJobs, getJob, stopJob, removeJob, runningJobs, tailLines, ago as ranFor } from '../src/background.js'
 import { checkUpdate, installKind, UPDATE_COMMANDS, packageDir, whatsNew } from '../src/update.js'
@@ -106,6 +106,7 @@ const SECTIONS = [
   ]],
   ['settings', [
     ['/toggle_thinking', "the model's thinking: its last two lines, or all of it (Alt+O)"],
+    ['/todos', 'the whole plan of the task at work, every step and its state (Alt+L)'],
     ['/voice', 'dictate a message (or Space in an empty box, once voice is set up): it shows in the box while speaking, Enter sends it, Esc cancels'],
   ]],
   ['session', [
@@ -145,7 +146,7 @@ for (const [, list] of SECTIONS) list.sort(byName) // alphabetical, in /help and
 const COMMANDS = SECTIONS.flatMap(([, list]) => list).sort(byName)
 // Typed while a task works, these run at once, beside it: they leave the conversation alone. The
 // others (/compact, /rewind, /resume, /init…) wait in the queue until it's done.
-const RIGHT_AWAY = new Set(['help', 'cost', 'context', 'background', 'model_info', 'diff', 'copy', 'mcp', 'doctor', 'toggle_thinking', 'btw', 'rename', 'export', 'tab', 'close_tab', 'exit', 'quit', 'settings', 'login_mcp', 'install_skill', 'import', 'voice', 'select_model'])
+const RIGHT_AWAY = new Set(['help', 'todos', 'cost', 'context', 'background', 'model_info', 'diff', 'copy', 'mcp', 'doctor', 'toggle_thinking', 'btw', 'rename', 'export', 'tab', 'close_tab', 'exit', 'quit', 'settings', 'login_mcp', 'install_skill', 'import', 'voice', 'select_model'])
 const helpText = (sections) => sections.map(([title, list]) => `  ${c.bold(title)}\n` + list.map(([n, d]) => `  ${c.cyan(n.padEnd(17))}  ${d}`).join('\n')).join('\n\n')
 const SLASH = helpText(SECTIONS)
 
@@ -162,6 +163,7 @@ function keysHelp(keys = {}, mouse = false, voice = false) {
     ['Esc Esc', 'rewind to an earlier message (at the prompt)'],
     ['Shift+Tab', 'change what runs without asking (permissions)'],
     [forAct('toggle_thinking'), "the model's thinking: after an answer, all of it in a box; while it works, all of it as it comes or its last two lines"],
+    [forAct('show_plan'), 'the whole plan in a box (only three of its steps show while it works)'],
     [forAct('background_log'), "the background commands' logs in a dialog, a tab each (←/→ switch, ↑/↓ scroll, K twice stops one, Esc closes); with text in the box it moves back a word instead"],
     [forAct('new_tab'), 'new tab'],
     [forAct('close_tab'), 'close this tab'],
@@ -862,12 +864,12 @@ class App {
   // across the lists the helpers are picked by (coding, web apps, long real tasks, hard prompts);
   // models not in them after, in your list's order.
   byProvider() {
-    if (this.cfg.helperOrder === 'score') {
+    if ((this.cfg.helperOrder ?? 'score') === 'score') { // the default: a small model early in your list isn't who looks at a screenshot
       const data = loadRankings()
       const share = new Map()
       const of = (t) => {
         const k = `${t.provider}/${t.model}`
-        if (!share.has(k)) share.set(k, Math.min(...['text:coding', 'webdev:webdev', 'agent:overall', 'text:hard_prompts'].map((l) => rankIn(t.model, l, data)).filter(Boolean).map((r) => r.rank / r.of), Infinity))
+        if (!share.has(k)) share.set(k, scoreOf(t.model, data))
         return share.get(k)
       }
       return (a, b) => (of(a) === of(b) ? 0 : of(a) < of(b) ? -1 : 1) // Infinity (not ranked) last; ties keep your order
@@ -1743,6 +1745,8 @@ async function slash(app, line, working = false) {
       if (text) ui.ahead.push(text) // sent: the next prompt takes it, as if typed
       return
     }
+    case 'todos':
+      return ui.showPlan()
     case 'toggle_thinking':
       ui.showThinking = !ui.showThinking
       ui.print(c.dim(ui.showThinking ? 'thinking shown: all of it (Alt+O: last two lines)' : 'thinking shown: its last two lines (Alt+O: all of it)'))

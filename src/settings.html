@@ -582,11 +582,11 @@
   .mt-mode-sets .h-order select { height: 34px; }
   .mt-mode-sets .seg { height: 34px; }
   .mt-mode-sets .seg label { padding: 0 11px; font-size: 12.5px; }
-  @media (min-width: 861px) and (max-width: 1400px) { .mt-mode-sets { column-gap: 6px; } .mt-mode-sets .seg label { padding: 0 7px; font-size: 12px; } .mt-div { margin: 0; } .mt-setc input[type=number], .mt-setc input.tries { width: 42px; } } /* a small laptop (1280): the settings stay on one line */
+  @media (min-width: 861px) and (max-width: 1400px) { .mt-mode-sets { column-gap: 6px; } .mt-mode-sets .seg label { padding: 0 7px; font-size: 12px; } .mt-div { margin: 0; } .mt-setc input[type=number], .mt-setc input.tries { width: calc(4ch + 18px); padding-inline: 6px; } } /* a small laptop (1280): the settings stay on one line */
   .mt-setc { display: flex; align-items: center; gap: 6px; }
   .mt-setc select { width: auto; min-width: 0; height: 34px; padding-top: 0; padding-bottom: 0; line-height: 32px; }
   .mt-setc input[type=number] { width: 50px; height: 34px; }
-  .mt-setc input.tries { width: 50px; }
+  .mt-setc input.tries { width: calc(4ch + 24px); } /* up to 4 digits (Stalled goes to 1800) */
   .mt-setc input[type=number] { appearance: textfield; -moz-appearance: textfield; text-align: center; } /* typed: no spinner taking the digits' room */
   .mt-setc input[type=number]::-webkit-inner-spin-button, .mt-setc input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   .mt-setc .unit { color: var(--muted); font-size: 13px; }
@@ -596,7 +596,7 @@
   .mt-row .f-search { flex: 1 1 140px; min-width: 130px; }
   .mt-line { display: flex; align-items: center; gap: 8px; flex: none; margin-left: auto; font-size: 13px; color: var(--muted); }
   .mt-line .count { white-space: nowrap; }
-  .mt-sets[inert], .mt-row[inert], .mt-hwrap[inert], .mt-actions[inert] { opacity: .5; transition: opacity .15s; }
+  .mt-sets[inert], .mt-row[inert], .mt-hwrap[inert], .mt-actions[inert], .mt-actions > [inert] { opacity: .5; transition: opacity .15s; }
   .mt-line .count b { color: var(--text); }
   .mt-hpick .mt-pickbar { grid-column: 3 / -1; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
   .mt-hpick { background: var(--brand-soft); }
@@ -676,6 +676,9 @@
   /* every other tooltip (titles): at once, the page's own look */
   #hint { position: fixed; z-index: 31; max-width: 340px; padding: 7px 10px; border-radius: 8px; background: var(--text); color: var(--bg); font-size: 12px; line-height: 1.45; box-shadow: var(--shadow-pop); pointer-events: none; opacity: 0; transition: opacity .06s; white-space: pre-line; }
   #hint.show { opacity: 1; }
+  /* a time limit moved to fit another one just set: flashes a moment */
+  .mt-sets input.moved { animation: moved 2.4s ease-out; }
+  @keyframes moved { 0%, 40% { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); } 100% { box-shadow: none; } }
   .with-q { display: inline-flex; align-items: center; gap: 5px; }
   .q { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 700; cursor: help; }
   .q:hover, .q:focus-visible { color: var(--text); border-color: var(--muted); outline: none; }
@@ -688,7 +691,7 @@
   #tip .tjob { font-weight: 650; font-size: 13.5px; }
   #tip .tcover { color: var(--muted); margin-top: 6px; line-height: 1.5; }
   #tip .thint { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--accent); font-weight: 600; }
-  #toast { position: fixed; bottom: 24px; left: 50%; transform: translate(-50%, 8px); padding: 10px 18px; border-radius: 12px; background: var(--text); color: var(--bg); font-weight: 500; box-shadow: var(--shadow-pop); opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; max-width: calc(100% - 32px); z-index: 10; }
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translate(-50%, 8px); padding: 10px 18px; border-radius: 12px; background: var(--text); color: var(--bg); font-weight: 500; box-shadow: var(--shadow-pop); opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; max-width: min(560px, calc(100% - 32px)); z-index: 10; white-space: pre-line; }
   #toast.show { opacity: 1; transform: translate(-50%, 0); }
   #toast.err { background: var(--err); color: #fff; }
   /* what's running (tests, loading): a strip at the top of the panel it's about, updated in place */
@@ -1344,12 +1347,12 @@ addEventListener('DOMContentLoaded', () => {
 const put = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter((x) => x != null && x !== false))
 let S = null
 let toastTimer
-function toast(text, err = false) {
+function toast(text, err = false, ms = err ? 6000 : 2400) {
   const t = $('toast')
   t.textContent = text
   t.className = 'show' + (err ? ' err' : '')
   clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => (t.className = ''), err ? 6000 : 2400)
+  toastTimer = setTimeout(() => (t.className = ''), ms)
 }
 // What's running (a test, lists loading, models.dev), shown at the top of the panels it's about
 // while it runs: job(id, { what, where, done, total, detail, stop }) to show or update it (no total:
@@ -2474,7 +2477,7 @@ const dirText = (key, dir) => COLS[key].words[dir === 'up' ? 0 : 1] + (key === '
 // Filters on the Your models page: which models are shown (and tested by "Test N shown", counted,
 // sorted, selected by "select all", saved first by Save list). Combined: a model shows when it passes
 // all of them. Kept with the page's choices.
-const NO_FILTER = { text: '', provider: '', works: '', context: 0, tools: false, thinking: false, images: false, free: false, helpers: false }
+const NO_FILTER = { text: '', provider: '', works: '', context: 0, tools: false, thinking: false, images: false, free: false }
 let FILTER = { ...NO_FILTER }
 let filtersLoaded = false
 const filtering = () => Object.keys(NO_FILTER).some((k) => FILTER[k] !== NO_FILTER[k])
@@ -2494,7 +2497,6 @@ function passes(t, skip) {
   const c = can(t)
   if ((f.tools && !c.tools) || (f.thinking && !c.thinking) || (f.images && !c.images)) return false
   if (f.free && !(t.price?.input === 0 && t.price?.output === 0)) return false
-  if (f.helpers && !helpers()[keyOf(t)] && !HSUG?.[keyOf(t)]) return false // and the ones suggested, while they are
   return true
 }
 const setFilter = (change) => {
@@ -2528,8 +2530,7 @@ function filterBarOf(order, counts = {}) {
         toggle('tools', 'Tools', 'only models that call tools', 'wrench'),
         toggle('thinking', 'Thinking', 'only models that think', 'bulb'),
         toggle('images', 'Images', 'only models that see images', 'image'),
-        toggle('free', 'Free', 'only models that cost nothing, in and out', 'tag'),
-        toggle('helpers', 'Helpers', 'only the helpers (the models #1 can start for side jobs), and the ones suggested', 'sparkles')))
+        toggle('free', 'Free', 'only models that cost nothing, in and out', 'tag')))
   }
   const bar = filterBar
   const focused = (el) => document.activeElement === el
@@ -2566,10 +2567,10 @@ function drawMine(s) {
   const n = (x) => x.toLocaleString()
 
   // --- what you do to the list ---
-  // the order you see, saved as yours; the sort then goes (your own order from here on: drag on)
+  // the order you see, saved as yours. Saved with Save list: the sort and filters stay as they are, so
+  // the page looks the same next time. A row dragged: the sort goes (your own order from there on)
   const keep = (list, moved) => {
-    SORT = []
-    savePref('sorts', SORT)
+    if (moved) (SORT = []), savePref('sorts', SORT)
     return saveOrder(withOff(list), list[0] !== order[0] ? `${moved ? '' : 'list saved: '}HeartCode now uses ${list[0].provider} · ${list[0].model}` : 'list saved')
   }
   // a row dragged (in the order shown, sorted or not). Filtered: it moves among the ones shown; the
@@ -2602,56 +2603,67 @@ function drawMine(s) {
   const pickedList = order.filter((t) => PICKED.has(keyOf(t)))
 
   // --- the page's header: how a model is picked (left), what's known about the models (right) ---
-  $('mt-lead').textContent = 'The models HeartCode uses, in order: #1 answers, the next one when it fails.'
+  $('mt-lead').textContent = 'The models HeartCode uses: #1 answers; when a model fails, another takes over (the best-ranked one not tried yet). Hover a setting to see what it does.'
   const busy = locked()
-  $('mt-actions').inert = busy
+  $('mt-actions').inert = false // Save list works at any time; the rest wait while something runs (below)
   // the order helpers are picked in when #1 starts them: your list's, or your provider ranking's
   const helperOrder = (by) => api('/api/helper-order', { by, rank: RANK }).then((r) => ((S.helperOrder = r.helperOrder), drawMine(S)), (e) => toast(e.message, true))
   // who chooses the helpers: HeartCode (from the tests and the rankings, again when those change) or you
-  const chooser = h('label', { className: 'h-order', title: 'Automatic: HeartCode chooses the helpers and what each is for, from the models that answered their test and the rankings, and again whenever those change. Manual: switched on and given their jobs by hand in the Helper column.' },
+  const chooser = h('label', { className: 'h-order', title: 'Helpers\nWho picks the helpers: the models #1 can hand side jobs to (looking at a screenshot, a review, a part of the plan).\n\nAutomatic: HeartCode picks them, and what each is for, from the tests and the rankings, and picks again when those change.\nManual: you switch them on, and pick their jobs, in the Helper column.' },
     h('span', { className: 'mt-setl' }, ic('sparkles'), h('span', { className: 'lt', textContent: 'Helpers' })),
     h('select', { id: 'h-auto', onchange: (e) => setAuto(e.target.value === 'auto', e.target) },
       [['auto', 'Automatic'], ['manual', 'Manual']].map(([v, t]) => h('option', { value: v, textContent: t, selected: (S.helpersAuto ? 'auto' : 'manual') === v }))))
-  const orderBy = h('span', { className: 'h-order', title: 'Used: the order #1 takes helpers in' }, h('span', { className: 'mt-setl' }, ic('bars'), h('span', { className: 'lt', textContent: 'Used' })),
+  const orderBy = h('span', { className: 'h-order', title: 'Used\nWhich helper #1 takes first when several fit a job.\n\nBy score: the best-ranked in public rankings (the default).\nIn list order: the first in your list.\nBy provider: by your provider ranking (Order providers).' }, h('span', { className: 'mt-setl' }, ic('bars'), h('span', { className: 'lt', textContent: 'Used' })),
     h('div', { className: 'seg', role: 'radiogroup', 'aria-label': 'The order helpers are used in' },
       [['own', 'in list order', 'when #1 starts a helper, it takes the first one that fits the job, in the list\'s order'], ['provider', 'by provider', 'when #1 starts a helper, it takes them by the provider ranking (Order providers), each provider\'s in the list\'s order. The list itself stays as it is'], ['score', 'by score', 'when #1 starts a helper, it takes the best ranked first: its best place in LMArena\'s public rankings for coding, web apps, long real tasks and hard prompts (Update model info). Models not ranked come after, in the list\'s order']].map(([v, t, about]) =>
-        h('label', { className: (S.helperOrder ?? 'own') === v ? 'on' : '', title: about },
-          h('input', { type: 'radio', name: 'helper-order', checked: (S.helperOrder ?? 'own') === v, disabled: v === 'provider' && !order.some((t) => t.provider !== order[0]?.provider), onchange: () => helperOrder(v) }), t))))
+        h('label', { className: (S.helperOrder ?? 'score') === v ? 'on' : '', title: about },
+          h('input', { type: 'radio', name: 'helper-order', checked: (S.helperOrder ?? 'score') === v, disabled: v === 'provider' && !order.some((t) => t.provider !== order[0]?.provider), onchange: () => helperOrder(v) }), t))))
   put($('mt-actions'),
     ((why) => h('span', { title: why ?? '' }, h('button', { className: 'small', textContent: 'Order providers', disabled: Boolean(why), title: why ? '' : 'drag the providers into order; the Provider column sorts by it', onclick: openRanking })))( // disabled: why, on a span (a disabled button shows no tooltip in every browser)
       !order.some((t) => t.provider !== order[0]?.provider) ? 'All the models are from one provider: nothing to order' : null),
     h('button', { className: 'small', textContent: 'Update model info', disabled: !order.length, title: `what each model can do (context, tools, thinking, images, price) from models.dev, and its places in LMArena's public rankings (coding, web apps, vision${S.rankings ? `; rankings from ${new Date(S.rankings.fetched).toLocaleDateString()}` : ''})`, onclick: () => lookUp() }),
     h('button', { className: 'small', textContent: filtered ? `Test ${n(shown.length)}` : 'Test all', disabled: testingAll || !shown.length, title: `send ${filtered ? 'the models shown' : 'each model'} a short message to see which really answer, and how fast`, onclick: () => tryAll(filtered ? shown : order) }),
-    // not on the helpers' view: they're not a list to keep only
-    filtered && FILTER.helpers ? null : h('button', { className: 'small primary', textContent: filtered ? `Use only these ${n(view.length)}` : 'Save list', disabled: !view.length || order.length < 2, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : 'save the list as shown: HeartCode uses them in this order (#1 first)', onclick: saveList }))
+    // always there: the list as it's shown (sorted, filtered), saved whenever
+    h('button', { className: 'small primary', textContent: filtered ? `Use only these ${n(view.length)}` : 'Save list', disabled: !view.length, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : 'save the list as shown: HeartCode uses them in this order (#1 first)', onclick: saveList }))
+  for (const b of $('mt-actions').children) if (!b.classList.contains('primary')) b.inert = busy // all but Save list wait while something runs
 
   // --- row 2, the list's settings: when a model fails (left), the helpers (right); an icon and a short label each ---
   const ro = s.rotation
-  const cell = (icon, label, about, ...control) => h('label', { className: 'mt-set', title: `${label}: ${about}` }, h('span', { className: 'mt-setl' }, ic(icon), h('span', { className: 'lt', textContent: label })), h('span', { className: 'mt-setc' }, ...control))
+  // about: its tooltip, in plain words (the label is its first line)
+  const cell = (icon, label, about, ...control) => h('label', { className: 'mt-set', title: `${label}\n${about}` }, h('span', { className: 'mt-setl' }, ic(icon), h('span', { className: 'lt', textContent: label })), h('span', { className: 'mt-setc' }, ...control))
   // a whole number setting (seconds), with its limits from the server (SPEED_LIMITS)
   const LIMITS = { replyStart: [5, 600], replyIdle: [10, 1800] }
-  const num = (name, label, said) => h('input', { type: 'number', className: 'tries', 'aria-label': label, min: LIMITS[name][0], max: LIMITS[name][1], value: S.settings[name], onchange: (e) => {
+  // a time limit saved; the ones that depend on it (Give up, Stalled, Tests wait) may move to fit: said
+  // for longer, and the boxes that moved flash
+  const saveTime = async (name, v, said) => {
+    const r = await act('/api/setting', { name, value: v })
+    if (!r) return
+    if (!r.notes?.length) return toast(said)
+    toast([said, ...r.notes.map((x) => x.text)].join('\n'), false, 9000)
+    for (const x of r.notes) document.querySelector(`.mt-sets input[data-name="${x.name}"]`)?.classList.add('moved')
+  }
+  const num = (name, label, said) => h('input', { type: 'number', className: 'tries', 'data-name': name, 'aria-label': label, min: LIMITS[name][0], max: LIMITS[name][1], value: S.settings[name], onchange: (e) => {
     const v = Math.round(Number(e.target.value))
     const [lo, hi] = LIMITS[name]
     if (!(v >= lo && v <= hi)) return (e.target.value = S.settings[name]), toast(`a whole number, ${lo} to ${hi}`, true)
-    act('/api/setting', { name, value: v }, said(v))
+    saveTime(name, v, said(v))
   } })
   const secsCell = (icon, label, name, about, unit, said) => cell(icon, label, about, num(name, label, said), h('span', { className: 'unit', textContent: unit }))
   const settings = h('div', { className: 'mt-sets', inert: busy },
     h('div', { className: 'mt-mode-sets' },
-      cell('swap', 'If one fails', ro.on === 'retries' ? 'a rate limit or outage: that model gets that many tries in all before the next one; any other error moves on at once' : "any error moves on at once, to the next model (after an error from its provider: another provider's first)",
+      cell('swap', 'If one fails', 'What happens when a model errors, doesn\'t answer in time, or is rate-limited.\n\nSwitch model: another of your models takes over at once (the best-ranked one not tried yet).\nRetry it first: when the model is only busy or briefly down (a rate limit, an outage), the same one is tried again, up to the number of tries set here; any other error switches at once.',
         h('select', { onchange: (e) => saveOrder(S.order, 'saved', { on: e.target.value }) },
-          [['failure', 'go to the next'], ['retries', 'retry it first']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.on === v }))),
-        ro.on === 'retries' ? h('input', { type: 'number', className: 'tries', 'aria-label': 'tries', title: 'tries of the same model first (rate limits, outages)', min: 1, max: 20, value: ro.retries, onchange: (e) => saveOrder(S.order, 'saved', { retries: Number(e.target.value) }) }) : null),
-      secsCell('clock', 'Give up', 'replyStart', "a model that hasn't started answering (text, thinking or a tool call) in this many seconds counts as failed (a streamed reply: a model set up without streaming waits for its whole reply)", 's', (v) => `a model that hasn't started answering in ${v}s counts as failed`),
-      secsCell('pause', 'Stalled', 'replyIdle', 'a reply that stops sending anything for this many seconds is stalled: tried again, or the next model', 's', (v) => `a reply silent for ${v}s counts as stalled`),
-      cell('hourglass', 'Tests wait', 'how long a test waits for each answer',
-        h('input', { type: 'number', className: 'tries', min: 1, max: 600, step: 1, value: S.settings.testTimeout ?? 10, 'aria-label': 'Test timeout in seconds', onchange: (e) => {
+          [['failure', 'switch model'], ['retries', 'retry it first']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.on === v }))),
+        ro.on === 'retries' ? h('input', { type: 'number', className: 'tries', 'aria-label': 'tries', title: 'Tries\nHow many times in all the same model is tried when it\'s busy or briefly down, before another model takes over.', min: 1, max: 20, value: ro.retries, onchange: (e) => saveOrder(S.order, 'saved', { retries: Number(e.target.value) }) }) : null),
+      secsCell('clock', 'Give up', 'replyStart', "How long a model gets to start answering.\n\nAfter HeartCode asks, the first word, thought or tool call must come within this many seconds. If nothing comes, the model counts as failed and another one takes over.\n\nRaise it if your providers are slow but do answer (fewer switches). Lower it to move on faster from models that hang.\nStalled and Tests wait are never shorter than this: they move up with it.", 's', (v) => `a model that hasn't started answering in ${v}s counts as failed`),
+      secsCell('pause', 'Stalled', 'replyIdle', "How long a reply may go quiet once it has started.\n\nA model that keeps sending (text or thinking) is never cut off, however long it takes. One that sends nothing at all for this many seconds counts as stalled: it's asked again, or another model takes over.\n\nAt least as long as Give up (a pause mid-reply has the same causes as a slow start).", 's', (v) => `a reply silent for ${v}s counts as stalled`),
+      cell('hourglass', 'Tests wait', "Only for the Test buttons on this page, not for real work.\n\nHow long each model gets to answer a short test message. No answer by then shows as \"no answer\" in Works?.\n\nAt least as long as Give up, so a test doesn't call a model broken that real work would still wait for.",
+        h('input', { type: 'number', className: 'tries', 'data-name': 'testTimeout', min: 1, max: 600, step: 1, value: S.settings.testTimeout, 'aria-label': 'Test timeout in seconds', onchange: (e) => {
           const v = Math.round(Number(e.target.value))
-          if (!(v >= 1 && v <= 600)) return (e.target.value = S.settings.testTimeout ?? 10), toast('a whole number of seconds, 1 to 600', true)
-          act('/api/setting', { name: 'testTimeout', value: v }, `tests wait ${v} second${v === 1 ? '' : 's'} for an answer`)
+          if (!(v >= 1 && v <= 600)) return (e.target.value = S.settings.testTimeout), toast('a whole number of seconds, 1 to 600', true)
+          saveTime('testTimeout', v, `tests wait ${v} second${v === 1 ? '' : 's'} for an answer`)
         } }), h('span', { className: 'unit', textContent: 's' })),
-      cell('send', 'New message', 'the model a new message goes to first: #1, or the last one that worked',
+      cell('send', 'New message', 'Which model a new message goes to first.\n\n#1: always the top of the list.\nLast working: the one that answered last (useful while #1 keeps failing).',
         h('select', { onchange: (e) => saveOrder(S.order, 'saved', { next: e.target.value }) },
           [['first', '#1'], ['stay', 'last working']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.next === v })))),
       h('span', { className: 'mt-div', 'aria-hidden': 'true' }),
@@ -2660,7 +2672,9 @@ function drawMine(s) {
   // --- beside the filters: what's shown · what you do with it (the sorts show in the column heads) ---
   const line = h('div', { className: 'mt-line' },
     h('span', { className: 'count', title: SORT.length ? `sorted by ${SORT.map(({ key, dir }) => `${COLS[key].label} ${COLS[key].words[dir === 'up' ? 0 : 1]}`).join(', then ')}; ties keep the list order` : '' }, filtered ? [h('b', { textContent: n(shown.length) }), ` of ${n(order.length)}`] : [h('b', { textContent: n(order.length) }), ` model${order.length === 1 ? '' : 's'}`]),
-    filtering() || SORT.length ? h('button', { className: 'small ghost', textContent: 'Clear', title: 'every filter and the sort off: the whole list, in order', onclick: clearView }) : null,
+    // the sorting off in one click (the filters stay); with filters on too, Clear all turns both off
+    SORT.length ? h('button', { className: 'small ghost', textContent: 'Clear sort', title: 'every sort off: the list in its own order again (the filters stay)', onclick: () => setSort([]) }) : null,
+    filtering() ? h('button', { className: 'small ghost', textContent: 'Clear all', title: 'every filter and the sort off: the whole list, in order', onclick: clearView }) : null,
     order.length > 1 ? drawHelperBar() : null)
 
   // --- the table ---
@@ -2883,7 +2897,7 @@ async function suggestNow(b) {
   if (!r) return
   HSUG = Object.keys(r.suggest).length ? r.suggest : null
   if (!HSUG) return toast(working() ? 'Nothing more to suggest' : 'No model worked in the test: nothing to pick from', !working())
-  setFilter({ helpers: true }) // your helpers and the suggested ones, together: not lost among the rest
+  drawMine(S) // shown dashed in the Helper column, in the list as it is: nothing filtered
 }
 // The toolbar's helpers part: suggestions waiting (take all · dismiss), or Suggest helpers and Clear
 // helpers. Each saves at once, its own button saying so.
@@ -2904,11 +2918,11 @@ function drawHelperBar() {
         saveHelpers(next, [], `${took.length} model${took.length === 1 ? ' is a helper' : 's are helpers'} now`).then(() => drawMine(S))
       } }),
       h('button', { className: 'small ghost', textContent: 'Dismiss', onclick: () => ((HSUG = null), drawMine(S)) })) : null,
-    !HSUG && !S.helpersAuto ? h('button', { className: 'small', title: working() ? `suggest helpers from the ${working()} models that answered their test (their provider switched on), each with what it's good at that it doesn't have yet (from the rankings, its test, thinking and context): shown first, to take or not` : 'suggest helpers: the models are tested first (helpers are picked from the ones that answer)', onclick: (e) => (working() ? suggestNow(e.currentTarget) : testFirst('suggest')), 'aria-label': 'Suggest helpers' }, ic('sparkles'), h('span', { className: 'lt', textContent: 'Suggest helpers' })) : null,
+    !HSUG && !S.helpersAuto ? h('button', { className: 'small', title: working() ? `suggest helpers from the ${working()} models that answered their test (their provider switched on), each with what it's good at that it doesn't have yet (from the rankings, its test, thinking and context): marked dashed in the Helper column, to take or not; the list isn't filtered` : 'suggest helpers: the models are tested first (helpers are picked from the ones that answer)', onclick: (e) => (working() ? suggestNow(e.currentTarget) : testFirst('suggest')), 'aria-label': 'Suggest helpers' }, ic('sparkles'), h('span', { className: 'lt', textContent: 'Suggest helpers' })) : null,
     !HSUG && n ? h('button', { className: 'small ghost', 'aria-label': 'Clear helpers', title: `Clear helpers: no model a helper (${n} now): #1 can then start any model again, as before`, onclick: (e) => {
       if (!confirm(`Clear the ${n} helper${n === 1 ? '' : 's'}? #1 can then start any model again, as before.`)) return
       busy(e.currentTarget)
-      saveHelpers({}, [], 'no helpers: #1 can start any model again').then(() => (FILTER.helpers ? setFilter({ helpers: false }) : drawMine(S))) // no helpers left to show only
+      saveHelpers({}, [], 'no helpers: #1 can start any model again').then(() => drawMine(S))
     } }, ic('x'), h('span', { className: 'lt', textContent: 'Clear helpers' })) : null)
   return helperBar
 }
@@ -3767,7 +3781,7 @@ function render(s) {
     // server can be older than a change made here a moment ago)
     if (!filtersLoaded) SORT = Array.isArray(p.sorts) ? p.sorts.filter((x) => COLS[x?.key]) : Array.isArray(p.sort) ? p.sort.filter((x) => COLS[x?.key]).map(flip) : []
     RANK = Array.isArray(p.rank) ? p.rank.filter((x) => typeof x === 'string') : []
-    if (!filtersLoaded) (filtersLoaded = true), (FILTER = { ...NO_FILTER, ...(p.filters && typeof p.filters === 'object' ? p.filters : {}) }) // after that the page's own are the latest
+    if (!filtersLoaded) (filtersLoaded = true), (FILTER = { ...NO_FILTER, ...Object.fromEntries(Object.entries(p.filters && typeof p.filters === 'object' ? p.filters : {}).filter(([k]) => k in NO_FILTER)) }) // after that the page's own are the latest (a filter that's gone, like the old Helpers one, isn't kept)
   }
   S = s
   for (const [key, r] of Object.entries(TRIES)) if (!r.going && placeOf(...key.split(/\/(.*)/s)) === undefined) delete TRIES[key] // off your list: its result too

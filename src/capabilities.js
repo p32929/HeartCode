@@ -5,8 +5,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { voiceProblem } from './voice.js'
+import { onPath } from './spawn.js'
 
-const onPath = (cmd) => (process.env.PATH ?? '').split(path.delimiter).some((d) => d && (fs.existsSync(path.join(d, cmd)) || fs.existsSync(path.join(d, cmd + '.exe'))))
 const exists = (p) => {
   try {
     fs.accessSync(p)

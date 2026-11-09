@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { log, logRequest, requestLog } from './log.js'
+import { loadRankings, scoreOf } from './rankings.js'
 import { fetch } from './http.js' // not the built-in one: see http.js
 
 // Tokens in a text, estimated the way tokenizers split it: a word or a number is about one, a long
@@ -268,17 +269,18 @@ export class Client {
   // Which model of the list to go on to after this one failed, for one request (tried: the places
   // tried, down: the providers that answered with an error, 400 or above). A provider that answered
   // with an error isn't asked again through its next model: the next one is from another provider.
-  // When every provider has failed, the models not tried yet, in order; when all have been tried,
+  // The best-ranked of your models first (scoreOf: the next in a list is often a much smaller model,
+  // and the work goes on with it), then the unranked ones in your order. Your #1 still starts each
+  // message. When every provider has failed, the models not tried yet; when all have been tried,
   // simply the next one (round again).
   #pick(e, tried, down) {
     const r = this.rotation
     tried.add(r.at)
     if (e?.status >= 400) down.add(r.list[r.at].provider)
     const n = r.list.length
-    const after = (ok) => {
-      for (let k = 1; k <= n; k++) if (ok((r.at + k) % n)) return (r.at + k) % n
-      return -1
-    }
+    const data = loadRankings()
+    const order = [...Array(n - 1).keys()].map((k) => (r.at + k + 1) % n).map((i) => ({ i, score: (r.list[i].score ??= scoreOf(r.list[i].model, data)) })).sort((a, b) => a.score - b.score).map((x) => x.i) // stable: unranked keep your order
+    const after = (ok) => order.find(ok) ?? -1
     let i = after((i) => !tried.has(i) && !down.has(r.list[i].provider))
     if (i < 0) i = after((i) => !tried.has(i))
     if (i < 0) {

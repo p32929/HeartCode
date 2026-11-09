@@ -10,7 +10,11 @@ import os from 'node:os'
 import { spawn, execFileSync } from 'node:child_process'
 import { applyEdit, closest, trimBlank } from './edit.js'
 import { readJson, HOME } from './config.js'
-import { c, diffLines, renderDiff } from './ui.js'
+import { c, diffLines, renderDiff, planPick } from './ui.js'
+import { pageCheck } from './check.js'
+import { killTree } from './spawn.js'
+import { scoreOf } from './rankings.js'
+import { family } from './client.js'
 import { webFetch, webSearch, fetchPage, pageView } from './web.js'
 import { savePage, saveSearch, findResearch } from './research.js'
 import { runHooks } from './hooks.js'
@@ -290,15 +294,7 @@ export function runCommand(root, cmd, { signal, timeout = 120_000, stdin, env, s
       child.stdin.on('error', () => {}) // a command that doesn't read its input
       child.stdin.end(stdin)
     }
-    const kill = (sig) => {
-      try {
-        if (group) process.kill(-child.pid, sig)
-        else child.kill(sig)
-        return true
-      } catch {
-        return false // nothing left
-      }
-    }
+    const kill = (sig) => killTree(child.pid, sig, group) // false: nothing left
     const finish = (code, note = '') => {
       if (done) return
       done = true
@@ -353,6 +349,7 @@ export function suggestCommands(root) {
 // What the model changed in files: this message's (or with all, the conversation's), each file from
 // before its first change to now (the turns keep that first version for /rewind; /diff shows the same).
 function changesTool(s, args) {
+  if (args.versions || args.version) return versionsOf(s, args)
   const turns = args.all ? (s.chat?.turns ?? []) : (s.chat?.turns ?? []).slice(-1)
   const first = new Map()
   for (const t of turns) for (const [rel, before] of Object.entries(t.files ?? {})) if (!first.has(rel)) first.set(rel, before)
@@ -367,6 +364,62 @@ function changesTool(s, args) {
   }
   const where = args.all ? 'in this conversation' : 'for this message'
   return out.join('\n\n') || (want ? `No changes to ${want} ${where}.` : `No file changes ${where}${first.size ? ' (the files you changed are back as they were)' : ''}.`)
+}
+
+// Files that are much smaller now than an earlier version of them (under 70% of its lines, 50 lines or
+// more gone): a sign that what an earlier message made was lost. One line each, or ''.
+export function shrunkNote(s, files) {
+  const out = []
+  for (const f of files) {
+    let now
+    try {
+      now = fs.readFileSync(path.join(s.root, f), 'utf8').split('\n').length
+    } catch {
+      continue
+    }
+    const list = fileVersions(s, f)
+    const big = list.reduce((m, v, i) => { const n = v.text.split('\n').length; return n > (m?.n ?? 0) ? { n, i, v } : m }, null)
+    if (big && now < big.n * 0.7 && big.n - now >= 50) out.push(`${f}: ${now} lines now; ${big.n} lines before the message "${clip(big.v.task.replace(/\s+/g, ' '), 80)}" (${String(big.v.at).slice(0, 10)}; changes with path and version: ${big.i + 1})`)
+  }
+  return out.join('\n')
+}
+
+// A file's versions kept in this project, newest first, each { at, task, rel, text }: as it was before
+// each message HeartCode worked on, in any conversation here, and this one's (not saved yet)
+export function fileVersions(s, want) {
+  want = String(want).replace(/\\/g, '/').replace(/^\.\//, '')
+  const dir = path.join(s.root, '.heartcode', 'sessions')
+  const found = []
+  const take = (t) => {
+    const rel = Object.keys(t.files ?? {}).find((r) => (r = r.replace(/\\/g, '/')) === want || r.endsWith(`/${want}`))
+    if (rel && typeof t.files[rel] === 'string' && !found.some((x) => x.at === t.at && x.text === t.files[rel])) found.push({ at: t.at ?? '', task: String(t.task ?? ''), rel, text: t.files[rel] })
+  }
+  for (const f of fs.existsSync(dir) ? fs.readdirSync(dir).filter((x) => x.endsWith('.json')) : []) {
+    try {
+      for (const t of JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')).turns ?? []) take(t)
+    } catch {}
+  }
+  for (const t of s.chat?.turns ?? []) take(t)
+  return found.sort((a, b) => String(b.at).localeCompare(String(a.at))).filter((v, i, all) => i === 0 || v.text !== all[i - 1].text)
+}
+
+// A file's earlier versions in this project: as it was before each message HeartCode worked on, in any
+// conversation here (the snapshots kept for /rewind). versions: the list, newest first; version: that
+// one saved to .heartcode/versions/ (to read whole) and its diff to the file now. For "it worked before".
+function versionsOf(s, args) {
+  const want = String(args.path ?? '').trim().replace(/^\.\//, '')
+  if (!want) return 'error: changes with versions/version needs "path": the file'
+  const list = fileVersions(s, want)
+  if (!list.length) return `No earlier versions of ${want} kept in this project.`
+  if (!args.version) return `Earlier versions of ${want}, newest first (each as it was before that message):\n${list.map((v, i) => `${i + 1}. ${String(v.at).slice(0, 16).replace('T', ' ')} · ${v.text.split('\n').length} lines · before: "${clip(v.task.replace(/\s+/g, ' '), 80)}"`).join('\n')}\nchanges with version: N shows one and what changed since.`
+  const v = list[Number(args.version) - 1]
+  if (!v) return `error: no version ${args.version}; there are ${list.length}`
+  const out = path.join(s.root, '.heartcode', 'versions', `${v.rel.replace(/[\\/]/g, '__')}@${args.version}`)
+  fs.mkdirSync(path.dirname(out), { recursive: true })
+  fs.writeFileSync(out, v.text)
+  const abs = path.join(s.root, v.rel)
+  const now = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : ''
+  return `Version ${args.version} of ${v.rel} (before "${clip(v.task.replace(/\s+/g, ' '), 80)}", ${String(v.at).slice(0, 16).replace('T', ' ')}), whole: ${path.relative(s.root, out)} (read_file it).\nWhat changed from it to the file now:\n${clip(renderDiff(diffLines(v.text, now), v.rel, false, 3, 400), 12000)}`
 }
 
 // A "no" from the user, with what they typed instead. Their words go to the model as their own message,
@@ -613,7 +666,7 @@ const obj = (properties, required = []) => ({ type: 'object', properties, requir
 export const TOOL_DEFS = [
   { name: 'read_file', get description() { return prompt('agent/tool-read_file') }, parameters: obj({ path: str, start_line: int, end_line: int }, ['path']) },
   { name: 'search', get description() { return prompt('agent/tool-search') }, parameters: obj({ query: str, path: str }, ['query']) },
-  { name: 'changes', get description() { return prompt('agent/tool-changes') }, parameters: obj({ path: str, all: { type: 'boolean' } }) },
+  { name: 'changes', get description() { return prompt('agent/tool-changes') }, parameters: obj({ path: str, all: { type: 'boolean' }, versions: { type: 'boolean' }, version: int }) },
   { name: 'list_files', get description() { return prompt('agent/tool-list_files') }, parameters: obj({ path: str, filter: str }) },
   { name: 'find_command', get description() { return prompt('agent/tool-find_command') }, parameters: obj({ names: { type: 'array', items: str } }, ['names']) },
   { name: 'lsp', get description() { return prompt('agent/tool-lsp') }, parameters: obj({ server: str, language: str, action: { type: 'string', enum: ['definition', 'references', 'hover', 'errors'] }, file: str, line: int, column: int, name: str }, ['server', 'language', 'action', 'file']) },
@@ -622,7 +675,7 @@ export const TOOL_DEFS = [
   { name: 'write_file', get description() { return prompt('agent/tool-write_file') }, parameters: obj({ path: str, content: str, append: { type: 'boolean' } }, ['path', 'content']) },
   { name: 'run_command', get description() { return prompt('agent/tool-run_command') }, parameters: obj({ command: str, wait: int, background: { type: 'boolean' } }, ['command']) },
   { name: 'background', get description() { return prompt('agent/tool-background') }, parameters: obj({ action: { type: 'string', enum: ['output', 'list', 'stop'] }, id: int, wait: int }, ['action']) },
-  { name: 'todo', get description() { return prompt('agent/tool-todo') }, parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'stuck'] }, why: str, parallel: { type: 'boolean' }, model: str, files: { type: 'array', items: str } }, ['content', 'status']) } }, ['todos']) },
+  { name: 'todo', get description() { return prompt('agent/tool-todo') }, parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'stuck'] }, why: str, parallel: { type: 'boolean' }, compare: { type: 'boolean' }, model: str, files: { type: 'array', items: str } }, ['content', 'status']) } }, ['todos']) },
   { name: 'web_search', get description() { return prompt('agent/tool-web_search') }, parameters: obj({ query: str, fresh: { type: 'boolean' } }, ['query']) },
   { name: 'web_fetch', get description() { return prompt('agent/tool-web_fetch') }, parameters: obj({ url: str, look_for: str, start: int }, ['url']) },
   { name: 'ask_user', get description() { return prompt('agent/tool-ask_user') }, parameters: obj({ question: str, header: str, options: { type: 'array', items: str }, multiple: { type: 'boolean' }, emphasis: { type: 'boolean' } }, ['question', 'options']) }, // one question a call (small models manage that); several calls in one reply are one dialog (agent.js)
@@ -708,8 +761,8 @@ export function extraTools(s) {
 // todo: the model's checklist for this message, shown to the user each time it changes.
 // Lenient: the list as JSON text, plain strings for items, "done" for completed.
 const MARK = { pending: '☐', in_progress: '◐', completed: '☑', stuck: '⚠' }
-// In the conversation: the whole plan when it's new (or its steps changed), else only the steps whose
-// status changed, on one line; the whole of it stays in sight under the spinner (full screen).
+// In the conversation: three of its steps when it's new (or its steps changed; the rest on a key), else
+// only the steps whose status changed, on one line; it stays in sight under the spinner (full screen).
 // the plan for a program reading HeartCode (headless stream-json): its steps, and who's doing a part
 export const sendTodos = (s) => !s.isSub && s.ui.event?.({ subtype: 'todos', todos: (s.chat.todos ?? []).map(({ content, status, why, by, byProvider }) => ({ content, status, ...(why && { why }), ...(by && { by: byProvider ? `${byProvider}/${by}` : by }) })) })
 function showTodos(s, before, todos) {
@@ -719,7 +772,13 @@ function showTodos(s, before, todos) {
   // (steps added, taken out, or whose status moved); the whole plan is pinned under the spinner
   const was = new Map((before ?? []).map((t) => [t.content, `${t.status}${t.why ?? ''}`]))
   const kept = todos.filter((t) => was.has(t.content)).length
-  if (!s.ui.full || !before?.length || kept < Math.max(1, todos.length / 2)) return s.ui.print(todos.map((t) => `  ${item(t)}`).join('\n') || c.faint('  (todo list cleared)'))
+  if (!s.ui.full || !before?.length || kept < Math.max(1, todos.length / 2)) {
+    if (!todos.length) return s.ui.print(c.faint('  (todo list cleared)'))
+    // three of its steps (what's being done, then what's next), the rest a count and the key that shows them
+    const { shown, hidden } = planPick(todos)
+    const key = s.ui.keyFor?.('show_plan')
+    return s.ui.print([...shown.map((t) => `  ${item(t)}`), ...(hidden ? [c.faint(`  … ${hidden} more${key ? ` · ${key} shows all of it` : ''}`)] : [])].join('\n'))
+  }
   const now = new Set(todos.map((t) => t.content))
   const changes = [
     ...todos.filter((t) => was.get(t.content) !== `${t.status}${t.why ?? ''}`).map((t) => (was.has(t.content) ? item(t) : `${c.faint('+')} ${item(t)}`)),
@@ -738,7 +797,7 @@ async function todoTool(s, args, signal, id) {
   }
   if (!Array.isArray(list)) return 'error: todos must be a list of {content, status}'
   const todos = list
-    .map((t) => (typeof t === 'string' ? { content: t, status: 'pending' } : { content: String(t?.content ?? t?.task ?? t?.title ?? ''), status: String(t?.status ?? 'pending'), ...(t?.why && { why: String(t.why).trim() }), ...(t?.model && { model: String(t.model) }), ...((t?.parallel === true || t?.parallel === 'true') && { parallel: true }), ...([t?.files ?? []].flat().filter(Boolean).length && { files: [t.files].flat().map(String) }) }))
+    .map((t) => (typeof t === 'string' ? { content: t, status: 'pending' } : { content: String(t?.content ?? t?.task ?? t?.title ?? ''), status: String(t?.status ?? 'pending'), ...(t?.why && { why: String(t.why).trim() }), ...(t?.model && { model: String(t.model) }), ...((t?.parallel === true || t?.parallel === 'true') && { parallel: true }), ...((t?.compare === true || t?.compare === 'true') && { compare: true, parallel: true }), ...([t?.files ?? []].flat().filter(Boolean).length && { files: [t.files].flat().map(String) }) }))
     .filter((t) => t.content.trim())
     .map((t) => ({ ...t, status: /stuck|block|fail|struggl/i.test(t.status) ? 'stuck' : /done|complete/i.test(t.status) ? 'completed' : /progress|doing|active/i.test(t.status) ? 'in_progress' : 'pending' }))
     .map(({ why, ...t }) => (t.status === 'stuck' ? { ...t, why: why || 'no reason given' } : t)) // a reason only on a stuck step
@@ -754,12 +813,20 @@ async function todoTool(s, args, signal, id) {
   // a step it said it was stuck on, now done: what got it out is worth learning (agent.js)
   for (const t of todos) if (t.status === 'completed' && before.get(t.content)?.status === 'stuck') (s.unstuck ??= []).push({ step: t.content, why: before.get(t.content).why })
   if (newlyStuck.length) return `Todo list saved: ${todos.filter((x) => x.status === 'completed').length} of ${todos.length} done.\n\n${await stuckSaid(s, newlyStuck[0].content, newlyStuck[0].why, signal, id)}`
-  const parts = await runParts(s, todos, signal, id)
+  // a plan of several steps: the user says (once a message) whether several agents work on it at once
+  // or one does it step by step. Nobody to answer (headless, no reply in time): several, the recommended
+  const pending = todos.filter((t) => t.status === 'pending')
+  if (s.split === undefined && !s.isSub && s.subagent && s.team?.().length && s.ui.permission !== 'plan' && pending.length >= 2) {
+    const said = await askUser(s, { question: `The plan has ${todos.length} steps. Work on it with several agents at once?`, header: 'Agents', options: [{ label: 'Several agents at once', description: 'steps that stand alone run side by side, each on the model best at it; one no model is sure of is done by two, and the better kept' }, { label: 'One agent', description: 'one model does every step, in turn' }] })
+    s.split = /One agent/.test(said) ? 'one' : 'several'
+    log('parts', `the user chose: ${s.split} (${said})`)
+  }
+  const parts = s.split === 'one' ? '' : await runParts(s, todos, signal, id)
   const done = todos.filter((t) => t.status === 'completed').length
   const next = todos.find((t) => t.status !== 'completed')
   // a plan of several parts with none given to another model or run side by side: asked once a message
   const open = todos.filter((t) => t.status === 'pending')
-  const askSplit = !parts && !s.isSub && !s.splitAsked && open.length >= 3 && !todos.some((t) => t.parallel || t.model) && s.subagent && s.team?.().length && s.ui.permission !== 'plan'
+  const askSplit = !parts && !s.isSub && !s.splitAsked && open.length >= 2 && s.split === 'several' && !todos.some((t) => t.parallel || t.model) && s.subagent && s.team?.().length && s.ui.permission !== 'plan'
   if (askSplit) s.splitAsked = true
   // a plan of a few steps made without looking anything up: asked once a message whether it uses something to read up on
   const askResearch = !parts && !s.isSub && !s.researchAsked && !s.lookedUp && !s.research?.lookedUp && open.length >= 2
@@ -813,6 +880,38 @@ function secondOpinionModel(s) {
   return helpers.find((t) => t.jobs.includes('hard')) ?? helpers[0] ?? (team.some((t) => t.jobs) ? null : team[0]) ?? null
 }
 
+// The web pages a change can break, to open in a browser: changed .html files, and the project's
+// pages that use a changed file by name or sit in a folder above it. Not pages a build tool or the
+// project's own server serves (a bundler or server in package.json, .ts/.jsx/.vue scripts): they don't
+// open as plain files. Three at most.
+export function pagesOf(root, changed) {
+  const slash = (f) => f.split(path.sep).join('/') // Windows paths compared the same way
+  const web = changed.map((f) => slash(path.relative(root, path.resolve(root, f)))).filter((f) => /\.(html?|m?js|css)$/i.test(f) && !f.startsWith('..') && !f.startsWith('.heartcode'))
+  if (!web.length) return []
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
+    if (Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).some((d) => /^(vite|webpack|parcel|next|react-scripts|astro|@sveltejs\/kit|nuxt|@angular\/core|esbuild|rollup|express|fastify|koa|hono)$/.test(d))) return [] // built, or served by its own server
+  } catch {}
+  const uses = (page) => {
+    if (web.includes(page)) return true
+    let text = ''
+    try {
+      text = fs.readFileSync(path.join(root, page), 'utf8')
+    } catch {
+      return false
+    }
+    if (/<script[^>]+src=["'][^"']+\.(tsx?|jsx|vue|svelte)["']/i.test(text)) return false
+    const dir = path.dirname(page)
+    return web.some((f) => text.includes(path.basename(f)) || dir === '.' || f.startsWith(`${dir}/`))
+  }
+  return listFiles(root)
+    .map(slash)
+    .filter((f) => /\.html?$/i.test(f) && !f.startsWith('.heartcode/') && !/(^|\/)(node_modules|dist|build|coverage)\//.test(f))
+    .sort((a, b) => web.includes(b) - web.includes(a) || /index\.html?$/i.test(b) - /index\.html?$/i.test(a) || a.split('/').length - b.split('/').length)
+    .filter(uses)
+    .slice(0, 3)
+}
+
 // The plan's parts marked parallel (or given to another model): each started at once as a helper
 // on its model, all at the same time, each changing only the files its part owns; marked done when
 // it reports back. What they did, for the model to put together and check. '' when none.
@@ -834,6 +933,10 @@ async function runParts(s, todos, signal, id) {
   const reports = await Promise.all(
     parts.map(async (t) => {
       const brief = prompt('agent/part', { task: s.task ?? '', plan, part: t.content, files: (t.files ?? []).join(', '), choices })
+      if (t.compare && t.files?.length) {
+        const r = await comparePart(s, t, brief, signal, id)
+        if (r) return r
+      }
       let out
       try {
         out = await s.subagent({ prompt: brief, model: t.model, description: clip(t.content, 40), ownFiles: t.files, part: t }, signal, id) // part: its model is noted on it (by)
@@ -849,6 +952,94 @@ async function runParts(s, todos, signal, id) {
   showTodos(s, shown, todos)
   sendTodos(s)
   return prompt('agent/parts-done', { reports: reports.join('\n\n'), unknown: unknown.join(', '), models: yours.map((y) => `${y.provider} ${y.model}`).join(', ') })
+}
+
+// A part no one model is sure to do well (compare): the two best-ranked of your models (the one the
+// plan named first) each do it in a copy of the project, at the same time. What each changed in the
+// part's files is checked (HeartCode opens a web page it changed in a browser), and another of your
+// models picks the better one; only that one's files come into the project. Returns the part's report,
+// or null when there aren't two models to compare (then it runs as any other part).
+async function comparePart(s, t, brief, signal, id) {
+  const tools = [{ provider: s.client?.provider, model: s.client?.model }, ...(s.team?.() ?? []).filter((x) => x.tools !== false)]
+  const pool = tools.some((x) => x.jobs) ? tools.filter((x, i) => i === 0 || x.jobs) : tools // helpers ticked: those (and this model)
+  const named = t.model && pool.find((x) => `${x.provider} ${x.model}` === t.model || x.model === t.model || t.model.endsWith(` ${x.model}`))
+  const ranked = pool.map((x) => ({ x, score: scoreOf(x.model) })).sort((a, b) => a.score - b.score).map((r) => r.x)
+  const first = named ?? ranked[0]
+  const second = ranked.find((x) => x !== first && family(x.model) !== family(first.model))
+  if (!first || !second) return null
+  const pair = [first, second]
+  const name = (x) => `${x.provider} ${x.model}`
+  s.ui.step('compare', `${clip(t.content, 50)}: ${first.model} and ${second.model}, each in a copy`)
+  const copies = pair.map(() => copyProject(s.root))
+  try {
+    const outs = await Promise.all(pair.map((x, i) => s.subagent({ prompt: brief, model: name(x), description: `${clip(t.content, 30)} · ${x.model}`, ownFiles: t.files, root: copies[i] }, signal, id).catch((e) => (e.name === 'AbortError' || signal?.aborted ? Promise.reject(e) : `error: ${e.message}`))))
+    const results = await Promise.all(copies.map(async (dir, i) => {
+      const diffs = []
+      for (const f of t.files) {
+        const read = (root) => { try { return fs.readFileSync(path.join(root, f), 'utf8') } catch { return null } }
+        const before = read(s.root), now = read(dir)
+        if (before !== now) diffs.push(now === null ? `${f}: deleted` : before === null ? `${f} (new):\n${clip(now, 4000)}` : renderDiff(diffLines(before, now), f, false, 3, 300))
+      }
+      const page = diffs.length ? pagesOf(dir, t.files)[0] : null
+      const check = page ? await pageCheck(dir, page, signal, null, () => {}).catch((e) => (signal?.aborted ? Promise.reject(e) : null)) : null
+      return { model: pair[i], said: outs[i], diffs, check, out: failed(outs[i]) || !diffs.length || check?.broken }
+    }))
+    let pick = results.findIndex((r) => !r.out)
+    let why = pick < 0 ? 'neither worked' : 'the other one failed'
+    if (results.every((r) => !r.out)) {
+      pick = 0
+      why = 'no one could compare them; the first kept'
+      const ask = prompt('agent/compare', { task: s.task ?? '', part: t.content, ...Object.fromEntries(results.flatMap((r, i) => [[`model${i}`, r.model.model], [`said${i}`, clip(r.said, 1500)], [`changes${i}`, clip(r.diffs.join('\n\n'), 6000)], [`check${i}`, r.check ? clip(r.check.report, 600) : '(no page to open)']])) })
+      const judges = [...(s.team?.() ?? []).filter((x) => !pair.some((p) => p.provider === x.provider && p.model === x.model)).map((x) => ({ x, score: scoreOf(x.model) })).sort((a, b) => a.score - b.score).map((r) => r.x).slice(0, 2), null]
+      for (const j of judges) {
+        try {
+          const { client } = j ? await s.engineFor(j) : { client: s.client }
+          s.ui.spinner(`${client.model} is comparing the two`)
+          const said = (await client.chat({ messages: [{ role: 'user', content: ask }] }, { signal })).content.trim()
+          s.ui.stopSpin()
+          const m = /^\W*(A|B)\b[\s.:—-]*(.*)/is.exec(said)
+          if (!m) continue
+          pick = m[1].toUpperCase() === 'A' ? 0 : 1
+          why = `${client.model}: ${clip(m[2].split('\n')[0] || 'better', 120)}`
+          break
+        } catch (e) {
+          s.ui.stopSpin()
+          if (e.name === 'AbortError' || signal?.aborted) throw e
+          log('parts', `compare judge: ${e.message}`)
+        }
+      }
+    }
+    s.ui.step('compare', pick < 0 ? `${clip(t.content, 50)}: neither worked` : `kept ${pair[pick].model}'s (${why})`)
+    if (pick < 0) t.status = 'pending'
+    if (pick < 0) return `## ${t.content}: not done\n${results.map((r) => `${r.model.model}: ${clip(r.said, 800)}${r.check?.broken ? `\nHeartCode's check: ${clip(r.check.report, 400)}` : ''}`).join('\n\n')}`
+    // the better one's files into the project, each recorded for /rewind and the checks
+    for (const f of t.files) {
+      const from = path.join(copies[pick], f), to = path.join(s.root, f)
+      const before = fs.existsSync(to) ? fs.readFileSync(to, 'utf8') : null
+      const now = fs.existsSync(from) ? fs.readFileSync(from, 'utf8') : null
+      if (before === now) continue
+      s.track?.(f, before)
+      if (now === null) fs.rmSync(to, { force: true })
+      else fs.mkdirSync(path.dirname(to), { recursive: true }), fs.writeFileSync(to, now)
+      s.changed?.add(f)
+      s.lastChangeAt = ++s.seq
+    }
+    t.status = 'completed'
+    t.by = pair[pick].model
+    t.byProvider = pair[pick].provider
+    return `## ${t.content} (done by ${pair[pick].model} and ${pair[1 - pick].model}; ${pair[pick].model}'s kept: ${why}): done\n${clip(results[pick].said, 3000)}`
+  } finally {
+    for (const d of copies) fs.rmSync(d, { recursive: true, force: true })
+  }
+}
+
+// The project in a folder of its own, for a helper to work in apart (node_modules linked, not copied;
+// .git and HeartCode's own folder left out). ponytail: copies every other file; a huge project is slow to copy.
+function copyProject(root) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'heartcode-part-'))
+  fs.cpSync(root, dir, { recursive: true, filter: (src) => src === root || !['node_modules', '.git', '.heartcode'].includes(path.basename(src)) })
+  if (fs.existsSync(path.join(root, 'node_modules'))) fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), 'junction') // a junction: Windows needs no admin rights for it
+  return dir
 }
 
 // ask_user: questions for the user mid-task, each with choices (and their own answer); several are

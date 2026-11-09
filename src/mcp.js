@@ -9,7 +9,6 @@
 // list it gave the last time it ran (kept in ~/.heart/mcp-tools.json, with its instructions): so a
 // server starts the first time the model uses it, or once to say its tools; it stops when
 // HeartCode exits.
-import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -17,6 +16,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { HOME, readJson, readConfig, writeJson, VERSION } from './config.js'
 import { log } from './log.js'
+import { spawnCmd, killTree } from './spawn.js'
 import { savedToken, signIn, hasToken } from './oauth.js'
 import { fetch } from './http.js' // not the built-in one: see http.js
 
@@ -154,7 +154,7 @@ class Server {
     const { command, args = [], env = {} } = this.cfg
     log('mcp', `starting ${this.name}: ${command} ${args.join(' ')}`)
     const cwd = this.cfg.scratchCwd ? scratchDir(this.root, this.name) : (this.root ?? undefined) // in the project, so a relative path in its config works; a browser gets a scratch dir instead
-    const child = (this.child = spawn(command, args, { cwd, env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' }))
+    const child = (this.child = spawnCmd(command, args, { cwd, env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' }))
     let buf = ''
     child.stdout.setEncoding('utf8') // a character split between two chunks stays whole
     child.stdout.on('data', (d) => {
@@ -350,10 +350,7 @@ class Server {
       return
     }
     if (!this.child) return
-    try {
-      if (this.child.pid && process.platform !== 'win32') process.kill(-this.child.pid, 'SIGTERM')
-      else this.child.kill()
-    } catch {}
+    if (!killTree(this.child.pid)) try { this.child.kill() } catch {}
     this.child = null
     this.ready = null
     this.#failAll(new Error(`${this.name} was stopped`)) // calls waiting on it fail now (its exit comes later, ignored)

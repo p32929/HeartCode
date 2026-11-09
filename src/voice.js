@@ -10,13 +10,13 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { HOME } from './config.js'
 import { runCommand } from './tools.js'
+import { onPath } from './spawn.js'
 import { log } from './log.js'
 import { fetch } from './http.js' // not the built-in one: see http.js
 
-const onPath = (cmd) => (process.env.PATH ?? '').split(path.delimiter).find((d) => d && fs.existsSync(path.join(d, cmd)))
 
 // A whisper.cpp model already on disk: the configured one, else the best found (small > base > tiny).
 // fast: the quickest found instead (tiny > base > small), for the words shown while you speak.
@@ -34,11 +34,24 @@ export function localModel(cfg = {}, { fast = false } = {}) {
   return found.sort((a, b) => (rank(a) === -1 ? 9 : rank(a)) - (rank(b) === -1 ? 9 : rank(b)))[0] ?? (fast ? localModel(cfg) : null)
 }
 
+// How to install a program here: the usual package manager of this OS
+const install = (mac, win, linux) => (process.platform === 'darwin' ? `brew install ${mac}` : process.platform === 'win32' ? `winget install ${win}` : linux)
+
+// The microphone, as ffmpeg's input: the default device (macOS, PulseAudio/PipeWire on Linux); on
+// Windows DirectShow needs a device's name, so the first microphone ffmpeg lists (kept once found)
+let winMic
+function micInput() {
+  if (process.platform === 'darwin') return ['-f', 'avfoundation', '-i', ':default']
+  if (process.platform !== 'win32') return ['-f', 'pulse', '-i', 'default']
+  winMic ??= /"([^"]+)"\s*\(audio\)/.exec(spawnSync('ffmpeg', ['-hide_banner', '-list_devices', 'true', '-f', 'dshow', '-i', 'dummy'], { encoding: 'utf8' }).stderr ?? '')?.[1] ?? ''
+  return ['-f', 'dshow', '-i', `audio=${winMic || 'default'}`]
+}
+
 // Why voice can't work here, or null when it can.
 export function voiceProblem(cfg = {}, providers = {}) {
-  if (!onPath('ffmpeg')) return 'voice input needs ffmpeg to record (brew install ffmpeg)'
+  if (!onPath('ffmpeg')) return `voice input needs ffmpeg to record (${install('ffmpeg', 'ffmpeg', 'install ffmpeg with your package manager')})`
   if (cfg.provider) return providers[cfg.provider] ? null : `voice.provider "${cfg.provider}" isn't one of the providers`
-  if (!onPath('whisper-cli')) return 'voice input needs whisper-cli (brew install whisper-cpp) and a model, or "voice": { "provider": …, "model": … } in ~/.heart/config.json'
+  if (!onPath('whisper-cli')) return `voice input needs whisper-cli (${process.platform === 'darwin' ? 'brew install whisper-cpp' : 'whisper.cpp, from github.com/ggml-org/whisper.cpp'}) and a model, or "voice": { "provider": …, "model": … } in ~/.heart/config.json`
   return localModel(cfg) ? null : 'voice input needs a whisper model: put a ggml-*.bin in ~/.whisper-models, or set "voice": { "model": "/path/to/ggml-….bin" }'
 }
 
@@ -48,7 +61,7 @@ const RATE = 16000 // 16 kHz mono, 16-bit: what whisper wants
 // said so far (raw), seconds(), stop() → all of it, cancel() }.
 export function listen() {
   // HEART_VOICE_FILE: a sound file played in at its own speed instead of the microphone (tests)
-  const input = process.env.HEART_VOICE_FILE ? ['-re', '-i', process.env.HEART_VOICE_FILE] : process.platform === 'darwin' ? ['-f', 'avfoundation', '-i', ':default'] : ['-f', 'pulse', '-i', 'default']
+  const input = process.env.HEART_VOICE_FILE ? ['-re', '-i', process.env.HEART_VOICE_FILE] : micInput()
   const child = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...input, '-ac', '1', '-ar', String(RATE), '-f', 's16le', 'pipe:1'], { stdio: ['pipe', 'pipe', 'pipe'] })
   const chunks = []
   let size = 0
@@ -107,7 +120,7 @@ export async function transcribePcm(pcm, cfg = {}, providers = {}, { fast = fals
 // Starts recording to a 16 kHz mono WAV. Returns { stop() → the file, cancel() }.
 export function record() {
   const file = path.join(os.tmpdir(), `heartcode-voice-${process.pid}-${Date.now()}.wav`)
-  const input = process.platform === 'darwin' ? ['-f', 'avfoundation', '-i', ':default'] : ['-f', 'pulse', '-i', 'default']
+  const input = micInput()
   const start = (inp) => spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...inp, '-ac', '1', '-ar', '16000', file], { stdio: ['pipe', 'ignore', 'pipe'] })
   let child = start(input)
   let err = ''

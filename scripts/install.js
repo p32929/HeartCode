@@ -1,12 +1,13 @@
 // npm start: installs HeartCode for this user (`heart` everywhere), then says how to use it.
 // A copy in npm's global folder (not a link to this one), the same as `npm install -g heartcode`:
 // /update then replaces it there like any other install. (To work on HeartCode itself: npm link.)
-import { spawnSync } from 'node:child_process'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { spawnCmdSync } from '../src/spawn.js'
 
-const root = path.resolve(new URL('..', import.meta.url).pathname)
+const root = path.resolve(fileURLToPath(new URL('..', import.meta.url))) // a real path on every OS (.pathname is /C:/… on Windows), no trailing separator
 const npm = process.env.npm_execpath ? [process.execPath, process.env.npm_execpath] : ['npm']
-const r = spawnSync(npm[0], [...npm.slice(1), 'install', '--global', '--install-links', root], { stdio: 'inherit' })
+const r = spawnCmdSync(npm[0], [...npm.slice(1), 'install', '--global', '--install-links', root], { stdio: 'inherit' }) // npm is npm.cmd on Windows
 if (r.status !== 0) {
   console.error(`
 Couldn't install HeartCode for everywhere (npm install --global failed, above).

@@ -8,6 +8,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { HOME } from './config.js'
 import { log } from './log.js'
+import { killTree } from './spawn.js'
 
 const DIR = path.join(HOME, 'outputs', 'background')
 const jobs = new Map() // id → { id, command, root, pid, file, started, code, read, exited }
@@ -15,14 +16,7 @@ let made = 0
 
 const plain = (t) => t.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r(?!\n)/g, '\n')
 const group = process.platform !== 'win32'
-const kill = (job, sig) => {
-  try {
-    group ? process.kill(-job.pid, sig) : process.kill(job.pid, sig)
-    return true
-  } catch {
-    return false
-  }
-}
+const kill = (job, sig) => killTree(job.pid, sig, group)
 
 // Started (it runs on; waitFor waits on it).
 export function startJob(root, command) {

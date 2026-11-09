@@ -5,10 +5,13 @@ import { prompt, userInstructions } from './prompts.js'
 import { newChat } from './sessions.js'
 import { skillFiles, readSkillFile } from './skills.js'
 import path from 'node:path'
-import { est, estMessages, Client, tokensOf, COMPACT_SHARE } from './client.js'
+import { fileURLToPath } from 'node:url'
+import { est, estMessages, Client, tokensOf, COMPACT_SHARE, family } from './client.js'
+import { scoreOf } from './rankings.js'
+import { pageCheck } from './check.js'
 import { runGuided } from './guided.js'
 import { markUsed, removeResearch, findResearch } from './research.js'
-import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, searchesOutside, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, refusal, noteNamedPaths, sendTodos, stuckSaid } from './tools.js'
+import { TOOL_DEFS, PLAN_HIDDEN, folderView, readOnlyCommand, searchesOutside, extraTools, runTool, listFiles, namedFiles, readFileTool, clip, allowed, loadMcpTools, saveOutput, isSavedOutput, runningCall, imageUrl, MAX_IMAGE, failed, refusal, noteNamedPaths, sendTodos, stuckSaid, pagesOf, shrunkNote } from './tools.js'
 import { serversNote } from './lsp.js'
 import { newlyEnded, jobLine } from './background.js'
 import { loadHooks, runHooks } from './hooks.js'
@@ -261,7 +264,7 @@ export class Session {
       if (args.part) (args.part.by = t.model), (args.part.byProvider = t.provider ?? this.client.provider), sendTodos(this) // a part of the plan: the model doing it, shown beside it
       let answer = ''
       try {
-        answer = (await this.#helper(t, task, images, args.description, id, signal, args.ownFiles))?.trim()
+        answer = (await this.#helper(t, task, images, args.description, id, signal, args.ownFiles, args.root))?.trim()
       } catch (e) {
         if (e.name === 'AbortError' || signal?.aborted) throw e
         if (e.maxTurns) return `error: the helper ${e.message}` // the caller's limit: every other model would stop there too
@@ -295,7 +298,10 @@ export class Session {
   // One helper on one model (t: this one, or another of yours), with its own connection (a helper's
   // failure moves no one else on to another model) that gives up after a few tries (then the next
   // model gets the job).
-  async #helper(t, task, images, description, id, signal, ownFiles) {
+  // root: a copy of the project to work in instead (a part done by two models to compare): its
+  // changes stay there, not this message's, until the better one is brought over (tools.js)
+  async #helper(t, task, images, description, id, signal, ownFiles, root = this.root) {
+    const own = root === this.root
     let { client, profile, strat } = this
     if (this.engineFor) {
       ;({ client, profile, strat } = await this.engineFor(t))
@@ -303,11 +309,11 @@ export class Session {
       client.retryIf = (e, attempt) => attempt < 3 && e.name !== 'TimeoutError' && e.status !== 429 && e.status !== 413 && (!was || was(e, attempt)) // silent (not starting, or stopping midway: each try would wait as long again), rate-limited or too large: the next model, not another try
     }
     const label = clip(String(description ?? '').trim() || task.split('\n')[0], 60) // its model is named on the agent line
-    const helper = new Session({ client, profile, strat, root: this.root, ui: helperUI(this.ui, label, client.model), chat: newChat(this.root) })
+    const helper = new Session({ client, profile, strat, root, ui: helperUI(this.ui, label, client.model), chat: newChat(root) })
     helper.chat.turns = this.chat.turns.slice(-1) // this message's turn: its file changes go there (track), the changes tool reads them
-    if (ownFiles?.length) helper.ownFiles = ownFiles.map((f) => path.resolve(this.root, f)) // a part of the plan: changes only its own files
+    if (ownFiles?.length) helper.ownFiles = ownFiles.map((f) => path.resolve(root, f)) // a part of the plan: changes only its own files
     Object.assign(helper, { isSub: true, research: this.research, ran: this.ran, noResearch: this.noResearch, mcp: this.mcp, skills: this.skills, hooks: this.hooks, allowTools: this.allowTools, denyTools: this.denyTools, maxTurns: this.maxTurns, autoCompact: this.autoCompact, appendSystem: this.appendSystem, fileCache: this.fileCache, noFormat: this.noFormat, noLsp: this.noLsp })
-    helper.track = (rel, before) => this.track(rel, before)
+    helper.track = own ? (rel, before) => this.track(rel, before) : () => {}
     // a helper that can't see, given screenshots by a tool (a browser): one of your models that can
     // describes them for its job (it has no helpers of its own to ask)
     const seers = strat.vision ? [] : (this.team?.() ?? []).filter((x) => x.images)
@@ -324,7 +330,7 @@ export class Session {
       if (this.ui.helpers?.delete(label)) this.ui.render?.()
       this.#release(helper)
       // its changes are this message's: the not-done checks and the review see them
-      if (helper.changed?.size && this.changed) {
+      if (own && helper.changed?.size && this.changed) {
         for (const f of helper.changed) this.changed.add(f)
         this.lastChangeAt = ++this.seq
         this.checksSince = 0
@@ -580,7 +586,9 @@ export class Session {
 // One line of context about where HeartCode runs, so the model knows the OS, shell and tools to expect.
 const OS_NAMES = { darwin: 'macOS', linux: 'Linux', win32: 'Windows' }
 const envLine = () => {
-  const shell = (process.env.SHELL || process.env.ComSpec || '').split(/[/\\]/).pop()
+  // the shell run_command really uses (Node's: cmd.exe on Windows, /bin/sh elsewhere), not $SHELL,
+  // which on Windows can say bash (Git Bash) while commands still run in cmd.exe
+  const shell = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe').split(/[/\\]/).pop() : 'sh'
   return `${OS_NAMES[process.platform] ?? process.platform} (${process.platform} ${os.release()}, ${process.arch})${shell ? `, shell ${shell}` : ''}`
 }
 
@@ -896,9 +904,10 @@ async function runNative(s, task, images, signal) {
   s.planAsked = false // asked for a plan before its first change, this message
   s.askedUser = s.askNudged = false // asked with ask_user / told to, this message (a reply of questions as text: askedInText)
   s.splitAsked = false // asked whether a plan's parts could run side by side, this message
+  s.split = undefined // the user's answer this message: 'several' agents at once, or 'one' (tools.js)
   s.lookedUp = s.researchAsked = false // searched or read the web this message / asked whether the plan needs it
   // what changed and when it was last checked, this message: a change not run/tested since isn't done
-  Object.assign(s, { changed: new Set(), seq: 0, lastChangeAt: -1, lastCheckAt: -1, reviewedAt: -1, checksSince: 0, spots: new Map(), stuckReports: 0, stuckSelf: null, stuckHandovers: 0, troubles: [], unstuck: [], reviewedRan: 0, lastReview: null, gaveUp: new Set(), toldLast: false, unstuckLearned: false })
+  Object.assign(s, { changed: new Set(), seq: 0, lastChangeAt: -1, lastCheckAt: -1, reviewedAt: -1, checksSince: 0, spots: new Map(), stuckReports: 0, stuckSelf: null, stuckHandovers: 0, troubles: [], unstuck: [], reviewedRan: 0, lastReview: null, gaveUp: new Set(), toldLast: false, unstuckLearned: false, provedAt: -1, proofFails: 0, shrunkTold: false })
 
   let empty = 0 // replies in a row with neither text nor tool calls
   let lastFinal = '' // the last answer it gave (a next one the same, after being told it isn't done: it's stuck)
@@ -912,7 +921,7 @@ async function runNative(s, task, images, signal) {
   const handOver = (why) => {
     const was = client.model
     s.gaveUp.add(`${client.provider}/${was}`) // not gone back to this message, nor asked for a second opinion
-    if (client.moveOn?.(`${was} ${why}`, s.gaveUp)) {
+    if (strongest(s, client, `${was} ${why}`) || client.moveOn?.(`${was} ${why}`, s.gaveUp)) {
       ui.warn(`${was} ${why}; handing over to ${client.model}`)
       // the next model sees the whole conversation: told it's taking over, and not to repeat what didn't work
       s.messages.push({ role: 'user', content: prompt('agent/taken-over', { was, why, plan: (s.chat.todos ?? []).filter((t) => t.status !== 'completed').map((t) => `- ${t.content}${t.why ? ` (stuck: ${t.why})` : ''}`).join('\n') }) })
@@ -1123,13 +1132,15 @@ async function runNative(s, task, images, signal) {
     // told it isn't done (open todos, a review's no, its own "couldn't"), and it answers again without
     // doing anything: the same answer, or one that only promises: the next of your models takes the task
     const same = (a, b) => a && b && a.replace(/\s+/g, ' ').trim().slice(0, 300) === b.replace(/\s+/g, ' ').trim().slice(0, 300)
-    if (!res.toolCalls.length && !sinceNudge && nudged && !s.isSub && client.rotation && (s.stuckHandovers ?? 0) < 2 && (same(res.content, lastFinal) || PROMISED_MORE.test(res.content) || SAYS_FAILED.test(res.content.slice(0, 400)))) {
-      handOver(`was told it isn't done and answered again without doing anything`)
+    if (!res.toolCalls.length && !sinceNudge && nudged && !s.isSub && client.rotation && (s.stuckHandovers ?? 0) < 2 && (same(res.content, lastFinal) || PROMISED_MORE.test(res.content) || SAYS_FAILED.test(res.content.slice(0, 400)) || s.proofFails > 0)) {
+      handOver(s.proofFails > 0 ? `was told its page doesn't work when HeartCode opens it, and said it's done without changing anything` : `was told it isn't done and answered again without doing anything`)
       s.stuckHandovers++
       sinceNudge = true
       continue
     }
     if (!res.toolCalls.length) lastFinal = res.content
+    // its page is still broken in HeartCode's check and nobody's left to take over: said, not hidden behind "done"
+    if (!res.toolCalls.length && !sinceNudge && s.proofFails > 0 && !s.isSub) ui.warn(`HeartCode's own check: the page still doesn't work (errors, or nothing shown or drawn); this answer isn't proven`)
     if (!res.toolCalls.length) {
       const more = sinceNudge && ((await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal)))
       showHeld(res.content) // after the review's line
@@ -1140,6 +1151,11 @@ async function runNative(s, task, images, signal) {
       nudged++
       sinceNudge = false
       s.messages.push({ role: 'user', content: more })
+      // said done twice and its page is still broken in HeartCode's own check: the best-ranked model takes over
+      if (s.proofFails >= 2 && !s.isSub && client.rotation) {
+        handOver(`said it was done ${s.proofFails} times, and its page still doesn't work when HeartCode opens it`)
+        s.proofFails = 0
+      }
       continue
     }
 
@@ -1445,6 +1461,22 @@ export function askedInText(reply) {
   return questions >= 2 && questions / sentences.length >= 0.4
 }
 
+// A model that showed it can't do this task (went round in circles, stuck, its work still broken):
+// the task goes to the best of your models by the rankings (scoreOf) that can use tools and hasn't
+// been given up on this message, not just the next in your list: the next is often a smaller one.
+// Your list's order still decides who starts, and who answers when one is only unavailable.
+// False when none is ranked (then the list's next, moveOn).
+function strongest(s, client, why) {
+  const now = family(client.model)
+  const best = (s.team?.() ?? [])
+    .filter((t) => t.tools !== false && !s.gaveUp.has(`${t.provider}/${t.model}`) && family(t.model) !== now)
+    .map((t) => ({ t, score: scoreOf(t.model) }))
+    .filter((x) => x.score < Infinity)
+    .sort((a, b) => a.score - b.score)[0]
+  const target = best && client.rotation?.list.find((x) => x.provider === best.t.provider && x.model === best.t.model)
+  return Boolean(target && client.switchTo(target, `${why}; the best-ranked of your models not tried yet`))
+}
+
 export async function notDone(s, signal, again, reply = '') {
   // questions typed out instead of asked: once a message, asked again with the tool (someone's there to answer)
   if (!s.isSub && !s.ui.noUser && !s.askedUser && !s.askNudged && askedInText(reply)) {
@@ -1469,6 +1501,36 @@ export async function notDone(s, signal, again, reply = '') {
     log('task', `the answer names files that don't exist: ${missing.join(', ')}`)
     return prompt('agent/not-done', { missing: missing.join(', ') })
   }
+  // a file it changed is much smaller than an earlier version: what earlier messages made may be lost.
+  // Told once a message, before the browser check; the review sees it too
+  if (!s.isSub && !s.shrunkTold && changed.length) {
+    const note = shrunkNote(s, changed)
+    if (note) {
+      s.shrunkTold = true
+      log('task', `files much smaller than before: ${note}`)
+      return prompt('agent/not-done', { shrunk: note })
+    }
+  }
+  // web pages it changed (or that use what it changed): HeartCode opens them in a browser itself, once
+  // per batch of changes. Broken (errors, nothing shown, a canvas drawing nothing) isn't done, whatever
+  // the model's own checks said; how it looks (contrast…) is left to the model and the review.
+  const pages = s.ui.permission === 'plan' || s.lastChangeAt <= (s.provedAt ?? -1) ? [] : pagesOf(s.root, changed)
+  if (pages.length) {
+    s.provedAt = s.lastChangeAt
+    for (const page of pages) {
+      s.ui.spinner(`opening ${page} in a browser to check it`)
+      const r = await pageCheck(s.root, page, signal, path.join(s.root, '.heartcode', 'page-shots'), () => {}).catch((e) => (signal?.aborted ? Promise.reject(e) : null))
+      s.ui.stopSpin()
+      if (!r) continue
+      s.ran?.push({ command: `HeartCode opened ${page} in a browser`, result: clip(r.report.split('\n')[0], 300) }) // the review sees it
+      s.ui.step('check', `${page} in a browser: ${r.broken ? 'broken' : 'works'}`)
+      if (!r.broken) continue
+      s.proofFails = (s.proofFails ?? 0) + 1
+      log('task', `HeartCode's page check failed (${s.proofFails}): ${r.report}`)
+      return prompt('agent/not-done', { broken: r.report, page, shots: (r.shots ?? []).map((f) => path.relative(s.root, f)).join(', '), command: `"${process.execPath}" "${BIN}" page ${page}` })
+    }
+    s.proofFails = 0
+  }
   if (s.acted && reply && PROMISED_MORE.test(reply)) {
     log('task', 'reply names a next step but no tool call followed; nudging to finish')
     return prompt('agent/not-done', { early: true })
@@ -1477,6 +1539,9 @@ export async function notDone(s, signal, again, reply = '') {
   const hook = await runHooks(s, 'Stop', { stop_hook_active: again }, signal)
   return hook.block ? prompt('agent/hook', { reason: hook.block, stop: true }) : null
 }
+
+// HeartCode itself, for the check commands it gives the model
+const BIN = fileURLToPath(new URL('../bin/heartcode.js', import.meta.url))
 
 // Files the final answer says were made, that aren't in the project: a path in backticks, or one
 // with a folder, with a source/config/doc extension, while the answer says it created or wrote
@@ -1567,7 +1632,7 @@ export async function review(s, task, answer, signal) {
   if (!diffs.length) diffs.push('(no files changed)')
   const plan = (s.chat.todos ?? []).map((t) => `- [${t.status === 'completed' ? 'x' : ' '}] ${t.content}`).join('\n')
   const ran = (s.ran ?? []).slice(-15).map((r) => `- ${clip(r.command.replace(/\s+/g, ' '), 160)} → ${r.result}`).join('\n')
-  const ask = prompt('agent/review', { request: requestsOf(s.chat, 1200), emphasis: (s.chat?.choices ?? []).join('; '), plan: plan || '(none)', answer: clip(String(answer ?? ''), 3000), changes: diffs.join('\n\n'), ran: ran || '(nothing)' })
+  const ask = prompt('agent/review', { request: requestsOf(s.chat, 1200), emphasis: (s.chat?.choices ?? []).join('; '), plan: plan || '(none)', answer: clip(String(answer ?? ''), 3000), changes: diffs.join('\n\n'), ran: ran || '(nothing)', shrunk: shrunkNote(s, [...(s.changed ?? [])]) })
   const self = { provider: s.client.provider, model: s.client.model, self: true }
   const others = (s.team?.() ?? []).filter((t) => t.tools !== false && !(t.provider === self.provider && t.model === self.model))
   const reviewers = others.filter((t) => t.jobs?.includes('code')).sort((a, b) => Boolean(b.thinking) - Boolean(a.thinking)) // ticked for Code & logic on Your models, the thinking ones first

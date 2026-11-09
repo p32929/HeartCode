@@ -267,7 +267,7 @@ export async function pageCommand(target) {
 
 // A web page: it loads without errors, shows something, and pressing its first button and a few keys
 // breaks nothing
-async function pageCheck(root, target, signal, shots, note) {
+export async function pageCheck(root, target, signal, shots, note) {
   const isUrl = /^https?:\/\//.test(target)
   if (!isUrl) {
     const file = path.resolve(root, target)
@@ -315,21 +315,85 @@ async function pageCheck(root, target, signal, shots, note) {
       await wait(500)
       for (const k of ['Enter', ' ', 'ArrowUp', 'ArrowLeft']) await page.key(k, 150)
       await wait(1500)
+      const flat = seen.canvas ? await flatCanvases(page).catch((e) => (log('check', `canvas: ${e.message}`), 0)) : 0
       const problems = []
       if (!seen.shown || (!seen.text && !seen.canvas && !seen.pictures)) problems.push('the page shows nothing')
+      if (flat) problems.push(`${flat === 1 ? 'its canvas draws' : `${flat} canvases draw`} nothing: one flat color, also after pressing ${button ? `"${button}" and ` : ''}keys (is something drawing each frame, e.g. a render call in the loop, and is the camera or view looking at what's there?)`)
       if (looks?.lowContrast.length) problems.push(`text too faint to read (WCAG 1.4.3: 4.5:1, large text 3:1): ${looks.lowContrast.map((x) => `"${x.text}" ${x.ratio}:1 (${x.fg} on ${x.bg})`).join('; ')}`)
       if (looks?.hidden) problems.push(`${looks.hidden}% of the page's text is invisible (opacity 0 or hidden) when it's loaded: content shown only after scrolling or an animation is blank in screenshots, print and with reduced motion; show it by default`)
       if (looks?.icons.length) problems.push(`icons that didn't draw (no such name): ${looks.icons.join(', ')}`)
       if (seen.phoneWide) problems.push('on a phone (390 px) it scrolls sideways: something is wider than the screen')
       if (page.errors.length) problems.push(`${page.errors.length} error${page.errors.length === 1 ? '' : 's'}${page.errors.length > atLoad ? (atLoad ? ` (${page.errors.length - atLoad} after pressing ${button ? `"${button}" and ` : ''}keys)` : ` after pressing ${button ? `"${button}" and ` : ''}keys`) : ''}:\n${[...new Set(page.errors)].slice(0, 8).join('\n')}`)
       const what = `${seen.shown} things shown${seen.canvas ? `, ${seen.canvas} canvas` : ''}${button ? `; pressed "${button}"` : ''} and keys (Enter, Space, arrows)${seen.wide ? '; wider than the window (scrolls sideways)' : ''}${seen.phoneWide ? '; on a phone it scrolls sideways' : ''}${saved.length ? `\nscreenshots (look at them): ${saved.join(', ')}` : ''}${tooSlow ? `\nno screenshots: ${tooSlow}` : ''}`
-      return { ok: !problems.length, report: `page ${target} in a browser: ${problems.length ? problems.join('; ') : 'loaded without errors'}; ${what}` }
+      // broken: it doesn't work (errors, nothing shown or drawn), not just how it looks
+      return { ok: !problems.length, broken: Boolean(!seen.shown || (!seen.text && !seen.canvas && !seen.pictures) || flat || page.errors.length), report: `page ${target} in a browser: ${problems.length ? problems.join('; ') : 'loaded without errors'}; ${what}`, shots: saved.map((f) => path.join(root, f)) }
     }, { signal })
   } catch (e) {
     if (signal?.aborted) throw e
-    if (e.stuck) return { ok: false, report: `page ${target} in a browser: ${e.message}` } // the page's fault, not the browser's
+    if (e.stuck) return { ok: false, broken: true, report: `page ${target} in a browser: ${e.message}` } // the page's fault, not the browser's
     return unchecked(e.message)
   }
+}
+
+// How many of the page's big canvases (a tenth of the window or more) show a single flat color: drawn
+// on by nothing (a game whose loop updates but never renders). Screenshots, not the canvas's own
+// pixels (a WebGL canvas reads back empty), with everything but canvases hidden for the shot.
+async function flatCanvases(page) {
+  const rects = await page.run(`[...document.querySelectorAll('canvas')].map((e) => e.getBoundingClientRect()).filter((r) => r.width * r.height >= innerWidth * innerHeight / 10).map((r) => ({ x: Math.max(0, r.x), y: Math.max(0, r.y), width: Math.min(r.width, innerWidth - Math.max(0, r.x)), height: Math.min(r.height, innerHeight - Math.max(0, r.y)) })).filter((r) => r.width > 0 && r.height > 0)`)
+  if (!rects?.length) return 0
+  await page.run(`(() => { const st = document.createElement('style'); st.id = '__hc_flat'; st.textContent = 'body *:not(canvas) { visibility: hidden !important } canvas { visibility: visible !important }'; document.head.append(st) })()`)
+  let flat = 0
+  try {
+    for (const r of rects) {
+      const { data } = await page.send('Page.captureScreenshot', { format: 'png', clip: { ...r, scale: Math.min(1, 200 / r.width) } })
+      const px = pngPixels(Buffer.from(data, 'base64'))
+      const count = new Map()
+      for (let i = 0; i < px.length; i += 4) {
+        const k = (px[i] << 16) | (px[i + 1] << 8) | px[i + 2]
+        count.set(k, (count.get(k) ?? 0) + 1)
+      }
+      if (Math.max(...count.values()) >= (px.length / 4) * 0.995) flat++
+    }
+  } finally {
+    await page.run(`document.getElementById('__hc_flat')?.remove()`).catch(() => {})
+  }
+  return flat
+}
+
+// A PNG's pixels as RGBA bytes (8-bit, not interlaced: what Chrome's screenshots are)
+export function pngPixels(buf) {
+  let w = 0, h = 0, type = 0
+  const idat = []
+  for (let at = 8; at < buf.length; ) {
+    const len = buf.readUInt32BE(at)
+    const kind = buf.toString('latin1', at + 4, at + 8)
+    const body = buf.subarray(at + 8, at + 8 + len)
+    if (kind === 'IHDR') {
+      ;[w, h, type] = [body.readUInt32BE(0), body.readUInt32BE(4), body[9]]
+      if (body[8] !== 8 || body[12] !== 0 || ![2, 6].includes(type)) throw new Error('a PNG kind not read here')
+    } else if (kind === 'IDAT') idat.push(body)
+    at += 12 + len
+  }
+  const bpp = type === 6 ? 4 : 3
+  const raw = zlib.inflateSync(Buffer.concat(idat))
+  const stride = w * bpp
+  const out = Buffer.alloc(w * h * 4)
+  let prev = Buffer.alloc(stride)
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)]
+    const line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)))
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? line[i - bpp] : 0, b = prev[i], c = i >= bpp ? prev[i - bpp] : 0
+      const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c)
+      line[i] = (line[i] + [0, a, b, (a + b) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f]) & 255
+    }
+    for (let x = 0; x < w; x++) {
+      for (let k = 0; k < 3; k++) out[(y * w + x) * 4 + k] = line[x * bpp + k]
+      out[(y * w + x) * 4 + 3] = bpp === 4 ? line[x * bpp + 3] : 255
+    }
+    prev = line
+  }
+  return out
 }
 
 // What a page looks like, measured in the browser, for what can be told for sure: text whose contrast
@@ -408,5 +472,5 @@ function staticPage(root, target, why = 'no browser here') {
     const f = path.resolve(dir, u.replace(/^\//, ''))
     if (fs.existsSync(f)) parse(fs.readFileSync(f, 'utf8'), u, /import|export/.test(fs.readFileSync(f, 'utf8')))
   }
-  return { ok: !problems.length, report: `page ${target}, checked without a browser (${why}): ${problems.length ? problems.join('; ') : 'the files it uses are there and its scripts parse'}` }
+  return { ok: !problems.length, broken: problems.length > 0, report: `page ${target}, checked without a browser (${why}): ${problems.length ? problems.join('; ') : 'the files it uses are there and its scripts parse'}` }
 }

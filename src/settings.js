@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import os from 'node:os'
-import { HOME, saveConfig, readJson, writeJson, byName, takeIn, whatOf, VERSION, speedOf, SPEED_LIMITS, HELPER_JOBS, helpersOf } from './config.js'
+import { HOME, saveConfig, readJson, writeJson, byName, takeIn, whatOf, VERSION, speedOf, SPEED_LIMITS, HELPER_JOBS, helpersOf, testWaitOf, fitTimes } from './config.js'
 import { newer } from './update.js'
 import { DEFAULT_SERVERS, mcpAuth, serverName } from './mcp.js'
 import { sections, BUILTIN_PROMPTS, prompt, reloadPrompts } from './prompts.js'
@@ -271,7 +271,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     if (gone) saveTests()
   }
   // How long a model test waits for its answer (cfg.testTimeout, seconds; the settings page sets it).
-  const testWait = () => (Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10) * 1000
+  const testWait = () => testWaitOf(cfg) * 1000
   const noAnswer = () => `no answer within ${testWait() / 1000} seconds`
   // A provider's models tested a few at a time (more for a long list: startRun)
   const AT_ONCE = 4
@@ -465,10 +465,10 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     rankings: ranked && { fetched: ranked.fetched, source: ranked.source },
     rotation: (({ then, ...opts }) => opts)(rotationOf(cfg)),
     helpers: helpersOf(cfg.helpers), // { 'provider/model': [jobs] }
-    helperOrder: cfg.helperOrder === 'provider' || cfg.helperOrder === 'score' ? cfg.helperOrder : 'own', // the order helpers are picked in: your list's, your provider ranking's, or by their rankings
+    helperOrder: cfg.helperOrder === 'provider' || cfg.helperOrder === 'own' ? cfg.helperOrder : 'score', // the order helpers are picked in: by their rankings (the default), your list's, or your provider ranking's
     helpersAuto: cfg.helpersAuto === true, // picked for you (pickHelpers), again whenever what's known changes: the models #1 may start as helpers, and what you picked each for
     jobs: HELPER_JOBS,
-    settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), logs: kindsOn(cfg), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg), testTimeout: Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : 10, ...speedOf(cfg) },
+    settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), logs: kindsOn(cfg), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg), testTimeout: testWaitOf(cfg), ...speedOf(cfg) },
     logs: { runs: tilde(path.join(LOGS, 'runs')), requests: tilde(REQUESTS) },
     voice: cfg.voice ? JSON.stringify(cfg.voice, null, 2) : '',
     statusBar: cfg.statusBar === undefined ? null : cfg.statusBar, // false (off), a list of lines, or null (default)
@@ -644,14 +644,14 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       save('setting:helpers')
       return { helpers: helpersOf(cfg.helpers), helpersAuto: false } // only these: the page saves a click at once, and the whole state of a long list takes seconds
     },
-    // the order helpers are picked in: 'own' (your list's), 'provider' (your provider ranking's, each
-    // provider's in your list's order; rank: the ranking as the page has it, kept for HeartCode to use)
-    // or 'score' (best placed in LMArena's rankings first)
+    // the order helpers are picked in: 'score' (the default: best placed in LMArena's rankings first),
+    // 'own' (your list's) or 'provider' (your provider ranking's, each provider's in your list's order;
+    // rank: the ranking as the page has it, kept for HeartCode to use)
     'POST /api/helper-order': ({ by, rank }) => {
-      cfg.helperOrder = by === 'provider' || by === 'score' ? by : undefined
+      cfg.helperOrder = by === 'provider' || by === 'own' ? by : undefined
       cfg.providerRank = cfg.helperOrder === 'provider' ? (Array.isArray(rank) ? rank.filter((x) => typeof x === 'string') : readJson(PREFS, {}).rank) : undefined
       save('setting:helperOrder')
-      return { helperOrder: cfg.helperOrder ?? 'own' }
+      return { helperOrder: cfg.helperOrder ?? 'score' }
     },
     // the model list, in order (#1 is the model), and when to go on to the next
     'POST /api/order': ({ list, on, retries, next }) => {
@@ -794,7 +794,9 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       if (name in SPEED_LIMITS && !(Number.isInteger(value) && value >= SPEED_LIMITS[name][0] && value <= SPEED_LIMITS[name][1])) throw new Error(`${name}: a whole number, ${SPEED_LIMITS[name][0]} to ${SPEED_LIMITS[name][1]}`)
       if (!['permissions', 'effort', 'theme', 'context', 'logDetail', 'logDays', 'testTimeout', ...Object.keys(SPEED_LIMITS), ...Object.keys(TOGGLES)].includes(name)) throw new Error(`no setting "${name}"`)
       cfg[name] = name === 'effort' && value === 'default' ? undefined : name === 'context' ? (value === null ? undefined : Number(value)) : value
+      const notes = ['replyStart', 'replyIdle', 'testTimeout'].includes(name) ? fitTimes(cfg, name) : [] // the others moved to fit, said on the page
       save(`setting:${name}`)
+      if (notes.length) return { ...state(), notes }
       if (name === 'logDetail') useRequestLog(cfg) // from the next request (a running HeartCode takes it in too: applySettings)
       if (name === 'logDays') pruneLogs(value) // older ones go now
       return state()

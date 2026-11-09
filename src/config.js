@@ -27,6 +27,35 @@ export function speedOf(cfg) {
   const sec = (v, d, min, max) => (Number.isInteger(Number(v)) && Number(v) >= min && Number(v) <= max ? Number(v) : d)
   return { replyStart: sec(cfg.replyStart, 60, 5, 600), replyIdle: sec(cfg.replyIdle, 150, 10, 1800) }
 }
+// A model test's wait (seconds): the one set, else Give up's (a test that waits less would call a model
+// broken that a task still waits for)
+export const testWaitOf = (cfg) => (Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : speedOf(cfg).replyStart)
+
+// The time limits that depend on one another, kept from contradicting: a test waits at least as long as
+// a model gets to start answering (Tests wait ≥ Give up), and a reply that has started may go quiet at
+// least that long too (Stalled ≥ Give up: a pause mid-reply has the same causes as a slow start, a
+// queue or thinking that isn't sent). The one just set (changed) stays; the other moves to fit. Returns
+// what moved and why, for the page to say.
+export function fitTimes(cfg, changed) {
+  const notes = []
+  const { replyStart: start, replyIdle: idle } = speedOf(cfg)
+  const test = Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : null
+  const [sLo] = SPEED_LIMITS.replyStart
+  if (changed === 'replyStart') {
+    if (test !== null && test < start) (cfg.testTimeout = start), notes.push({ name: 'testTimeout', text: `Tests wait raised to ${start} s too: a test should wait at least as long as Give up, or it calls a model broken that real work would still wait for` })
+    if (idle < start) (cfg.replyIdle = start), notes.push({ name: 'replyIdle', text: `Stalled raised to ${start} s too: a reply that has started may go quiet at least as long as a model gets to start` })
+  } else if (changed === 'replyIdle') {
+    if (start > idle) (cfg.replyStart = Math.max(sLo, idle)), notes.push({ name: 'replyStart', text: `Give up lowered to ${cfg.replyStart} s too: a model can't get longer to start than a started reply may go quiet` })
+  } else if (changed === 'testTimeout' && test !== null && test < start) {
+    if (test >= sLo) (cfg.replyStart = test), notes.push({ name: 'replyStart', text: `Give up lowered to ${test} s too: real work shouldn't wait longer for a model than its test does` })
+    else {
+      Object.assign(cfg, { testTimeout: sLo, replyStart: sLo })
+      notes.push({ name: 'testTimeout', text: `Tests wait set to ${sLo} s: the shortest Give up can be, and a test must wait at least as long` }, { name: 'replyStart', text: `Give up lowered to ${sLo} s too: real work shouldn't wait longer for a model than its test does` })
+    }
+  }
+  return notes
+}
+
 // What a helper can be picked for (Your models' pills): [its label there, what #1 is told it's good at,
 // what the pill covers (its tooltip)]
 export const HELPER_JOBS = {

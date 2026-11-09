@@ -11,6 +11,7 @@ import path from 'node:path'
 import { HOME, readJson } from './config.js'
 import { runCommand } from './tools.js'
 import { log } from './log.js'
+import { onPath } from './spawn.js'
 
 const has = (root, f) => fs.existsSync(path.join(root, f))
 const read = (root, f) => {
@@ -20,9 +21,10 @@ const read = (root, f) => {
     return ''
   }
 }
-const onPath = (cmd) => (process.env.PATH ?? '').split(path.delimiter).some((d) => d && fs.existsSync(path.join(d, cmd)))
-const local = (root, cmd) => (has(root, `node_modules/.bin/${cmd}`) ? path.join(root, 'node_modules/.bin', cmd) : null)
-const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
+const WIN = process.platform === 'win32'
+const local = (root, cmd) => ((cmd = WIN ? `${cmd}.cmd` : cmd), has(root, `node_modules/.bin/${cmd}`) ? path.join(root, 'node_modules/.bin', cmd) : null) // npm's .cmd on Windows
+// a path quoted for the shell the command runs in: cmd.exe on Windows (double quotes), sh elsewhere
+const q = (s) => (WIN ? `"${String(s).replace(/"/g, '""')}"` : `'${String(s).replace(/'/g, `'\\''`)}'`)
 
 // [file pattern, (root) → the command (the file's path is added at the end), or null]
 const BUILTIN = [

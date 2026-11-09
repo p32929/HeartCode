@@ -109,11 +109,28 @@ setTheme()
 
 // keybindings.json: { "alt+g": "cycle_permissions", "alt+r": "/rewind", "shift+tab": "none" }.
 // Actions: stop, send_first, send_all, queue_mode, cycle_permissions, newline, clear_input, scroll_up, scroll_down (a page),
-// scroll_line_up, scroll_line_down (3 lines), scroll_top, scroll_bottom, voice, toggle_thinking, background_log, new_tab,
+// scroll_line_up, scroll_line_down (3 lines), scroll_top, scroll_bottom, voice, toggle_thinking, show_plan, background_log, new_tab,
 // close_tab, next_tab, prev_tab, tab_1…tab_9, none (turns a
 // built-in key off); anything else is sent as typed (a /command or a message). Ctrl+C stays Ctrl+C.
 // A key as people read it ("alt+shift+down" → "Alt+Shift+↓")
 const KEY_NAMES = { pageup: 'PgUp', pagedown: 'PgDn', up: '↑', down: '↓', left: '←', right: '→', ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift' }
+// A text's last n rows at width w (its lines' spaces squeezed, long ones wrapped at spaces), the
+// first starting with … when there was more before it: thinking shown in two rows, however long.
+export function lastRows(text, w, n) {
+  w = Math.max(4, w - 2) // room for the "… " in front
+  const rows = String(text).split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).flatMap((l) => l.match(new RegExp(`.{1,${w}}(\\s|$)|.{${w}}`, 'g')) ?? [l]).map((l) => l.trim()).filter(Boolean)
+  const out = rows.slice(-n)
+  if (rows.length > n) out[0] = `… ${out[0]}`
+  return out
+}
+// The steps of a plan to show when only n fit: what's being done or stuck first, then what's next,
+// then the last ones done; in the plan's order. The rest: a count, and the key that shows all of it.
+export function planPick(todos, n = 3) {
+  const rank = { in_progress: 0, stuck: 0, pending: 1, completed: 2 }
+  const order = todos.map((t, i) => [t, i]).sort((a, b) => rank[a[0].status] - rank[b[0].status] || (a[0].status === 'completed' ? b[1] - a[1] : a[1] - b[1]))
+  const keep = new Set(order.slice(0, n).map(([, i]) => i))
+  return { shown: todos.filter((_, i) => keep.has(i)), hidden: todos.length - keep.size }
+}
 export const prettyKey = (k) => k.split('+').map((p) => KEY_NAMES[p] ?? (p.length === 1 ? p.toUpperCase() : p[0].toUpperCase() + p.slice(1))).join('+')
 const CONTROL_KEYS = { '\x1c': 'ctrl+\\', '\x1d': 'ctrl+]', '\x1e': 'ctrl+^', '\x1f': 'ctrl+_' } // no name from readline
 export const keyId = (key, s = '') => CONTROL_KEYS[key.sequence ?? s] ?? [key.ctrl && 'ctrl', key.meta && 'alt', key.shift && 'shift', key.name ?? s].filter(Boolean).join('+').toLowerCase()
@@ -125,9 +142,10 @@ export const keyId = (key, s = '') => CONTROL_KEYS[key.sequence ?? s] ?? [key.ct
 // Alt+A all of them (as one message); Alt+M switches what goes when an answer is done (all or the
 // next one). /voice records (Space in an empty box, or a key in keybindings.json); Alt+T, Alt+W,
 // Alt+N/P, Alt+1…9: tabs; Shift+↑↓ and Alt+↑↓ scroll the conversation (as PgUp/PgDn and the mouse
-// wheel do), Alt+Shift+↑↓ to its top and bottom; Alt+O: all of the model's thinking, or its last lines.
+// wheel do), Alt+Shift+↑↓ to its top and bottom; Alt+O: all of the model's thinking, or its last lines;
+// Alt+L: the whole plan.
 // keybindings.json can move any of them.
-export const DEFAULT_KEYS = { 'alt+o': 'toggle_thinking', 'alt+b': 'background_log', 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+shift+up': 'scroll_top', 'alt+shift+down': 'scroll_bottom', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
+export const DEFAULT_KEYS = { 'alt+o': 'toggle_thinking', 'alt+l': 'show_plan', 'alt+b': 'background_log', 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+shift+up': 'scroll_top', 'alt+shift+down': 'scroll_bottom', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
 export function loadKeys(file = path.join(HOME, 'keybindings.json')) {
   let raw = {}
   try {
@@ -967,8 +985,8 @@ export class UI {
     }
   }
 
-  // The plan (todo list) while it works, kept in sight under the spinner: how much is done, what's
-  // being done, what's left. Long ones: the finished folded into a count, the open ones up to 8.
+  // The plan (todo list) while it works, kept in sight under the spinner: how much is done, and three
+  // of its steps (what's being done, then what's next); the rest on a key (show_plan).
   #todoLines(cols) {
     const todos = this.todos?.() ?? []
     const open = todos.filter((t) => t.status !== 'completed')
@@ -977,13 +995,22 @@ export class UI {
     const mark = { pending: c.muted('☐'), in_progress: c.info('◐'), completed: c.faint('☑'), stuck: c.warn('⚠') }
     const by = (t) => (t.by ? c.faint(' · ') + (t.status === 'in_progress' ? c.info(t.by) : c.faint(t.by)) : '') // the model a part was given to
     const line = (t) => fit(`    ${mark[t.status]} ${t.status === 'in_progress' ? c.info(c.bold(t.content)) : t.status === 'completed' ? c.faint(t.content) : t.status === 'stuck' ? c.warn(t.content) : c.muted(t.content)}${by(t)}`, cols)
-    const shown = todos.length <= 8 ? todos : open.slice(0, 7)
+    const { shown, hidden } = planPick(todos)
     return [
       fit(`  ${c.muted('Plan')} ${c.faint(`· ${done} of ${todos.length} done`)}`, cols),
-      ...(todos.length > 8 && done ? [fit(`    ${c.faint(`☑ ${done} done`)}`, cols)] : []),
       ...shown.map(line),
-      ...(open.length > shown.filter((t) => t.status !== 'completed').length ? [fit(`    ${c.faint(`… ${open.length - 7} more`)}`, cols)] : []),
+      ...(hidden ? [fit(`    ${c.faint(`… ${hidden} more${this.keyFor('show_plan') ? ` · ${this.keyFor('show_plan')} shows all of it` : ''}`)}`, cols)] : []),
     ]
+  }
+
+  // The whole plan in a box (show_plan, /todos): every step and its state; the key closes it again.
+  showPlan() {
+    const todos = this.todos?.() ?? []
+    if (!todos.length) return this.notice('No plan right now: the model writes one for a task of a few steps', 2500)
+    const mark = { pending: '☐', in_progress: '◐', completed: '☑', stuck: '⚠' }
+    const paint = { pending: c.muted, in_progress: (x) => c.info(c.bold(x)), completed: c.faint, stuck: c.warn }
+    const done = todos.filter((t) => t.status === 'completed').length
+    this.showText(`Plan · ${done} of ${todos.length} done`, todos.map((t) => paint[t.status](`${mark[t.status]} ${t.content}`) + (t.status === 'stuck' && t.why ? c.warn(`: ${t.why}`) : '') + (t.by ? c.faint(` · ${t.by}`) : '')).join('\n'), 'show_plan')
   }
 
   // The last lines of this task's output, at most n rows of w (what a question in the middle of the work
@@ -1029,8 +1056,8 @@ export class UI {
     const summary = () => {
       this.thinkTail = ''
       if (thought.trim() && !think) {
-        // what it thought stays in the conversation: its last two lines (all of it: Alt+O)
-        const last = thought.split('\n').map((l) => l.trim()).filter(Boolean).slice(-2)
+        // what it thought stays in the conversation: its last two rows on this screen (all of it: Alt+O)
+        const last = lastRows(thought, Math.max(20, (this.out.columns || 80) - 4), 2)
         this.print(c.faint(c.italic(`✻ ${who ? `${who} ` : ''}thought for ${secs()}${this.keyFor('toggle_thinking') ? ` · ${this.keyFor('toggle_thinking')} shows all of it` : ''}`)))
         this.print(c.think(c.italic(last.map((l) => `  ${l}`).join('\n'))))
         this.lastThought = { who, text: thought } // Alt+O shows it, now that it's over (showLastThought)
@@ -1344,9 +1371,8 @@ export class UI {
   }
 
   // The conversation as screen rows (wrapped to the width; cached per line).
-  // While it works, the conversation shows where too: the step running (its ● spins until its
-  // result), else (waiting on the model between steps) a line of its own at the end, as the
-  // spinner under the conversation says it.
+  // While it works, the step running spins its ● until its result; what it waits on between steps is
+  // said once, by the spinner under the conversation.
   #rows(cols) {
     if (this.wrapCols !== cols) [this.wrapped, this.wrapCols] = [[], cols]
     const spin = this.timer && !this.asking ? c.brand(FRAMES[this.frame % FRAMES.length]) : null
@@ -1360,7 +1386,6 @@ export class UI {
       if (!w || w.src !== line) this.wrapped[i] = { src: line, rows: wrapHang(line, cols) } // at spaces, wrapped rows under the text
       out.push(...this.wrapped[i].rows)
     })
-    if (spin && live === -1 && !this.replying && this.statusText) out.push(...wrapHang(`${spin} ${c.muted(this.statusText)}`, cols))
     return out
   }
 
@@ -1395,11 +1420,8 @@ export class UI {
       const timer = this.busySince ? [this.beforeRetry !== undefined && 'no answer yet', `${short(this.worked())} in all`, 'Esc twice to stop', this.thinkTail && this.keyFor('toggle_thinking') && `${this.keyFor('toggle_thinking')} shows all thinking`].filter(Boolean).join(' · ') : ''
       if (this.thinkTail) {
         // the thinking's last two lines (long ones wrapped), dim, changing as it comes
-        const w = Math.max(20, cols - 6)
-        const lines = this.thinkTail.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).flatMap((l) => l.match(new RegExp(`.{1,${w}}(\\s|$)|.{${w}}`, 'g')) ?? [l]).map((l) => l.trim()).filter(Boolean)
-        for (const l of lines.slice(-2)) bottom.push(fit(`  ${c.think(c.italic(l))}`, cols))
+        for (const l of lastRows(this.thinkTail, Math.max(20, cols - 6), 2)) bottom.push(fit(`  ${c.think(c.italic(l))}`, cols))
       }
-      this.statusText = status // the same, at the end of the conversation (#rows)
       bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(status)}`, cols))
       if (timer) bottom.push(...wrapParts(timer, cols - 2).map((r) => fit(`  ${c.faint(r)}`, cols)))
       // helpers at work (agent.js keeps them in this.helpers: label → what it's doing), then the plan
@@ -1796,6 +1818,8 @@ export class UI {
         return this.dictateIn()
       case 'background_log':
         return this.onPanel?.()
+      case 'show_plan':
+        return this.showPlan()
       case 'stop':
         return this.asking ? undefined : this.onEscape?.()
       case 'cycle_permissions':
@@ -2375,16 +2399,31 @@ export class UI {
     this.write(s + '\n')
   }
   // who: the model that made this call (named after it)
+  // The same call again right after it (nothing printed between but its result, as a model polling a
+  // page does): the line it has counts it (×2, ×3…) instead of another of the same, and its result
+  // makes way for the new one's.
   step(name, detail = '', who = '') {
+    const line = `${c.accent('●')} ${c.accent(c.bold(name))} ${c.info(detail)}${who ? c.faint(` · ${who}`) : ''}`
+    const was = this.lastStep
+    const end = this.log.length - 1 // the line being written (empty, after a whole line)
+    if (this.full && was?.line === line && was.log === this.log && this.log[was.at] === was.shown && !plainOf(this.log[end]) && (end === was.at + 1 || end === was.after)) {
+      const open = this.log[end]
+      this.log.length = was.at + 1 // its result out: the new one's comes
+      this.log.push(open)
+      was.shown = `${line}${c.faint(` ×${++was.n}`)}`
+      this.log[was.at] = this.liveStep = was.shown // its ● spins until its result (#rows)
+      return this.render()
+    }
     if (this.afterBlock) this.gap()
     this.afterBlock = false
-    const line = `${c.accent('●')} ${c.accent(c.bold(name))} ${c.info(detail)}${who ? c.faint(` · ${who}`) : ''}`
     this.print(line)
     this.liveStep = line // its ● spins until its result (#rows)
+    this.lastStep = { line, shown: line, n: 1, log: this.log, at: this.log.length - 2 }
   }
   result(text) {
     this.liveStep = null
     this.print(`  ${c.ghost('⎿')} ${c.faint(text)}`)
+    if (this.lastStep?.log === this.log && this.lastStep.at === this.log.length - 3) this.lastStep.after = this.log.length - 1 // its step's, right under it
   }
   warn(text) {
     log('warn', text)

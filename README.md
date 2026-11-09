@@ -27,7 +27,11 @@ has none, so there's nothing for anyone to poison.
   down or fails, the next one answers and the work goes on. A ↻ in the status bar shows it.
 - When a conversation gets too long for a model, it moves to one of your models with more room
   instead of summarizing things away.
-- When a model goes round in circles, the next one takes over. Only you stop it (Esc).
+- When a model goes round in circles, another takes over. Only you stop it (Esc).
+- A model that shows it can't do the task (stuck, going round, or saying "done" while the work is
+  still broken) hands it to the best-ranked of your models it hasn't tried (LMArena's rankings),
+  not just the next in your list. Your list still decides who starts, and who answers when one is
+  down.
 - Models are told to say when they're stuck, and believed: first a different approach, then a
   second opinion from another of your models, then the next model takes over (not another version
   of the same one). The same happens when a model says "I can't" without trying its tools, or
@@ -38,6 +42,9 @@ has none, so there's nothing for anyone to poison.
   makes a plan before it changes anything.
 - It runs and tests what it changed before it says "done", and another of your models checks the
   result against what you asked.
+- A web page or game it changed, HeartCode opens in a real browser itself before it accepts "done":
+  errors, a blank page or a canvas that draws nothing send it back to work, whatever the model's own
+  checks said.
 - It writes the least code that works and changes only what the task needs.
 
 **It learns, per project**
@@ -74,12 +81,16 @@ has none, so there's nothing for anyone to poison.
 2. **It reads up** on whatever it's about to use, instead of trusting its memory.
 3. **It makes a plan**: a todo list you can see. Its first change of each message waits for one.
 4. **It does the work**: reading files, running commands, editing.
-5. **It may split the work.** Your #1 model can hand a job to a helper, or run separate parts at
-   the same time, each on its own files. The model decides. Pick your helpers yourself (below), or
-   let HeartCode pick them; without any, it can use any of your models, in your order. Every step
-   on screen names the model doing it.
+5. **It splits the work, if you want.** When the plan has several steps, HeartCode asks: several
+   agents at once, or one? With several, steps that stand alone run at the same time, each on its
+   own files and on the model best at it. A step no model is sure to do well is done by two of your
+   best-ranked models, each in a copy of the project, and the better result is kept (HeartCode checks
+   both, another model picks). Nobody to answer (`heart -p`): several. Pick your helpers yourself
+   (below), or let HeartCode pick them; without any, it can use any of your models. Every step on
+   screen names the model doing it.
 6. **It checks before it says it's done**: it must have tested what it changed, finished its todo
-   list and made the files it names. Then your next models say yes or no (also when it changed no
+   list and made the files it names. A web page it changed, HeartCode opens in a browser itself.
+   Then your next models say yes or no (also when it changed no
    files but ran commands or a browser); a no sends it back.
 7. **It tidies up** in the background: saves notes for next time, removes throwaway files.
 
@@ -141,14 +152,14 @@ On **Models → List**:
 2. **Drag rows** to fine-tune. #1 is the one HeartCode uses; the rest are its fallbacks, in order.
 3. **Test** (optional): **Test all** sends each model a short message and shows which answer and
    how fast (*Works?*). Sort by it to put the fastest first.
-4. **Filter** (optional): by name, provider, test result, context, abilities, free or helpers.
+4. **Filter** (optional): by name, provider, test result, context, abilities or free.
    **Use only these** keeps just the ones you see, in that order.
 5. **Helpers** (optional): the models #1 can hand parts of a task to. In the *Helper* column, switch
    a model on and pick what it's good at: **UI & visuals**, **Code & logic**, **Big & hard**,
    **Quick & cheap** (hover an icon to see what it covers). **Suggest helpers** proposes them from
    the models that passed **Test all** and the rankings; or set *Helpers* (at the top) to
-   **Automatic**. *Used*: which helper #1 takes first: in your order, by your provider ranking, or
-   **by score** (best placed in LMArena's rankings first).
+   **Automatic**. *Used*: which helper #1 takes first: **by score** (the default: best placed in
+   LMArena's rankings first), in your order, or by your provider ranking.
 
 **Update model info** fetches what each model can do and costs (from models.dev) and its places in
 LMArena's public rankings for coding, web apps and vision, as columns to sort by. A model *not
@@ -222,7 +233,9 @@ Ask it to read, change, run and fix things in your project, like any coding agen
 - `Esc` twice stops it; `Esc` also closes a dialog.
 - While it works, `Enter` queues a message. `Esc` (or `↑`) takes queued messages back into the box
   to change or drop, without stopping the work.
-- `Shift+Enter` (or `Option+Enter`) adds a new line. `Alt+O` shows all of the model's thinking.
+- `Shift+Enter` (or `Option+Enter`) adds a new line. `Alt+O` shows all of the model's thinking (two lines
+  of it show otherwise), `Alt+L` the whole plan (three of its steps show while it works). The same
+  call made again and again shows once, with a count (×4).
 - While it works, commands that don't change the conversation (`/help`, `/cost`, `/diff`,
   `/settings`…) run at once; the ones that do (`/compact`, `/rewind`…) wait until it's done.
 
