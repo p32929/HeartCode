@@ -45,7 +45,7 @@ ${c.bold('usage')}
   heart providers                    list added providers
   heart models [filter]              what -m takes, one per line: "auto" (the list), then each model
                                      as provider/model, #1 first
-  heart models --all [filter]        every provider's models (provider/model)
+  heart models --all [filter]        every switched-on provider's models (provider/model)
   heart models --json                as JSON (with --all too), for other programs
   heart config                       show the config file
   heart settings                     change providers, models and settings in the browser
@@ -1129,16 +1129,17 @@ class App {
 
   // `heart models`: what -m takes, one per line (as \`opencode models\`): "auto" (your list: #1, then
   // the next when one fails; also no -m), then your models as provider/model, #1 first. all: every
-  // provider's models (fetched from each; a provider whose list is off: the ones added by name).
+  // switched-on provider's models (fetched from each; a provider whose list is off: the ones added by
+  // name). A provider switched off isn't listed at all: its models aren't offered anywhere.
   // json: one JSON object on stdout, for other programs:
   //   { "models": [{ "id": "auto", "fallbacks": true }, { "id": "groq/openai/gpt-oss-120b", "provider", "model", "place": 1 }, …],
-  //     "providers": [{ "name", "baseUrl", "list": true, "off"?: true, "models": ["provider/model", …], "error"? }] }   (--all)
+  //     "providers": [{ "name", "baseUrl", "list": true, "models": ["provider/model", …], "error"? }] }   (--all)
   async listModels(filter = '', { all = false, json = false } = {}) {
     const { ui, cfg } = this
     const match = (id) => id.toLowerCase().includes(filter.toLowerCase())
     const mine = this.myModels().map((t, i) => ({ id: `${t.provider}/${t.model}`, provider: t.provider, model: t.model, place: i + 1 }))
-    const providers = !all ? [] : await Promise.all(Object.entries(cfg.providers).map(async ([name, p]) => {
-      const out = { name, baseUrl: p.baseUrl, list: p.list !== false, ...(p.off && { off: true }), models: [] }
+    const providers = !all ? [] : await Promise.all(Object.entries(cfg.providers).filter(([, p]) => !p.off).map(async ([name, p]) => {
+      const out = { name, baseUrl: p.baseUrl, list: p.list !== false, models: [] }
       if (out.list) {
         try {
           out.models = await new Client({ baseUrl: p.baseUrl, apiKey: p.apiKey }).listModels()
