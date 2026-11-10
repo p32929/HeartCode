@@ -25,11 +25,11 @@ const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director',
 // sending for it is stalled.
 export function speedOf(cfg) {
   const sec = (v, d, min, max) => (Number.isInteger(Number(v)) && Number(v) >= min && Number(v) <= max ? Number(v) : d)
-  return { replyStart: sec(cfg.replyStart, 60, 5, 600), replyIdle: sec(cfg.replyIdle, 150, 10, 1800) }
+  return { replyStart: sec(cfg.replyStart, 45, 5, 600), replyIdle: sec(cfg.replyIdle, 60, 10, 1800) }
 }
-// A model test's wait (seconds): the one set, else Give up's (a test that waits less would call a model
-// broken that a task still waits for)
-export const testWaitOf = (cfg) => (Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : speedOf(cfg).replyStart)
+// A model test's wait (seconds): the one set, else 60, never less than Give up's (a test that waits less
+// would call a model broken that a task still waits for)
+export const testWaitOf = (cfg) => (Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : Math.max(60, speedOf(cfg).replyStart))
 
 // The time limits that depend on one another, kept from contradicting: a test waits at least as long as
 // a model gets to start answering (Tests wait ≥ Give up), and a reply that has started may go quiet at

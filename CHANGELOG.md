@@ -2,6 +2,15 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.63 (2026-11-10)
+
+- **Time limits set for free models out of the box**: Give up 45 s, Stalled 60 s, Tests wait 60 s
+  (never shorter than Give up), so Test all works without changing anything. Values already saved stay.
+- **`heart models --all`** lists only the providers that are switched on.
+- **README**: the setup as I do it, step by step (add every provider's models, Update model info,
+  Test all, keep the ones that work, sort by coding, save), with what the time limits do; old
+  screenshots taken out for new ones.
+
 ## 0.1.62 (2026-11-10)
 
 - **"Done" is checked, not taken on trust**: a web page or game that was changed is opened in a real

@@ -8,8 +8,7 @@ ones, local ones, several at once.
 **Zero dependencies.** Only Node.js (22 or newer) and HeartCode's own code. No `node_modules`, no
 install scripts. What you install is what you can read.
 
-<!-- image: HeartCode in the terminal, answering a message -->
-![HeartCode in the terminal](https://res.cloudinary.com/m0jnrul4/image/upload/v1793485425/Screenshot_2026-11-01_at_2.23.35_AM.png)
+<!-- SCREENSHOT: HeartCode in the terminal, answering a message -->
 
 ## Why I made it
 
@@ -94,7 +93,10 @@ has none, so there's nothing for anyone to poison.
    files but ran commands or a browser); a no sends it back.
 7. **It tidies up** in the background: saves notes for next time, removes throwaway files.
 
-## How to set it up
+## How I set it up
+
+There are many ways to set HeartCode up. This is how I do it: every free model I can get, tested,
+the ones that work kept, the best at coding first.
 
 ### 1. Install
 
@@ -123,8 +125,92 @@ Type `/settings`. The page opens in your browser. Its link also works from anoth
 network (handy when HeartCode runs on a server over SSH). Only that link works: it has a secret
 key. A running HeartCode picks up your changes right away.
 
-<!-- image: the settings page -->
-![The settings page](https://res.cloudinary.com/m0jnrul4/image/upload/v1793485584/8396c407-f5f8-48af-a242-0b5cbc1c0331.png)
+<!-- SCREENSHOT: the settings page -->
+
+### 4. Add your providers and pick their models
+
+On **Models → Providers**:
+
+1. **+ Add a provider**: its name, base URL and API key. A preset fills in the URL.
+2. **Pick models.** I take all of them: tick the box at the top (*select every model shown*), then
+   **Add N to the list**. Or click a model to add just that one.
+3. Do the same for every provider you have.
+
+<!-- SCREENSHOT: Models → Providers, models ticked, "Add N to the list" -->
+
+### 5. Update model info
+
+On **Models → List**, click **Update model info**. It fetches what each model can do and costs
+(from [models.dev](https://models.dev)) and its places in LMArena's public rankings for coding, web
+apps and vision. The rankings become columns you can sort by (step 9).
+
+### 6. Test all
+
+Click **Test all**. It sends each model a short message and shows in the *Works?* column which ones
+answer, and how fast.
+
+Why: most providers have free and paid models side by side, and not every model they list works
+for your key. The test shows which ones really answer for you. (A paid model charges for its few
+tokens.)
+
+The three time limits next to the buttons are already set the way I use them:
+
+| Setting | Default | What it does |
+|---|---|---|
+| **Give up** | 45 s | How long a model gets to start answering (its first word, thought or tool call). Nothing by then: it counts as failed and the next model takes over. |
+| **Stalled** | 60 s | How long a reply may go quiet once it has started. A model that keeps sending is never cut off; one silent for this long is asked again, or another takes over. |
+| **Tests wait** | 60 s | Only for the Test buttons: how long each model gets to answer the test message. No answer by then shows as *no answer*. |
+
+Give up and Stalled apply to real work too. They're kept consistent: Stalled and Tests wait are
+never shorter than Give up. Change one so they would clash and the other moves with it (the page
+says so). Hover any setting for what it does.
+
+<!-- SCREENSHOT: Test all running, the Works? column filling in -->
+
+### 7. Wait for every test to finish
+
+With many models this takes a while. When it's done, a message says how many work.
+
+### 8. Keep only the ones that work
+
+In the filters above the list, set *Result* to **✓ Works**. Only the models that answered show.
+
+### 9. Sort by coding
+
+Click the **`</>`** column header (*Coding*): the 9th header counting from *#*, right after the
+wrench, bulb and image icons, before the globe and eye. The models best placed in LMArena's coding ranking come first. #1 is
+the one HeartCode uses first, so the best coder answers, and the next ones take over when it fails.
+
+<!-- SCREENSHOT: filtered by Works, sorted by Coding -->
+
+### 10. Save
+
+Click **Use only these N**. HeartCode uses just these models, in the order shown. The others stay
+under Providers, and the sort and filter stay as they are for next time.
+
+### 11. Back to HeartCode
+
+Go back to the terminal. While the settings page is on, HeartCode shows a dialog and waits.
+**Turn off** is selected: press Enter to stop the settings page. Your changes are already in.
+
+<!-- SCREENSHOT: the "settings page is on" dialog -->
+
+### 12. Start coding
+
+Ask it to read, change, run and fix things in your project, like any coding agent.
+
+- `/` shows every command; `heart --help` lists the rest.
+- `Shift+Tab` changes what it may do without asking.
+- `Esc` twice stops it; `Esc` also closes a dialog.
+- While it works, `Enter` queues a message. `Esc` (or `↑`) takes queued messages back into the box
+  to change or drop, without stopping the work.
+- `Shift+Enter` (or `Option+Enter`) adds a new line. `Alt+O` shows all of the model's thinking (two lines
+  of it show otherwise), `Alt+L` the whole plan (three of its steps show while it works). The same
+  call made again and again shows once, with a count (×4).
+- While it works, commands that don't change the conversation (`/help`, `/cost`, `/diff`,
+  `/settings`…) run at once; the ones that do (`/compact`, `/rewind`…) wait until it's done.
+
+## More on the settings page
 
 What's in the sidebar:
 
@@ -134,38 +220,21 @@ What's in the sidebar:
 - **Skills**, **MCP servers** and **System prompt**: what HeartCode can do and what it's told.
 - **Advanced**: *Logs* and *Files* (the rest of the settings, as files).
 
-### 4. Add a provider and pick models
+On **Models → List**, also:
 
-On **Models → Providers**:
+- **Drag rows** to fine-tune the order. **Clear sort** puts the list back in its own order; **Clear
+  all** turns off the filters too.
+- **Filter** by name, provider, test result, context, abilities or free.
+- **Helpers**: the models #1 can hand parts of a task to. In the *Helper* column, switch a model on
+  and pick what it's good at: **UI & visuals**, **Code & logic**, **Big & hard**, **Quick & cheap**
+  (hover an icon to see what it covers). **Suggest helpers** proposes them from the models that
+  passed **Test all** and the rankings; or set *Helpers* (at the top) to **Automatic**. *Used*:
+  which helper #1 takes first: **by score** (the default: best placed in LMArena's rankings first),
+  in your order, or by your provider ranking.
+- A model *not found* in models.dev: **Retry** looks it up again, or **Set up** tells HeartCode what
+  it can do.
 
-![The settings page](https://res.cloudinary.com/m0jnrul4/image/upload/v1793485944/HeartCode-Settings-11-01-2026_02_28_AM_1.png)
-
-1. **Add a provider**: its name, base URL and API key. A preset fills in the URL.
-2. **Pick models**: click a model to add it to your list. I use the free ones.
-
-### 5. Put your list in order
-
-On **Models → List**:
-
-1. **Sort.** Click *Abilities*, then *Context*: the most capable models come first, the biggest
-   context window first among those. Click **Save list**.
-2. **Drag rows** to fine-tune. #1 is the one HeartCode uses; the rest are its fallbacks, in order.
-3. **Test** (optional): **Test all** sends each model a short message and shows which answer and
-   how fast (*Works?*). Sort by it to put the fastest first.
-4. **Filter** (optional): by name, provider, test result, context, abilities or free.
-   **Use only these** keeps just the ones you see, in that order.
-5. **Helpers** (optional): the models #1 can hand parts of a task to. In the *Helper* column, switch
-   a model on and pick what it's good at: **UI & visuals**, **Code & logic**, **Big & hard**,
-   **Quick & cheap** (hover an icon to see what it covers). **Suggest helpers** proposes them from
-   the models that passed **Test all** and the rankings; or set *Helpers* (at the top) to
-   **Automatic**. *Used*: which helper #1 takes first: **by score** (the default: best placed in
-   LMArena's rankings first), in your order, or by your provider ranking.
-
-**Update model info** fetches what each model can do and costs (from models.dev) and its places in
-LMArena's public rankings for coding, web apps and vision, as columns to sort by. A model *not
-found* in models.dev: **Retry** looks it up again, or **Set up** tells HeartCode what it can do.
-
-### 6. Recommended: let it see what it builds
+### Recommended: let it see what it builds
 
 Out of the box, HeartCode reads, writes and runs code. It can't see a page it made or click
 through an app. These three fix that. They're optional, but you'll get much better results with
@@ -207,37 +276,6 @@ hands the looking to the first of your models that can.
   [@BotFather](https://t.me/BotFather), paste its token, press Start in the bot; HeartCode finds your chat.
 - **Advanced → Logs**: switch on only the kinds you need and read them there (by run, searched,
   live). Logs older than 3 days are deleted.
-
-### 7. Back to HeartCode
-
-Go back to the terminal. While the settings page is on, HeartCode shows a dialog and waits. Your
-changes are already in.
-
-### 8. Press Enter to stop the settings page
-
-**Turn off** is selected: press Enter.
-
-<!-- image: the "settings page is on" dialog -->
-![The settings dialog](https://res.cloudinary.com/m0jnrul4/image/upload/v1793486060/Screenshot_2026-11-01_at_2.34.15_AM.png)
-
-### 9. Send "Hi" as a test
-
-Type `Hi` and press Enter. A reply means your model works.
-
-### 10. Start using it
-
-Ask it to read, change, run and fix things in your project, like any coding agent.
-
-- `/` shows every command; `heart --help` lists the rest.
-- `Shift+Tab` changes what it may do without asking.
-- `Esc` twice stops it; `Esc` also closes a dialog.
-- While it works, `Enter` queues a message. `Esc` (or `↑`) takes queued messages back into the box
-  to change or drop, without stopping the work.
-- `Shift+Enter` (or `Option+Enter`) adds a new line. `Alt+O` shows all of the model's thinking (two lines
-  of it show otherwise), `Alt+L` the whole plan (three of its steps show while it works). The same
-  call made again and again shows once, with a count (×4).
-- While it works, commands that don't change the conversation (`/help`, `/cost`, `/diff`,
-  `/settings`…) run at once; the ones that do (`/compact`, `/rewind`…) wait until it's done.
 
 ## Thanks
 
