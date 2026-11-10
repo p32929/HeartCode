@@ -8,7 +8,7 @@ ones, local ones, several at once.
 **Zero dependencies.** Only Node.js (22 or newer) and HeartCode's own code. No `node_modules`, no
 install scripts. What you install is what you can read.
 
-<!-- SCREENSHOT: HeartCode in the terminal, answering a message -->
+<img width="972" height="611" alt="Image" src="https://github.com/user-attachments/assets/4f747a6f-a958-4056-97ee-b6a8b9394b4a" />
 
 ## Why I made it
 
@@ -125,7 +125,7 @@ Type `/settings`. The page opens in your browser. Its link also works from anoth
 network (handy when HeartCode runs on a server over SSH). Only that link works: it has a secret
 key. A running HeartCode picks up your changes right away.
 
-<!-- SCREENSHOT: the settings page -->
+<img width="1920" height="1083" alt="Image" src="https://github.com/user-attachments/assets/b51c5884-1da3-4fc9-9a0c-de119d8bb15e" />
 
 ### 4. Add your providers and pick their models
 
@@ -135,8 +135,6 @@ On **Models → Providers**:
 2. **Pick models.** I take all of them: tick the box at the top (*select every model shown*), then
    **Add N to the list**. Or click a model to add just that one.
 3. Do the same for every provider you have.
-
-<!-- SCREENSHOT: Models → Providers, models ticked, "Add N to the list" -->
 
 ### 5. Update model info
 
@@ -165,8 +163,6 @@ Give up and Stalled apply to real work too. They're kept consistent: Stalled and
 never shorter than Give up. Change one so they would clash and the other moves with it (the page
 says so). Hover any setting for what it does.
 
-<!-- SCREENSHOT: Test all running, the Works? column filling in -->
-
 ### 7. Wait for every test to finish
 
 With many models this takes a while. When it's done, a message says how many work.
@@ -181,8 +177,6 @@ Click the **`</>`** column header (*Coding*): the 9th header counting from *#*, 
 wrench, bulb and image icons, before the globe and eye. The models best placed in LMArena's coding ranking come first. #1 is
 the one HeartCode uses first, so the best coder answers, and the next ones take over when it fails.
 
-<!-- SCREENSHOT: filtered by Works, sorted by Coding -->
-
 ### 10. Save
 
 Click **Use only these N**. HeartCode uses just these models, in the order shown. The others stay
@@ -192,8 +186,6 @@ under Providers, and the sort and filter stay as they are for next time.
 
 Go back to the terminal. While the settings page is on, HeartCode shows a dialog and waits.
 **Turn off** is selected: press Enter to stop the settings page. Your changes are already in.
-
-<!-- SCREENSHOT: the "settings page is on" dialog -->
 
 ### 12. Start coding
 
@@ -209,6 +201,8 @@ Ask it to read, change, run and fix things in your project, like any coding agen
   call made again and again shows once, with a count (×4).
 - While it works, commands that don't change the conversation (`/help`, `/cost`, `/diff`,
   `/settings`…) run at once; the ones that do (`/compact`, `/rewind`…) wait until it's done.
+
+<img width="972" height="611" alt="Image" src="https://github.com/user-attachments/assets/dcf9488a-7cee-4a24-8e3e-c86876d379c9" />
 
 ## More on the settings page
 
