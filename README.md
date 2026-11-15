@@ -31,6 +31,10 @@ has none, so there's nothing for anyone to poison.
   still broken) hands it to the best-ranked of your models it hasn't tried (LMArena's rankings),
   not just the next in your list. Your list still decides who starts, and who answers when one is
   down.
+- It remembers how each model does in real work (tasks finished; handed over, reviews that said
+  no, broken replies). A model that keeps doing well comes first when HeartCode picks by ranking; one
+  that fails most of its work goes last and doesn't start a message while another can (*Settings →
+  Learn from each model's track record*; the Models list shows each one's record on hover).
 - Models are told to say when they're stuck, and believed: first a different approach, then a
   second opinion from another of your models, then the next model takes over (not another version
   of the same one). The same happens when a model says "I can't" without trying its tools, or
@@ -58,6 +62,10 @@ has none, so there's nothing for anyone to poison.
 - What each model can do comes from [models.dev](https://models.dev), so nothing is wasted
   finding out.
 - It sends only what's needed, and never sends `max_tokens`, so no reply is cut short.
+- A short system prompt: who it is, where, and seven core rules. The fuller guidance for each kind
+  of work (finding its way, changing code, proving it works, research, parts on other models) comes
+  once, when the model starts that kind of work. Your other models: the first five are named, the
+  rest are a tool call away.
 
 **And the rest you'd expect**
 - **Set up in a web page** (`/settings`), not by editing config files.
@@ -68,7 +76,8 @@ has none, so there's nothing for anyone to poison.
 - **Telegram messages** when a task finishes, fails or waits for you.
 - **Logs** of exactly what you choose (seven kinds, all off by default), readable on the settings page.
 - **`heart -p`** runs one task without the screen, for other tools and AI agents, like `claude -p`
-  (see [SKILL.md](SKILL.md)).
+  (see [SKILL.md](SKILL.md)). A program can add its own instructions (`--append-system-prompt`) or
+  replace HeartCode's entirely (`--system-prompt`), and choose the run's logs (`--logs`).
 - **`heartcode page index.html`** checks a web page in a real browser (errors, blank page, faint
   text, missing icons) and saves desktop and phone screenshots.
 - **`/context`** shows what fills the context window. `/update` installs a newer version.
@@ -193,7 +202,7 @@ Ask it to read, change, run and fix things in your project, like any coding agen
 
 - `/` shows every command; `heart --help` lists the rest.
 - `Shift+Tab` changes what it may do without asking.
-- `Esc` twice stops it; `Esc` also closes a dialog.
+- `Esc` twice (or `Ctrl+C` twice) stops it; `Esc` also closes a dialog.
 - While it works, `Enter` queues a message. `Esc` (or `↑`) takes queued messages back into the box
   to change or drop, without stopping the work.
 - `Shift+Enter` (or `Option+Enter`) adds a new line. `Alt+O` shows all of the model's thinking (two lines

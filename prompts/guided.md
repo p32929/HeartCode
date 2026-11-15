@@ -161,6 +161,26 @@ Choices for the user: a numbered list (1. 2. 3.). Simple Markdown only (**bold**
 <!-- For an image attached with @file.png. {{task}}: the user's message. -->
 The user attached this image to the task: "{{task}}". Describe everything in it that matters for the task: text, code, errors, layout. Thorough but short.
 
+## not-done-nothing
+
+<!-- The model chose finish, but it said the task needs a change and no file was changed. -->
+Not done: no file has been changed, and the task needs a change. Make the change now (edit or create). If it truly can't be done, say exactly why in your answer.
+
+## not-done-unchecked
+
+<!-- The model chose finish after changing files without running anything since. -->
+Not done: you changed files but haven't run anything since. Run what proves the change works (the test or the program) and read the result.
+
+## unproven-nothing
+
+<!-- Added to the answer when the model finished without changing anything and no other model could take over. -->
+(HeartCode: no file was changed, so this is not done.)
+
+## unproven-unchecked
+
+<!-- Added to the answer when the model finished without running its change and no other model could take over. -->
+(HeartCode: the change was not run or tested.)
+
 ## note-repeated
 
 You just did the same thing twice; again changes nothing. Choose a different step, or finish if the task is done.

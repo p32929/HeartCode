@@ -2,6 +2,50 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.64 (2026-11-15)
+
+- **Models added by name go to their provider, not the list**: on Providers, type one name or
+  several separated by commas; click one to put it in the list.
+- **Custom models stay under their provider** when they're taken off the list (also all at once);
+  ✕ or *Forget them* still forgets them.
+- **`--system-prompt` / `--system-prompt-file`** (with `-p`): another program's prompt instead of
+  HeartCode's, and HeartCode's own workflow off (plan first, "not done" checks, reviews, memory); its
+  tools, permissions and model fallback stay.
+- **`--logs <kinds>`**: a run's logs set by whoever starts it (`none`, `all`, or a list), whatever the
+  settings say.
+- **Each model's track record**: tasks finished, handovers, reviews that said no and broken replies
+  are remembered per model (`~/.heart/records.json`). Where HeartCode picks by ranking (the next model
+  after a failure, a handover, helpers by score), a model that keeps doing well moves up and one that
+  keeps failing moves down; one that failed most of its recent work doesn't start a message while
+  another can. On by default; *Settings → Learn from each model's track record* turns it off. The
+  Models list shows each model's record on hover, and *failing* beside one that fails most.
+- **A much shorter system prompt** (about a third): the core rules only; the fuller guidance for
+  finding the way, changing code, proving it works, research and parts on other models comes with the
+  first tool result of that kind, once per conversation. The model list names five models (the agent
+  tool's model "list" gives the rest), so hundreds of models no longer fill the prompt.
+- **A failing test is fixed in the code it tests** (the test changes only when it's wrong, said why), and
+  tools or language servers are installed into the project, never globally, and only when the task needs them.
+- **A continued tab no longer changes the list's #1**: reopening tabs used to put back the model each
+  tab had when it closed (the #1 of back then) as everyone's #1, and a later save wrote it into the
+  list, a second time. Now only a tab's own /select_model choice comes back, for that tab; and the
+  model list is never saved or read with a model twice.
+- **Guided mode (models without tool calls) checks "done" too**: finishing after trying a change and
+  changing nothing, or without running the change, is sent back (then the next model); with no model
+  left, the answer says it isn't done instead of claiming it.
+- **The review sees the page**: when HeartCode's browser check passes, a reviewer that can see images
+  gets its screenshot, to judge what's on screen against the request and the answer.
+- **Pages are checked headless**: the model is told to use HeartCode's browser check (screenshots to
+  look at), never to open the user's browser or apps.
+- **"Couldn't" in a condition isn't failure**: "without which the test could not pass" no longer
+  counts as the model saying it's stuck.
+- **Save list changes #1 from any window**: a folder's /select_model choice kept a settings page opened
+  from that HeartCode from saving a new #1 (it looked saved, then came back); only a -m run keeps its
+  model off everyone's #1 now.
+- **Models list**: the # column counts 1, 2, 3… down the page whatever the sort; when the order shown
+  isn't the one HeartCode uses, the button says *Save this order* and hovering a number shows its
+  place in the list.
+- **Ctrl+C asks before stopping**, like Esc: the first press asks, the second stops, one more quits.
+
 ## 0.1.63 (2026-11-10)
 
 - **Time limits set for free models out of the box**: Give up 45 s, Stalled 60 s, Tests wait 60 s

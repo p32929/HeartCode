@@ -10,6 +10,7 @@ import { est } from './client.js'
 import { applyEdit, parseBlocks, cleanCode, lostNames, reindent } from './edit.js'
 import { listFiles, namedFiles, readFileTool, searchFiles, numberLines, proposeWrite, runConfirmed, suggestCommands, resolveIn, writeResult, clip, allowed } from './tools.js'
 import { runHooks } from './hooks.js'
+import { record } from './record.js'
 import { foldersOf } from './agent.js'
 import { c } from './ui.js'
 
@@ -239,7 +240,8 @@ class Guided {
     const think = strat.thinking ? 4096 : 0
     const user = `${this.context(est(question) + room + think + tries * 600, skipKey)}\n\n${question}`
     this.instructions ??= userInstructions(this.s.root)
-    const system = [prompt('guided/system'), this.instructions && prompt('agent/instructions', { instructions: this.instructions }), this.s.appendSystem].filter(Boolean).join('\n\n')
+    // --system-prompt: the program's after the step format only (that format is how this mode works at all)
+    const system = (this.s.ownSystem ? [prompt('guided/system'), this.s.ownSystem] : [prompt('guided/system'), this.instructions && prompt('agent/instructions', { instructions: this.instructions }), this.s.appendSystem]).filter(Boolean).join('\n\n')
     const messages = [
       { role: 'system', content: system },
       { role: 'user', content: user },
@@ -283,6 +285,25 @@ class Guided {
       log('guided', `step ${step + 1}: ${action}${auto ? ' (autopilot)' : ''}`, this.st)
       if (auto === 'edit' && this.st.runs) this.st.fixes++
       if (action === 'finish') {
+        // not done, as native mode's checks: it said the task needs a change (or tried one) and changed nothing, or it
+        // changed files and ran nothing since. Told twice; then the next of your models; with none
+        // left, the answer says what's missing (it isn't claimed done)
+        const missing = this.s.ownSystem ? null : (this.st.wantsChange || this.st.editTries) && !this.st.edits ? 'nothing' : this.st.edits && this.st.editsSinceRun ? 'unchecked' : null
+        if (missing && (this.held = (this.held ?? 0) + 1) <= 3) {
+          if (this.held === 3) {
+            const was = this.s.client.model
+            if (this.s.client.moveOn?.(`${was} said it was done, but ${missing === 'nothing' ? 'changed nothing' : "didn't run its change"}`)) {
+              record({ provider: this.s.client.provider, model: was }, 'handover') // its track record (record.js)
+              this.ui.warn(`${was} said it was done, but ${missing === 'nothing' ? 'changed nothing' : "didn't run its change"}; handing over to ${this.s.client.model}`)
+              this.held = 0
+            }
+          }
+          log('guided', `finish held: ${missing}`)
+          this.note('not-done', 'not done yet', prompt(`guided/not-done-${missing}`))
+          this.st.held = true
+          continue
+        }
+        this.unproven = missing
         // the Stop hooks, as in native mode (the main conversation's, not a helper's): one that blocks has it carry on
         const hook = this.s.isSub ? {} : await runHooks(this.s, 'Stop', { stop_hook_active: this.stops++ > 0 }, this.signal)
         if (!hook.block) break
@@ -637,6 +658,8 @@ class Guided {
       return text
     }
     this.ui.stopSpin()
+    // said done without doing it, and no model left to: said so, not left looking done
+    if (this.unproven) return `${res.content}\n\n${prompt(`guided/unproven-${this.unproven}`)}`
     return res.content
   }
 }

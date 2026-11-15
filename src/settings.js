@@ -26,12 +26,13 @@ import { installSkill, findImports } from './importer.js'
 import { capabilities } from './capabilities.js'
 import { connect, sendTelegram, tokenHint, tgReady, EVENTS } from './telegram.js'
 import { searchSettings, testSearxng, ENGINE_NAMES } from './web.js'
+import { recordOf, unreliable, records } from './record.js'
 import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays, logSize, clearLogs, LOG_KINDS, kindsOn, listLogRuns, readLog } from './log.js'
 import { fetch } from './http.js' // not the built-in one: see http.js
 
 const PAGE = new URL('./settings.html', import.meta.url)
 const EFFORTS = ['default', 'low', 'medium', 'high']
-const TOGGLES = { autoCompact: 'compact the conversation when it fills 85% of the model\'s context window', director: 'let the model add skills, MCP servers and change settings when asked', format: "run the project's formatter on every file HeartCode writes", lsp: "show the model a language server's errors after each edit", updateCheck: 'check at every start whether a newer HeartCode is out (shown in the status bar; /update installs it)', mouse: "the wheel scrolls only the conversation (the tabs, the input and the status bar stay put) and dragging copies; Option+drag (Shift+drag elsewhere) is the terminal's own selection. Off: the terminal's own mouse, and its wheel scrolls the whole screen" }
+const TOGGLES = { autoCompact: 'compact the conversation when it fills 85% of the model\'s context window', director: 'let the model add skills, MCP servers and change settings when asked', format: "run the project's formatter on every file HeartCode writes", lsp: "show the model a language server's errors after each edit", updateCheck: 'check at every start whether a newer HeartCode is out (shown in the status bar; /update installs it)', trackRecord: "remember how each model does in real work (tasks finished; handed over, reviews that said no, broken replies): one that keeps doing well comes first where HeartCode picks by ranking (the next model after a failure, a handover, helpers by score), and one that fails most of its work moves down and doesn't start a message while another can. Off: the rankings and your order only", mouse: "the wheel scrolls only the conversation (the tabs, the input and the status bar stay put) and dragging copies; Option+drag (Shift+drag elsewhere) is the terminal's own selection. Off: the terminal's own mouse, and its wheel scrolls the whole screen" }
 // The Logging page's: both off unless switched on; how much of each request ("full" or "summary")
 // The status-bar items the visual editor offers (id must match App.status in bin/heartcode.js).
 // `sample` is shown in the page's live preview.
@@ -453,6 +454,11 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     return true
   }
 
+  // its track record (record.js), rounded: { done, failed, poor } (poor: it doesn't start a message)
+  const recordView = (t) => {
+    const r = recordOf(t)
+    return r && { done: Math.round(r.good), failed: Math.round(r.bad), poor: unreliable(t) }
+  }
   const state = (ranked = loadRankings()) => ({
     providers: Object.entries(byName(cfg.providers))
       .filter(([n]) => n !== cfg.adhoc)
@@ -461,7 +467,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     model: cfg.model ?? null,
     version: VERSION,
     update: (({ latest } = {}) => (cfg.updateCheck !== false && latest && newer(latest, VERSION) ? latest : null))(readJson(path.join(HOME, 'update-check.json'), {})), // the day's answer from npm: no request here
-    order: [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then].map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t), ranks: ranksOf(t.model, ranked) })),
+    order: [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then].map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t), ranks: ranksOf(t.model, ranked), record: records.on ? recordView(t) : null })),
     rankings: ranked && { fetched: ranked.fetched, source: ranked.source },
     rotation: (({ then, ...opts }) => opts)(rotationOf(cfg)),
     helpers: helpersOf(cfg.helpers), // { 'provider/model': [jobs] }
@@ -566,13 +572,21 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       save('provider')
       return state()
     },
-    // A model added by its name (one the provider doesn't list, or its list is off): remembered.
+    // A model added by its name (one the provider doesn't list, or its list is off): remembered under
+    // the provider, not put in the list (clicked there, it is). models: several at once.
     // all: every model added by name forgotten at once
-    'POST /api/provider/added': ({ name, model, remove, all }) => {
+    'POST /api/provider/added': ({ name, model, models, remove, all }) => {
       const p = cfg.providers[name]
       if (!p) throw new Error(`no provider "${name}"`)
       if (all) {
         delete p.models
+        save('provider')
+        return state()
+      }
+      if (Array.isArray(models)) {
+        const add = models.map((m) => String(m ?? '').trim()).filter(Boolean)
+        if (!add.length) throw new Error('a model is needed')
+        p.models = [...new Set([...(p.models ?? []), ...add])]
         save('provider')
         return state()
       }
@@ -618,7 +632,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     'POST /api/model': ({ provider, model }) => {
       if (!cfg.providers[provider]) throw new Error(`no provider "${provider}"`)
       if (!String(model ?? '').trim()) throw new Error('a model is needed')
-      Object.assign(cfg, { provider, model: String(model).trim() })
+      Object.assign(cfg, { provider, model: String(model).trim(), pinned: undefined }) // saved, also from a run given -m (config.js saved)
       if (cfg.rotation?.then) cfg.rotation.then = cfg.rotation.then.filter((t) => t.provider !== provider || t.model !== cfg.model) // #1 now, not also further down
       save('model')
       test([{ provider, model: cfg.model }])
@@ -669,8 +683,15 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       if (!Number.isInteger(opts.retries) || opts.retries < 1 || opts.retries > 20) throw new Error('tries before moving on: 1 to 20')
       if (!ROTATION.next.includes(opts.next)) throw new Error(`a new message starts with: ${ROTATION.next.join(', ')}`)
       // an empty list: no model (HeartCode says so until one is chosen)
+      // one taken off the list that its provider doesn't list (added by name): kept under the provider
+      const kept = new Set(clean.map((t) => `${t.provider}/${t.model}`))
+      for (const t of [{ provider: cfg.provider, model: cfg.model }, ...(cfg.rotation?.then ?? [])]) {
+        const p = cfg.providers[t.provider]
+        if (!p || !t.model || kept.has(`${t.provider}/${t.model}`) || readLists()[t.provider]?.models?.includes(t.model) || p.models?.includes(t.model)) continue
+        p.models = [...(p.models ?? []), t.model]
+      }
       const changed1 = cfg.provider !== clean[0]?.provider || cfg.model !== clean[0]?.model
-      Object.assign(cfg, { provider: clean[0]?.provider, model: clean[0]?.model })
+      Object.assign(cfg, { provider: clean[0]?.provider, model: clean[0]?.model, pinned: undefined }) // a new #1 chosen here is saved, also from a run given -m (config.js saved)
       cfg.rotation = { on: opts.on, retries: opts.retries, next: opts.next, then: clean.slice(1) }
       ownWrite = Date.now()
       saveConfig(cfg)

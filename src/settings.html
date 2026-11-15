@@ -209,6 +209,7 @@
   button:active:not(:disabled) { transform: translateY(1px); }
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
   button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.07); }
+  button.primary.attn { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); } /* the order shown isn't saved yet */
   button.danger { color: var(--err); }
   button.danger:hover:not(:disabled) { background: var(--err-soft); border-color: color-mix(in srgb, var(--err) 35%, transparent); }
   button.small { padding: 4px 10px; font-size: 12.5px; }
@@ -2151,7 +2152,7 @@ const addModel = (provider, id) => {
 // a provider switched off: its models stay in your list, but HeartCode skips them; the one in use is
 // the first of a provider that's on
 const isOff = (name) => Boolean(S?.providers.find((p) => p.name === name)?.off)
-const inUse = () => S.order.find((t) => !isOff(t.provider))
+const inUse = () => S.order.find((t) => !isOff(t.provider) && !t.record?.poor) ?? S.order.find((t) => !isOff(t.provider)) // #1 failing (its track record): the first that isn't (client.js)
 // Your models as shown: none of a provider that's switched off (they come back when it's on again)
 const shownOrder = () => S.order.filter((t) => !isOff(t.provider))
 // An order saved from what's shown: the models of a provider that's off keep their places in yours
@@ -2333,17 +2334,17 @@ function buildCatalog(s) {
         if (placeOf(p.name, id) !== undefined) await saveOrder(S.order.filter((t) => t.provider !== p.name || t.model !== id), `${id} removed`)
         act('/api/provider/added', { name: p.name, model: id, remove: true }, `forgot ${id}`)
       } }))
-    // a model by its name, into your list; one it has already: said, and shown
+    // models by their names (several, comma-separated), under this provider only: not into the list
+    // (a click on one puts it there); one it has already: said, and shown
     const addByName = (e) => {
       e.preventDefault()
       const box = e.target.elements.name
-      const id = box.value.trim()
-      if (!id) return
-      const at = placeOf(p.name, id)
-      if (at !== undefined) return showRow(p.name, id, `${id} is already in the list (#${at + 1})`)
-      if (listed.has(id) || yours.includes(id)) return showRow(p.name, id, `${p.name} already has ${id}: click it to add it`)
+      const ids = [...new Set(box.value.split(',').map((x) => x.trim()).filter(Boolean))]
+      if (!ids.length) return
+      const add = ids.filter((id) => !listed.has(id) && !yours.includes(id))
+      if (!add.length) return showRow(p.name, ids[0], ids.length === 1 ? `${p.name} already has ${ids[0]}: click it to add it to the list` : `${p.name} already has all ${ids.length}`)
       box.value = ''
-      addModel(p.name, id)
+      act('/api/provider/added', { name: p.name, models: add }, `${add.length === 1 ? add[0] : `${add.length} models`} added to ${p.name}${add.length < ids.length ? ` (${ids.length - add.length} it had already)` : ''}: click one to put it in the list`)
     }
     if (q && !ids.length) return null // searching: only the providers with a match
     if (freeOnly && !ids.length) return null // free only: the providers with a free one
@@ -2362,7 +2363,7 @@ function buildCatalog(s) {
           h('span', { className: 'tag inlist' }),
           h('span', { className: 'meta mono', textContent: p.baseUrl, title: `${p.baseUrl} · key ${p.key || 'none'}` })),
         h('form', { className: 'by-name', onsubmit: addByName },
-          h('input', { type: 'text', name: 'name', placeholder: 'model name', 'aria-label': `add a model to ${p.name} by its name`, title: `a model's exact name: added to the list, also one ${p.name} doesn't list` }),
+          h('input', { type: 'text', name: 'name', placeholder: 'model name(s)', 'aria-label': `add models to ${p.name} by their names`, title: `a model's exact name, or several separated by commas: added to ${p.name} (not to the list: click one to put it there), also ones ${p.name} doesn't list` }),
           h('button', { className: 'small', textContent: 'Add' })),
         h('button', { className: 'small', textContent: 'Edit', title: 'its address and key, its model list, delete it', onclick: () => openForm(p) })),
       // what's listed first; loading and errors under it (the models already shown stay where they are)
@@ -2563,6 +2564,8 @@ function drawMine(s) {
   const shown = filtering() ? order.filter((t) => passes(t)) : order
   const view = sorted(shown)
   const filtered = shown.length !== order.length
+  // sorted, and the order shown isn't the list's (test times changed since it was saved…): said on Save list
+  const drift = SORT.length > 0 && !filtered && view.some((t, i) => t !== order[i])
   for (const k of PICKED) if (placeOf(...k.split(/\/(.*)/s)) === undefined) PICKED.delete(k) // gone from the list
   const n = (x) => x.toLocaleString()
 
@@ -2624,7 +2627,7 @@ function drawMine(s) {
     h('button', { className: 'small', textContent: 'Update model info', disabled: !order.length, title: `what each model can do (context, tools, thinking, images, price) from models.dev, and its places in LMArena's public rankings (coding, web apps, vision${S.rankings ? `; rankings from ${new Date(S.rankings.fetched).toLocaleDateString()}` : ''})`, onclick: () => lookUp() }),
     h('button', { className: 'small', textContent: filtered ? `Test ${n(shown.length)}` : 'Test all', disabled: testingAll || !shown.length, title: `send ${filtered ? 'the models shown' : 'each model'} a short message to see which really answer, and how fast`, onclick: () => tryAll(filtered ? shown : order) }),
     // always there: the list as it's shown (sorted, filtered), saved whenever
-    h('button', { className: 'small primary', textContent: filtered ? `Use only these ${n(view.length)}` : 'Save list', disabled: !view.length, title: filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : 'save the list as shown: HeartCode uses them in this order (#1 first)', onclick: saveList }))
+    h('button', { className: 'small primary' + (drift ? ' attn' : ''), textContent: filtered ? `Use only these ${n(view.length)}` : drift ? 'Save this order' : 'Save list', disabled: !view.length, title: (drift ? `The order shown isn't the one HeartCode uses: its #1 is ${order[0].model}, here at row ${view.indexOf(order[0]) + 1} (sorted ${dirText(SORT[0].key, SORT[0].dir)}). ` : '') + (filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : 'save the list as shown: HeartCode uses them in this order (#1 first)'), onclick: saveList }))
   for (const b of $('mt-actions').children) if (!b.classList.contains('primary')) b.inert = busy // all but Save list wait while something runs
 
   // --- row 2, the list's settings: when a model fails (left), the helpers (right); an icon and a short label each ---
@@ -2707,7 +2710,7 @@ function drawMine(s) {
     lastPicked = i
     drawMine(S)
   }
-  const tableV = table && virtual(table, { count: view.length, height: TABLE_ROW, row: (i) => tableRow(view[i], order.indexOf(view[i]), (e) => pick(i, e)), scroller: window })
+  const tableV = table && virtual(table, { count: view.length, height: TABLE_ROW, row: (i) => tableRow(view[i], order.indexOf(view[i]), (e) => pick(i, e), i), scroller: window })
   if (tableV) tableV.items = view.length
   // typing in a filter: the box is put back in the redrawn page, still with the focus and the caret
   const typing = filterBar?.contains(document.activeElement) ? document.activeElement : null
@@ -2927,7 +2930,8 @@ function drawHelperBar() {
   return helperBar
 }
 
-function tableRow(t, at, pick) {
+// at: its place in the list; row: its row as shown (sorted or filtered: 1, 2, 3… down the page)
+function tableRow(t, at, pick, row = at) {
   const c = can(t)
   const ctx = COLS.context.get(t)
   const picked = PICKED.has(keyOf(t))
@@ -2941,8 +2945,9 @@ function tableRow(t, at, pick) {
   return h('li', { className: 'in' + (picked ? ' picked' : '') + (isOff(t.provider) ? ' off' : ''), 'data-key': `${t.provider}/${t.model}`, title: isOff(t.provider) ? `${t.provider} is switched off: HeartCode skips this model until it's on` : '' },
     h('span', { className: 'grip', textContent: '⋮⋮', 'aria-hidden': 'true' }),
     h('input', { type: 'checkbox', checked: picked, disabled: busy, 'aria-label': `select ${t.model}`, title: 'select (Shift: and every row up to the last one selected)', onclick: (e) => (e.preventDefault(), pick(e)) }),
-    h('span', { className: 'n', textContent: `#${at + 1}`, title: SORT.length || filtering() ? 'its place in the list' : '' }),
-    h('span', { className: 'm' }, h('span', { className: 'name', textContent: t.model, title: t.model }), tag),
+    h('span', { className: 'n', textContent: `#${row + 1}`, title: row !== at ? `#${at + 1} in the list HeartCode uses (Save list to use the order shown)` : '' }),
+    h('span', { className: 'm' }, h('span', { className: 'name', textContent: t.model, title: t.model + (t.record ? `\nTrack record (recent work): ${t.record.done} done, ${t.record.failed} failed` : '') }), tag,
+      t.record?.poor ? h('span', { className: 'tag warn', textContent: '⚠', 'aria-label': 'failing', title: `Failing: it failed most of its recent work (${t.record.failed} failed, ${t.record.done} done: handed over, reviews that said no, broken replies). HeartCode picks it last and doesn't start a message with it while another can. Turn off "Learn from each model's track record" in Settings to use your order only.` }) : null),
     h('span', { className: 'p', textContent: isOff(t.provider) ? `${t.provider} · off` : t.provider, title: t.provider }),
     helperCell(t, at),
     h('span', { className: 'num', textContent: ctx ? `${t.tested?.sure === false ? '~' : ''}${kTok(ctx)}` : '–', title: ctx ? `${ctx.toLocaleString()} tokens${t.tested?.sure === false ? ' (assumed: the server and models.dev don\'t say)' : ''}` : '' }),
@@ -2976,13 +2981,14 @@ function markCatalog() {
 function drawUsing(s) {
   const o = s.order.filter((t) => !isOff(t.provider))
   $('using').hidden = page() === 'providers' // there it's on the page itself
-  put($('using'), o.length ? [h('span', { className: 'k', textContent: 'HeartCode uses' }), h('b', { textContent: o[0].model }), h('span', { className: 'k', textContent: `${o[0].provider}${o.length > 1 ? ` · ${o.length - 1} fallback${o.length > 2 ? 's' : ''}` : ''}` })] : s.order.length ? [h('span', { className: 'k', textContent: 'The providers of all the models are switched off' }), h('a', { href: '#providers', textContent: 'Switch one on' })] : [h('span', { className: 'k', textContent: 'No model chosen yet' }), h('a', { href: '#providers', textContent: 'Choose one' })])
+  const first = inUse() ?? o[0]
+  put($('using'), o.length ? [h('span', { className: 'k', textContent: 'HeartCode uses' }), h('b', { textContent: first.model, title: first !== o[0] ? `${o[0].model} (#1) failed most of its recent work, so messages start with ${first.model} until it does better` : '' }), h('span', { className: 'k', textContent: `${first.provider}${first !== o[0] ? ' · #1 is failing' : ''}${o.length > 1 ? ` · ${o.length - 1} fallback${o.length > 2 ? 's' : ''}` : ''}` })] : s.order.length ? [h('span', { className: 'k', textContent: 'The providers of all the models are switched off' }), h('a', { href: '#providers', textContent: 'Switch one on' })] : [h('span', { className: 'k', textContent: 'No model chosen yet' }), h('a', { href: '#providers', textContent: 'Choose one' })])
 }
 
 // --- General ---
 const PERM_INFO = { all: ['Everything', 'Edits files and runs commands without asking'], commands: ['Edits only', 'Edits files; asks before running commands'], ask: ['Ask first', 'Asks before every edit and command'] }
 const THEME_INFO = { dark: ["The terminal's background", ['#1f2328', '#d4d4d8', '#ff6b9d', '#7aa2f7']], light: ['White background', ['#fafbfc', '#24292f', '#d6336c', '#0969da']], midnight: ['Deep blue background', ['#1a1b26', '#c0caf5', '#ff7ab2', '#7aa2f7']], mono: ['No colors: bold and dim', ['#000000', '#bbbbbb', '#ffffff', '#777777']] }
-const TOGGLE_INFO = { autoCompact: 'Compact long conversations', director: 'Let the model set things up', format: 'Format files after edits', lsp: 'Language server checks', updateCheck: 'Check for updates', mouse: 'HeartCode takes the mouse' }
+const TOGGLE_INFO = { autoCompact: 'Compact long conversations', director: 'Let the model set things up', format: 'Format files after edits', lsp: 'Language server checks', updateCheck: 'Check for updates', trackRecord: "Learn from each model's track record", mouse: 'HeartCode takes the mouse' }
 function choices(id, list, cur, name) {
   put($(id), list.map(([v, title, desc, colors]) => h('label', { className: 'choice' + (v === cur ? ' on' : '') },
     h('input', { type: 'radio', name: id, checked: v === cur, onchange: () => act('/api/setting', { name, value: v }, `${title}: saved`) }),

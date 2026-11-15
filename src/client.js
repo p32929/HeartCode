@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { log, logRequest, requestLog } from './log.js'
 import { loadRankings, scoreOf } from './rankings.js'
+import { byRecord, unreliable, record } from './record.js'
 import { fetch } from './http.js' // not the built-in one: see http.js
 
 // Tokens in a text, estimated the way tokenizers split it: a word or a number is about one, a long
@@ -279,7 +280,7 @@ export class Client {
     if (e?.status >= 400) down.add(r.list[r.at].provider)
     const n = r.list.length
     const data = loadRankings()
-    const order = [...Array(n - 1).keys()].map((k) => (r.at + k + 1) % n).map((i) => ({ i, score: (r.list[i].score ??= scoreOf(r.list[i].model, data)) })).sort((a, b) => a.score - b.score).map((x) => x.i) // stable: unranked keep your order
+    const order = [...Array(n - 1).keys()].map((k) => (r.at + k + 1) % n).map((i) => ({ i, t: r.list[i], score: (r.list[i].score ??= scoreOf(r.list[i].model, data)) })).sort(byRecord).map((x) => x.i) // stable: unranked keep your order; moved by each model's track record (record.js)
     const after = (ok) => order.find(ok) ?? -1
     let i = after((i) => !tried.has(i) && !down.has(r.list[i].provider))
     if (i < 0) i = after((i) => !tried.has(i))
@@ -289,10 +290,16 @@ export class Client {
     }
     return i
   }
-  // A new message: back to #1 (unless it stays on the one that worked)
+  // A new message: back to #1 (unless it stays on the one that worked); #1 failed most of its work
+  // (its track record, record.js): the first in your order that hasn't
   newMessage() {
     const r = this.rotation
-    if (r && r.next === 'first' && r.at) this.#use(r.list[(r.at = 0)])
+    if (!r || r.next !== 'first') return
+    const i = Math.max(0, r.list.findIndex((t) => !unreliable(t)))
+    if (r.at !== i) {
+      if (i) log('rotate', `${r.list[0].model} failed most of its recent work (its track record): this message starts with ${r.list[i].model}`)
+      this.#use(r.list[(r.at = i)])
+    }
   }
   // onUse(target): the model the next request goes to changed (its abilities and profile follow)
   #use(t) {
@@ -504,6 +511,7 @@ export class Client {
       } catch (e) {
         if (e.name === 'AbortError' || opts.signal?.aborted) throw e
         this.onFail?.(e, { provider: this.provider, model: this.model }) // what it says is learned (a stated limit)
+        if (e.status !== 429) record({ provider: this.provider, model: this.model }, 'no-answer') // its track record: didn't answer, refused the key, needs a paid plan… (a rate limit passes)
         // With a list of models, any failure makes way for the next one (another provider's first).
         // Without one, only what waiting can fix is tried again.
         if (!(this.rotation?.list.length > 1) && !outage(e)) throw e

@@ -130,8 +130,18 @@ export function log(topic, ...parts) {
 
 // The requests log: on, and how much of each (from config.json: logRequests, logDetail).
 export const requestLog = { on: false, detail: 'full', dir: null }
+// --logs: this run's kinds, whatever config.json and the settings page say: "none", "all", or a
+// comma-separated list of kinds (tools, models, agent, errors, conversation, debug, requests)
+let forced = null
+export function forceLogs(spec) {
+  const all = [...Object.keys(LOG_KINDS), 'requests']
+  const want = String(spec).split(',').map((w) => w.trim().toLowerCase()).filter(Boolean)
+  const bad = want.filter((w) => !all.includes(w) && w !== 'all' && w !== 'none')
+  if (bad.length || !want.length) throw new Error(`--logs: none, all, or some of ${all.join(', ')} (comma-separated)`)
+  forced = Object.fromEntries(all.map((k) => [k, !want.includes('none') && (want.includes('all') || want.includes(k))]))
+}
 export function useRequestLog(cfg) {
-  const on = kindsOn(cfg)
+  const on = forced ?? kindsOn(cfg)
   for (const k of Object.keys(logKinds)) logKinds[k] = on[k]
   return Object.assign(requestLog, { on: on.requests, detail: cfg.logDetail === 'summary' ? 'summary' : 'full' })
 }

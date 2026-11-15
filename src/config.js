@@ -19,7 +19,7 @@ export function projectDir(root, what) {
   return dir
 }
 
-const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director', 'theme', 'format', 'lsp', 'voice', 'queue', 'rotation', 'statusBar', 'log', 'logRequests', 'logDetail', 'logDays', 'telegram', 'search', 'testTimeout', 'updateCheck', 'logs', 'replyStart', 'replyIdle', 'mouse', 'helpers', 'helpersAuto', 'helperOrder', 'providerRank']
+const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director', 'theme', 'format', 'lsp', 'voice', 'queue', 'rotation', 'statusBar', 'log', 'logRequests', 'logDetail', 'logDays', 'telegram', 'search', 'testTimeout', 'updateCheck', 'logs', 'replyStart', 'replyIdle', 'mouse', 'helpers', 'helpersAuto', 'helperOrder', 'providerRank', 'trackRecord']
 // How long a reply may take (the settings page's Your models), in seconds, with the defaults:
 // replyStart: a reply must start within it, else that model failed; replyIdle: a reply that stops
 // sending for it is stalled.
@@ -118,6 +118,16 @@ export function providerName(url) {
   return (parts.length > 1 ? parts.at(-2) : parts[0]) || u.hostname
 }
 
+// The model list never holds a model twice (the #1 again further down, or one twice): the first
+// stays. On what's read and what's written, whoever changed the #1 or the list.
+function oneEach(c) {
+  if (!Array.isArray(c?.rotation?.then)) return c
+  const seen = new Set(c.model ? [`${c.provider}/${c.model}`] : [])
+  const then = c.rotation.then.filter((t) => !seen.has(`${t?.provider}/${t?.model}`) && seen.add(`${t?.provider}/${t?.model}`))
+  if (then.length !== c.rotation.then.length) c.rotation = { ...c.rotation, then }
+  return c
+}
+
 function fromFile() {
   const file = readJson(CONFIG_FILE, {})
   const cfg = { ...file, providers: { ...file.providers }, adhoc: null }
@@ -159,6 +169,7 @@ export function loadConfig(flags = {}) {
   const file = fromFile()
   const cfg = { providers: byName(file.providers), provider: file.provider, model: file.model, adhoc: null }
   for (const k of SETTINGS) cfg[k] = flags[k] ?? file[k]
+  oneEach(cfg)
   if (cfg.context) cfg.context = Number(cfg.context)
 
   const baseUrl = flags.baseUrl || process.env.HEART_BASE_URL || process.env.OPENAI_BASE_URL
@@ -184,11 +195,14 @@ export function loadConfig(flags = {}) {
 function saved(cfg) {
   const providers = byName(cfg.providers)
   if (cfg.adhoc) delete providers[cfg.adhoc]
-  // a run-only provider (-m URL) or models chosen for this session (cfg.session, /select_model) aren't
-  // saved as the current model: the pin is local, it must not become everyone's #1 on disk
-  const keep = (cfg.adhoc && cfg.provider === cfg.adhoc) || cfg.session?.length ? fromFile() : null // a run-only provider or a model set chosen for this session isn't saved as the current
+  // a run-only provider (-u URL) or a model given for this run (-m, cfg.pinned: it's put in
+  // cfg.provider/model) isn't saved as the current model: it must not become everyone's #1 on disk.
+  // A folder's /select_model set (cfg.session alone) leaves cfg.provider/model as the list's #1, so a
+  // new #1 from the settings page is saved.
+  const keep = (cfg.adhoc && cfg.provider === cfg.adhoc) || cfg.pinned ? fromFile() : null
   const out = { providers, provider: keep?.provider ?? cfg.provider, model: keep?.model ?? cfg.model }
   for (const k of SETTINGS) if (cfg[k] !== undefined) out[k] = cfg[k]
+
   return JSON.parse(JSON.stringify(out))
 }
 
@@ -215,6 +229,7 @@ export function saveConfig(cfg) {
       disk.providers = byName(ps)
     } else if (!same(out[k], was[k])) out[k] === undefined ? delete disk[k] : (disk[k] = out[k])
   }
+  oneEach(disk)
   writeJson(CONFIG_FILE, disk)
   synced(cfg, disk)
 }
@@ -233,6 +248,7 @@ export function takeIn(cfg) {
     const value = k === 'providers' ? { ...byName(disk.providers), ...(cfg.adhoc && { [cfg.adhoc]: cfg.providers[cfg.adhoc] }) } : disk[k]
     value === undefined ? delete cfg[k] : (cfg[k] = value)
   }
+  oneEach(cfg)
   file = disk
   mine = saved(cfg)
   return keys

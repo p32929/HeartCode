@@ -6,6 +6,7 @@ import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE,
 import { loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
 import { learnFromUsage, LIMIT_MS, RATE_CAP_MS } from '../src/context.js'
 import { loadRankings, scoreOf } from '../src/rankings.js'
+import { byRecord, useRecords } from '../src/record.js'
 import { Session, transcript, contextReport } from '../src/agent.js'
 import { listJobs, getJob, stopJob, removeJob, runningJobs, tailLines, ago as ranFor } from '../src/background.js'
 import { checkUpdate, installKind, UPDATE_COMMANDS, packageDir, whatsNew } from '../src/update.js'
@@ -13,7 +14,7 @@ import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/
 import { UI, c, PERMISSIONS, duration, copyText, overSsh, prettyKey, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width, shortError, wrapWords } from '../src/ui.js'
 import { listFiles, runCommand, clip } from '../src/tools.js'
 import { notify } from '../src/telegram.js'
-import { log, LOG_FILE, LOG_DIR, requestLog, useRequestLog, useLogs, pruneLogs, logDays } from '../src/log.js'
+import { log, LOG_FILE, LOG_DIR, requestLog, useRequestLog, useLogs, pruneLogs, logDays, forceLogs } from '../src/log.js'
 import { prompt, usePromptsFrom, reloadPrompts } from '../src/prompts.js'
 import { newChat, saveChat, listChats, loadChat, restoreFiles, ago, forkChat, exportChat } from '../src/sessions.js'
 import { loadPrices, priceOf, addUsage, money, limitsOf } from '../src/usage.js'
@@ -77,6 +78,9 @@ ${c.bold('headless')} (for other programs; flags and output as in Claude Code's 
       --output-format <f>            text (default), json, or stream-json (one JSON event per line)
       --input-format <f>             text (default; the prompt, or stdin) or stream-json (messages on stdin)
       --append-system-prompt <text>  added to HeartCode's system prompt
+      --system-prompt <text>         instead of HeartCode's: the model is only what this says, and HeartCode's
+                                     own workflow is off (plan first, "not done" checks, reviews, memory);
+                                     its tools, permissions and model fallback stay. --system-prompt-file <file>: from a file
       --mcp-config <file|json>       more MCP servers (repeatable); --strict-mcp-config: only those
       --skills-dir <dir>             more skills (repeatable)
       --allowedTools <list>          only these tools (HeartCode's or Claude Code's names: Read, Edit, Bash…)
@@ -90,6 +94,8 @@ ${c.bold('headless')} (for other programs; flags and output as in Claude Code's 
                                      interactive: until Esc)
       --max-turns <n>                stop after n model steps in one message (default: no limit)
       --verbose                      warnings and retries on stderr
+      --logs <kinds>                 this run's logs, whatever the settings say: none, all, or some of
+                                     tools, models, agent, errors, conversation, debug, requests (comma-separated)
 
 ${c.bold('editors')}  heartcode --acp   the Agent Client Protocol on stdin/stdout (Zed, JetBrains, Neovim)
 
@@ -176,7 +182,7 @@ function keysHelp(keys = {}, mouse = false, voice = false) {
     [[forAct('scroll_up'), forAct('scroll_down')].filter(Boolean).join(' / '), 'scroll the conversation a page'],
     [[forAct('scroll_top'), forAct('scroll_bottom')].filter(Boolean).join(' / '), 'to the top / bottom of the conversation (scrolled up, it stays put while the answer comes in)'],
     [[forAct('scroll_line_up'), forAct('scroll_line_down')].filter(Boolean).join(' / '), 'scroll a few lines'],
-    ['Ctrl+C', 'stop · twice quits HeartCode'],
+    ['Ctrl+C', 'twice stops · then again quits HeartCode'],
     [mouse ? 'Drag' : '', 'select and copy: the conversation, a dialog, the folder, the input, the status bar'],
     [mouse ? 'Double-click' : '', 'copy the word under it (an address, a path, a model)'],
     [mouse ? (process.platform === 'darwin' ? 'Option+drag' : 'Shift+drag') : '', "the terminal's own selection, past HeartCode's"],
@@ -872,7 +878,7 @@ class App {
         if (!share.has(k)) share.set(k, scoreOf(t.model, data))
         return share.get(k)
       }
-      return (a, b) => (of(a) === of(b) ? 0 : of(a) < of(b) ? -1 : 1) // Infinity (not ranked) last; ties keep your order
+      return (a, b) => byRecord({ t: a, score: of(a) }, { t: b, score: of(b) }) // Infinity (not ranked) last; ties keep your order; moved by the track record (record.js)
     }
     const rank = this.cfg.helperOrder === 'provider' && Array.isArray(this.cfg.providerRank) ? this.cfg.providerRank : null
     if (!rank) return () => 0
@@ -1187,7 +1193,8 @@ async function leaveWorktree(app) {
 const TABS_FILE = path.join(HOME, 'tabs.json')
 function saveTabs(tabs) {
   const all = readJson(TABS_FILE, {})
-  all[tabs.root] = { at: tabs.list.indexOf(tabs.at), tabs: tabs.list.map((t) => ({ chat: t.app.chat.id, worktree: t.app.worktree?.name ?? null, provider: t.app.cfg.provider ?? null, model: t.app.cfg.model ?? null })) }
+  // a tab's own models only when it chose some (/select_model): the list's #1 is everyone's, not the tab's
+  all[tabs.root] = { at: tabs.list.indexOf(tabs.at), tabs: tabs.list.map((t) => ({ chat: t.app.chat.id, worktree: t.app.worktree?.name ?? null, ...(t.app.cfg.session?.length && { session: t.app.cfg.session.map(({ provider, model }) => ({ provider, model })) }) })) }
   writeJson(TABS_FILE, all)
 }
 
@@ -1226,11 +1233,13 @@ async function continueTabs(app, saved) {
 }
 
 // A continued tab's own model, as it was (unless its provider is gone: then the current one).
-function useModel(app, { provider, model }) {
-  if (!provider || !model || (provider === app.cfg.provider && model === app.cfg.model)) return
-  if (!app.cfg.providers[provider]) return app.ui.warn(`this tab used ${provider} · ${model}, but there's no provider "${provider}" now: using the list`)
-  if (app.cfg.providers[provider].off) return app.ui.warn(`this tab used ${provider} · ${model}, but ${provider} is switched off: using the list`)
-  Object.assign(app.cfg, { provider, model })
+// A continued tab's own models (the ones it chose with /select_model), for that tab only: the
+// list's #1 (cfg.provider/model) is never changed here. (Older tabs.json entries have a provider and
+// model: that was the list's #1 back then, not the tab's choice, so it's left alone.)
+function useModel(app, { session }) {
+  const ok = (session ?? []).filter((t) => app.cfg.providers[t?.provider] && !app.cfg.providers[t.provider].off && t.model)
+  if (!ok.length) return
+  app.cfg.session = ok
   app.s = null
 }
 
@@ -1258,6 +1267,7 @@ function applySettings(apps, cfg, what) {
   if (what === 'prompts') reloadPrompts()
   if (['setting:logs', 'setting:log', 'setting:logRequests', 'setting:logDetail'].includes(what)) useRequestLog(cfg) // each kind of log, on or off now
   if (what === 'setting:logDays') pruneLogs(logDays(cfg))
+  if (what === 'setting:trackRecord') useRecords(cfg)
   settingsSeen(what) // the watcher (watchSettings) mustn't take it in a second time
   for (const app of apps) {
     const { ui } = app
@@ -1363,6 +1373,7 @@ function watchSettings(apps, cfg) {
 function afterReset(apps, level) {
   const fresh = loadConfig()
   useRequestLog(fresh)
+  useRecords(fresh)
   const before = themeCodes()
   setTheme(fresh.theme)
   reloadPrompts()
@@ -1870,15 +1881,20 @@ async function repl(app, f = {}) {
     ui.submit('/close_tab') // at the prompt: asked in its turn, like a typed /close_tab
   }
   const others = () => (app.tabs?.list.length ?? 1) - 1
+  // working: like Esc, a second Ctrl+C within 2.5s stops it (a stray one doesn't); one more quits
+  let stopArm = 0
   ui.onInterrupt = () => {
     const again = Date.now() - lastInterrupt < 2000
     lastInterrupt = Date.now()
     if (ctl) {
-      if (again) return quit()
+      if (again && !stopArm) return quit() // already stopping (or stuck): quits
+      if (Date.now() - stopArm >= 2500) return (stopArm = Date.now()), (lastInterrupt = 0), ui.notice('Press Ctrl+C again to stop', 2500)
+      stopArm = 0
       stop()
       ui.cancelAsk()
       return ui.warn(`stopping… (Ctrl+C again to quit${others() ? ` HeartCode, all ${others() + 1} tabs` : ''})`)
     }
+    stopArm = 0
     if (ui.rl?.line) {
       lastInterrupt = 0 // clearing isn't the first half of quitting
       return ui.clearInput()
@@ -2021,6 +2037,8 @@ async function main() {
       'output-format': { type: 'string' },
       'input-format': { type: 'string' },
       'append-system-prompt': { type: 'string' },
+      'system-prompt': { type: 'string' },
+      'system-prompt-file': { type: 'string' },
       'mcp-config': { type: 'string', multiple: true },
       'strict-mcp-config': { type: 'boolean' },
       'skills-dir': { type: 'string', multiple: true },
@@ -2034,6 +2052,7 @@ async function main() {
       effort: { type: 'string' },
       'no-memory': { type: 'boolean' },
       verbose: { type: 'boolean' },
+      logs: { type: 'string' },
       'max-retries': { type: 'string' },
       'max-turns': { type: 'string' },
       all: { type: 'boolean' }, // heart models --all
@@ -2055,7 +2074,9 @@ async function main() {
   if (f.effort && !['default', 'low', 'medium', 'high'].includes(f.effort)) throw new Error('--effort must be low, medium, high or default')
   const cfg = loadConfig({ baseUrl: f['base-url'], model: f.provider && f.model ? `${f.provider} ${f.model}` : f.model, apiKey: f['api-key'], context: f.context })
   setTheme(cfg.theme)
+  if (f.logs !== undefined) forceLogs(f.logs)
   useLogs(cfg)
+  useRecords(cfg)
   const safe = { ...cfg, providers: Object.fromEntries(Object.entries(cfg.providers).map(([n, p]) => [n, { ...p, apiKey: p.apiKey && mask(p.apiKey) }])) }
   log('start', `heartcode ${VERSION} · node ${process.version} · ${process.platform} · cwd ${process.cwd()}`, { args: process.argv.slice(2).map((a) => (a === f['api-key'] ? mask(a) : a)), config: safe })
   // --provider: one model alone, as -m does: with -m, that one (above); alone, that provider's first
@@ -2196,6 +2217,8 @@ async function main() {
   if (sub === 'providers') return app.listProviders(), ui.close()
   if (sub === 'models') return await app.listModels(positionals[1] ?? '', { all: f.all, json: f.json }), ui.close()
   if (f['no-memory']) app.memory = null
+  const ownSystem = f['system-prompt'] ?? (f['system-prompt-file'] && fs.readFileSync(f['system-prompt-file'], 'utf8'))
+  if (ownSystem) app.memory = null // HeartCode's notes and lessons are its own workflow: off
   const chat = f['resume-id'] ? loadChat(f['resume-id'], app.root) : f.continue && headless ? listChats(app.root)[0] : f['session-id'] ? (loadChat(f['session-id'], app.root) ?? { ...newChat(app.root), id: f['session-id'] }) : null
   if (f['resume-id'] && !chat) throw new Error(`no session ${f['resume-id']}`)
   if (chat && (headless || !f['resume-id'])) app.setChat(chat) // interactive: resumed below, with its transcript
@@ -2203,7 +2226,7 @@ async function main() {
   if (headless) {
     app.allowTools = [...(f.allowedTools ?? []), ...(f['allowed-tools'] ?? [])]
     app.denyTools = [...(f.disallowedTools ?? []), ...(f['disallowed-tools'] ?? [])]
-    const code = await runHeadless(app, { prompt: positionals.join(' '), input: f['input-format'], output: f['output-format'], appendSystem: f['append-system-prompt'], partial: f['include-partial-messages'] })
+    const code = await runHeadless(app, { prompt: positionals.join(' '), input: f['input-format'], output: f['output-format'], appendSystem: f['append-system-prompt'], ownSystem, partial: f['include-partial-messages'] })
     if (wt && worktreeState(wt).empty) removeWorktree(wt) // else kept, for the caller to merge (its path is in the log)
     process.exit(code) // MCP servers are stopped by the exit hooks
   }

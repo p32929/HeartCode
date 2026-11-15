@@ -16,7 +16,7 @@ heart --version          # installed? (else: node /path/to/heart_cli/bin/heart.j
 heart providers          # the providers set up, and their URLs (keys are masked)
 heart models             # what -m takes, one per line: "auto" first, then the user's models (provider/model), #1 first
 heart models --json      # the same, as JSON
-heart models --all       # every provider's models (slower: asks each provider); with --json, beside the list
+heart models --all       # every switched-on provider's models (slower: asks each provider); with --json, beside the list
 ```
 
 `heart models` prints one id per line, nothing else (like `opencode models`):
@@ -50,10 +50,11 @@ With `--json`:
 No model set up yet: `models` is empty (and `heart -p` fails with "no model set up").
 `heart models [--all] <filter>` keeps only the ids that contain `<filter>`.
 
-`providers` (only with `--all`): every provider's models. `list: false`: the user switched that
-provider's list off, and `models` are the ones they added by name. `off: true`: the user switched
-the provider off; `auto` skips its models (they aren't in `models`), but `-m provider/model` still runs one. A provider that can't be
-reached has an `error` (in text: a line on stderr) and is skipped; the command still exits `0`.
+`providers` (only with `--all`): every switched-on provider's models. `list: false`: the user
+switched that provider's list off, and `models` are the ones they added by name. A provider the
+user switched off isn't there at all, and `auto` skips its models, but `-m provider/model` still
+runs one. A provider that can't be reached has an `error` (in text: a line on stderr) and is
+skipped; the command still exits `0`.
 
 **Which model to pass:**
 
@@ -78,6 +79,13 @@ over (the first such one in the list's order); only when none has room is it sum
 list moves on to a model with a smaller window, it's summarized for that model before it's sent.
 Each request is fitted to the model it goes to: one that can't see gets a note in place of each
 image, one that can't call tools gets the tool calls as text.
+
+**Track record:** HeartCode remembers how each model does in real work (`~/.heart/records.json`:
+tasks finished, handovers, reviews that said no, broken replies), unless the user turned it off on
+the settings page. With `auto`, the next model after a failure is picked by the rankings moved by
+that record, and a #1 that failed most of its recent work doesn't start the run while another model
+can (the `init` line's `model` says which one did). A run's record counts for the next ones (`--temp`:
+not kept).
 
 `--provider <name>` and `-u <url>` (a server for this run) also mean one model, alone.
 
@@ -124,7 +132,7 @@ goes to stderr. Logs never go to stdout.
 ## Continue the same conversation
 
 Every run is saved as a session in the project's `.heartcode/sessions/` (and logged, for the kinds of logs the user
-switched on), as when the user works in HeartCode; `--temp` keeps nothing. Pass the `session_id`
+switched on, or the ones `--logs` names), as when the user works in HeartCode; `--temp` keeps nothing. Pass the `session_id`
 from the last result:
 
 ```sh
@@ -148,6 +156,7 @@ can't switch the model you chose.
 | Everything (edits and commands) | `--permission-mode all` (the default unless the user set another) |
 | Changes kept apart from the user's files | `--worktree=<name>` (in a git repo): it works in `.heartcode/worktrees/<name>` on the branch `heartcode/<name>`; kept if anything changed (merge it from there), removed if nothing did |
 | A cap on how long it works | `--max-turns 30` (model steps), `--max-retries 3` (a failing provider) |
+| No logs, or only some | `--logs none`, or e.g. `--logs errors,requests` (the user's settings stay as they are) |
 | Nothing kept: no session, logs, settings or notes in `~/.heart`, nothing in the project's `.heartcode/` | `--temp` (a throwaway copy, shared by the `--temp` runs going on at once, deleted after the last; the project's notes and research are read, and what the run adds goes with the copy)  With `--worktree` too, the worktree itself is made in the project's `.heartcode/worktrees/` (git needs it in the repository) |
 
 Tool names: HeartCode's own (`read_file`, `edit_file`, `write_file`, `run_command`, `search`,
@@ -204,13 +213,15 @@ HEART_API_KEY=… heart -u https://api.groq.com/openai/v1 -m openai/gpt-oss-120b
 A model server on this machine (Ollama on :11434, LM Studio on :1234, llama.cpp on :8080) is
 found on its own while no provider is set up yet. The user can also set everything up in a browser: `heart settings` (its link has
 the machine's network address, so it opens from another device too, for HeartCode on a server), where
-**Test all** under *Your models* sends each model a short message to show it really answers, and how fast. A run that fails with a wrong key or an unknown model: ask the user to test it there.
+**Test all** under *Models → List* sends each model a short message to show it really answers, and how fast. A run that fails with a wrong key or an unknown model: ask the user to test it there.
 
 ## More context for the task
 
 | Flag | |
 |---|---|
 | `--append-system-prompt "<text>"` | your instructions for this run, at the end of the system prompt. HeartCode's own part then says less (no role of its own, no "stay in the project folder", no way of finishing of its own) and tells the model to follow yours where they differ; its `manage` tool is left out (its memory still works: `--no-memory` turns that off) |
+| `--system-prompt "<text>"` / `--system-prompt-file <file>` | instead of HeartCode's system prompt: the model is only what yours says. HeartCode's own workflow is off too (plan before editing, the "not done" checks, the browser check, reviews, handovers, memory and lessons): an answer is the answer. Its tools, permissions and model fallback stay. With `--append-system-prompt` as well, that text follows yours |
+| `--logs <kinds>` | this run's logs, whatever the user's settings say: `none`, `all`, or some of `tools`, `models`, `agent`, `errors`, `conversation`, `debug`, `requests` (comma-separated). Logs go to files under `~/.heart/logs` (or `HEART_LOGS`), never stdout. `HEART_LOG=<file>` puts every text log in one file |
 | `--mcp-config <file or JSON>` | more MCP servers (repeatable); `--strict-mcp-config`: only those. The model sees every server's tools by name, one line each, and gets a tool's arguments when it uses it (a call that doesn't fit them comes back with what's wrong, not run). What a server says about using its tools comes once, with the first result of one of them |
 | `--skills-dir <folder>` | more skills (repeatable) |
 | `--no-memory` | nothing read or kept: no memory notes, no web pages saved in the project, no wrap-up at the end (see "What a run leaves") |
@@ -234,11 +245,18 @@ server, a watcher) takes `background: true`. The `background` tool reads a comma
 (after waiting up to `wait` seconds for it), lists them and stops one. Whatever is still running is
 stopped when HeartCode exits.
 
+All of this section is HeartCode's own workflow. With `--system-prompt` none of it runs (no
+plan-first, no checks or review, no handovers for being stuck, no notes, research or wrap-up): the
+model's first answer without tool calls is the answer, and your program does its own checking.
+
 Before a task that changed files ends, another of the user's models (the same one when only one is
 used) reviews the work against the request in a request of its own; a NO sends it back to fix.
 The first file change of each message waits for the model's plan (its todo list): without one it
 isn't made, once (the model is told to write the plan first). Changing files and
-then saying it's done without running anything since sends it back to check. Nothing stops a
+then saying it's done without running anything since sends it back to check. A web page or game it
+changed, HeartCode opens in a headless browser itself before it accepts "done" (as `heartcode page`
+does): errors, a blank page or a canvas that draws nothing send it back. A plan of several steps is
+worked on by several helpers at once where steps stand alone (headless: nobody is asked). Nothing stops a
 task but `--max-turns`, `--max-retries` or an interrupt: a model going round in circles hands the
 work to the next model in the list. These requests are in `usage` and `modelUsage` too.
 
@@ -312,3 +330,8 @@ requests (their `retry` lines can come after the `result`). Their tokens are in 
 - Don't run `heart` without `-p` from an agent: it's a full-screen app and waits for a person.
 - Don't put API keys on the command line where other processes can see them; use `HEART_API_KEY`.
 - Don't run `heart settings` unless the user asked: it starts a web page and runs until stopped.
+- Don't use `--system-prompt` only to add instructions or a role: use `--append-system-prompt`, which
+  keeps HeartCode's checks (plan, tests, review). Replace it only when your program brings its own
+  workflow and checks the work itself.
+- Don't parse logs for results: read `result` (JSON) or the stream. Logs are files, for people
+  debugging, and may be off (`--logs none`).

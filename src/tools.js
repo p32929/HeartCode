@@ -14,6 +14,7 @@ import { c, diffLines, renderDiff, planPick } from './ui.js'
 import { pageCheck } from './check.js'
 import { killTree } from './spawn.js'
 import { scoreOf } from './rankings.js'
+import { byRecord } from './record.js'
 import { family } from './client.js'
 import { webFetch, webSearch, fetchPage, pageView } from './web.js'
 import { savePage, saveSearch, findResearch } from './research.js'
@@ -751,11 +752,11 @@ export function extraTools(s) {
   }
   if (!s.isSub && s.subagent) {
     const team = s.team?.() ?? []
-    const model = { type: 'string', description: team.some((t) => t.jobs) ? 'Which helper does the job ("provider model" from "Your helpers"). Left out: the first helper.' : 'Which of your models does the job ("provider model" from "Your other models"). Left out: yours, or with images you can\'t see, the first of yours that can.' }
+    const model = { type: 'string', description: team.some((t) => t.jobs) ? 'Which helper does the job ("provider model" from "Your helpers"). Left out: the first helper. "list": all of them, nothing started.' : 'Which of your models does the job ("provider model" from "Your other models"). Left out: yours, or with images you can\'t see, the first of yours that can. "list": all of them, nothing started.' }
     const images = { type: 'array', items: str, description: 'Image paths or URLs for the helper to look at. Needs a model that sees images.' }
     out.push({ name: 'agent', get description() { return prompt('agent/tool-agent') }, parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }) }, ['description', 'prompt']) })
   }
-  return [...out, ...(s.director && !s.appendSystem ? s.director.toolDefs(s) : [])] // manage (director.js); not when a program gives the instructions (--append-system-prompt)
+  return [...out, ...(s.director && !s.appendSystem && !s.ownSystem ? s.director.toolDefs(s) : [])] // manage (director.js); not when a program gives the instructions (--append-system-prompt, --system-prompt)
 }
 
 // todo: the model's checklist for this message, shown to the user each time it changes.
@@ -963,7 +964,7 @@ async function comparePart(s, t, brief, signal, id) {
   const tools = [{ provider: s.client?.provider, model: s.client?.model }, ...(s.team?.() ?? []).filter((x) => x.tools !== false)]
   const pool = tools.some((x) => x.jobs) ? tools.filter((x, i) => i === 0 || x.jobs) : tools // helpers ticked: those (and this model)
   const named = t.model && pool.find((x) => `${x.provider} ${x.model}` === t.model || x.model === t.model || t.model.endsWith(` ${x.model}`))
-  const ranked = pool.map((x) => ({ x, score: scoreOf(x.model) })).sort((a, b) => a.score - b.score).map((r) => r.x)
+  const ranked = pool.map((x) => ({ x, t: x, score: scoreOf(x.model) })).sort(byRecord).map((r) => r.x) // moved by the track record (record.js)
   const first = named ?? ranked[0]
   const second = ranked.find((x) => x !== first && family(x.model) !== family(first.model))
   if (!first || !second) return null
@@ -990,7 +991,7 @@ async function comparePart(s, t, brief, signal, id) {
       pick = 0
       why = 'no one could compare them; the first kept'
       const ask = prompt('agent/compare', { task: s.task ?? '', part: t.content, ...Object.fromEntries(results.flatMap((r, i) => [[`model${i}`, r.model.model], [`said${i}`, clip(r.said, 1500)], [`changes${i}`, clip(r.diffs.join('\n\n'), 6000)], [`check${i}`, r.check ? clip(r.check.report, 600) : '(no page to open)']])) })
-      const judges = [...(s.team?.() ?? []).filter((x) => !pair.some((p) => p.provider === x.provider && p.model === x.model)).map((x) => ({ x, score: scoreOf(x.model) })).sort((a, b) => a.score - b.score).map((r) => r.x).slice(0, 2), null]
+      const judges = [...(s.team?.() ?? []).filter((x) => !pair.some((p) => p.provider === x.provider && p.model === x.model)).map((x) => ({ x, t: x, score: scoreOf(x.model) })).sort(byRecord).map((r) => r.x).slice(0, 2), null]
       for (const j of judges) {
         try {
           const { client } = j ? await s.engineFor(j) : { client: s.client }

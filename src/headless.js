@@ -144,7 +144,7 @@ export class HeadlessUI {
 }
 
 // Runs the messages (prompt, or stdin) and writes the output. Returns the exit code.
-// app: the App (bin/heartcode.js); opts: { prompt, input, output, appendSystem }
+// app: the App (bin/heartcode.js); opts: { prompt, input, output, appendSystem, ownSystem }
 export async function runHeadless(app, opts) {
   const out = opts.output ?? 'text'
   const emit = (obj) => process.stdout.write(JSON.stringify(obj) + '\n')
@@ -156,6 +156,7 @@ export async function runHeadless(app, opts) {
     return 1
   }
   s.appendSystem = opts.appendSystem || undefined
+  s.ownSystem = opts.ownSystem || undefined // --system-prompt: the program's, instead of HeartCode's (agent.js)
   const session_id = app.chat.id
   const model = `${s.client.provider ?? app.cfg.provider}/${s.client.model}`
 
