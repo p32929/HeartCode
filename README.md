@@ -22,70 +22,70 @@ has none, so there's nothing for anyone to poison.
 ## What it does differently
 
 **It keeps working when a model doesn't**
-- Give it a list of models, from any providers (free ones too). When one hits a rate limit, goes
+1. Give it a list of models, from any providers (free ones too). When one hits a rate limit, goes
   down or fails, the next one answers and the work goes on. A ↻ in the status bar shows it.
-- When a conversation gets too long for a model, it moves to one of your models with more room
+2. When a conversation gets too long for a model, it moves to one of your models with more room
   instead of summarizing things away.
-- When a model goes round in circles, another takes over. Only you stop it (Esc).
-- A model that shows it can't do the task (stuck, going round, or saying "done" while the work is
+3. When a model goes round in circles, another takes over. Only you stop it (Esc).
+4. A model that shows it can't do the task (stuck, going round, or saying "done" while the work is
   still broken) hands it to the best-ranked of your models it hasn't tried (LMArena's rankings),
   not just the next in your list. Your list still decides who starts, and who answers when one is
   down.
-- It remembers how each model does in real work (tasks finished; handed over, reviews that said
+5. It remembers how each model does in real work (tasks finished; handed over, reviews that said
   no, broken replies). A model that keeps doing well comes first when HeartCode picks by ranking; one
   that fails most of its work goes last and doesn't start a message while another can (*Settings →
   Learn from each model's track record*; the Models list shows each one's record on hover).
-- Models are told to say when they're stuck, and believed: first a different approach, then a
+6. Models are told to say when they're stuck, and believed: first a different approach, then a
   second opinion from another of your models, then the next model takes over (not another version
   of the same one). The same happens when a model says "I can't" without trying its tools, or
   answers again without doing anything after being told it isn't done.
 
 **It works carefully**
-- It asks what you want before it builds, reads the current docs before it uses something, and
+1. It asks what you want before it builds, reads the current docs before it uses something, and
   makes a plan before it changes anything.
-- It runs and tests what it changed before it says "done", and another of your models checks the
+2. It runs and tests what it changed before it says "done", and another of your models checks the
   result against what you asked.
-- A web page or game it changed, HeartCode opens in a real browser itself before it accepts "done":
+3. A web page or game it changed, HeartCode opens in a real browser itself before it accepts "done":
   errors, a blank page or a canvas that draws nothing send it back to work, whatever the model's own
   checks said.
-- It writes the least code that works and changes only what the task needs.
+4. It writes the least code that works and changes only what the task needs.
 
 **It learns, per project**
-- Every web page it reads is saved in `.heartcode/research/`.
-- After a task, it saves what's worth knowing as notes (`.heartcode/memory/`) and deletes the junk
+1. Every web page it reads is saved in `.heartcode/research/`.
+2. After a task, it saves what's worth knowing as notes (`.heartcode/memory/`) and deletes the junk
   and throwaway files, in the background.
-- A mistake it fixes becomes a lesson it won't repeat. So does what blocked a task, or what got it
+3. A mistake it fixes becomes a lesson it won't repeat. So does what blocked a task, or what got it
   unstuck, so the next task like it starts knowing.
 
 **It gets good work out of small and local models**
-- Models that can't call tools are guided one simple question at a time.
-- What each model can do comes from [models.dev](https://models.dev), so nothing is wasted
+1. Models that can't call tools are guided one simple question at a time.
+2. What each model can do comes from [models.dev](https://models.dev), so nothing is wasted
   finding out.
-- It sends only what's needed, and never sends `max_tokens`, so no reply is cut short.
-- A short system prompt: who it is, where, and seven core rules. The fuller guidance for each kind
+3. It sends only what's needed, and never sends `max_tokens`, so no reply is cut short.
+4. A short system prompt: who it is, where, and seven core rules. The fuller guidance for each kind
   of work (finding its way, changing code, proving it works, research, parts on other models) comes
   once, when the model starts that kind of work. Your other models: the first five are named, the
   rest are a tool call away.
 
 **And the rest you'd expect**
-- **Set up in a web page** (`/settings`), not by editing config files.
-- **Skills, MCP servers and hooks** in Claude Code's formats; `/import` brings yours over.
-- **Tabs** (`Alt+T`) and git worktrees, for work kept apart.
-- **Servers in the background**: the model starts a dev server and keeps working. `Alt+B` shows
+1. **Set up in a web page** (`/settings`), not by editing config files.
+2. **Skills, MCP servers and hooks** in Claude Code's formats; `/import` brings yours over.
+3. **Tabs** (`Alt+T`) and git worktrees, for work kept apart.
+4. **Servers in the background**: the model starts a dev server and keeps working. `Alt+B` shows
   the running ones' logs live (`A`: the stopped ones too).
-- **Notifications** when a task finishes, fails or waits for you: a sound (HeartCode's own heartbeat), a
+5. **Notifications** when a task finishes, fails or waits for you: a sound (HeartCode's own heartbeat), a
   desktop notification and/or a Telegram message. Asked once at the first start; `/notifications`
   changes it any time (or `/settings` → Notifications, each event on its own).
-- **"Done" said, not guessed**: when the model changed or ran something, it says it's finished (and
+6. **"Done" said, not guessed**: when the model changed or ran something, it says it's finished (and
   what it checked) before it answers; one that stops without saying so is asked whether every part
   is done and checked. In the terminal, not in `heart -p`.
-- **Logs** of exactly what you choose (seven kinds, all off by default), readable on the settings page.
-- **`heart -p`** runs one task without the screen, for other tools and AI agents, like `claude -p`
+7. **Logs** of exactly what you choose (seven kinds, all off by default), readable on the settings page.
+8. **`heart -p`** runs one task without the screen, for other tools and AI agents, like `claude -p`
   (see [SKILL.md](SKILL.md)). A program can add its own instructions (`--append-system-prompt`) or
   replace HeartCode's entirely (`--system-prompt`), and choose the run's logs (`--logs`).
-- **`heartcode page index.html`** checks a web page in a real browser (errors, blank page, faint
+9. **`heartcode page index.html`** checks a web page in a real browser (errors, blank page, faint
   text, missing icons) and saves desktop and phone screenshots.
-- **`/context`** shows what fills the context window. `/update` installs a newer version.
+10. **`/context`** shows what fills the context window. `/update` installs a newer version.
 
 ## What happens when you ask it to make something
 
@@ -207,15 +207,15 @@ Go back to the terminal. While the settings page is on, HeartCode shows a dialog
 
 Ask it to read, change, run and fix things in your project, like any coding agent.
 
-- `/` shows every command; `heart --help` lists the rest.
-- `Shift+Tab` changes what it may do without asking.
-- `Esc` twice (or `Ctrl+C` twice) stops it; `Esc` also closes a dialog.
-- While it works, `Enter` queues a message. `Esc` (or `↑`) takes queued messages back into the box
+1. `/` shows every command; `heart --help` lists the rest.
+2. `Shift+Tab` changes what it may do without asking.
+3. `Esc` twice (or `Ctrl+C` twice) stops it; `Esc` also closes a dialog.
+4. While it works, `Enter` queues a message. `Esc` (or `↑`) takes queued messages back into the box
   to change or drop, without stopping the work.
-- `Shift+Enter` (or `Option+Enter`) adds a new line. `Alt+O` shows all of the model's thinking (two lines
+5. `Shift+Enter` (or `Option+Enter`) adds a new line. `Alt+O` shows all of the model's thinking (two lines
   of it show otherwise), `Alt+L` the whole plan (three of its steps show while it works). The same
   call made again and again shows once, with a count (×4).
-- While it works, commands that don't change the conversation (`/help`, `/cost`, `/diff`,
+6. While it works, commands that don't change the conversation (`/help`, `/cost`, `/diff`,
   `/settings`…) run at once; the ones that do (`/compact`, `/rewind`…) wait until it's done.
 
 <img width="972" height="611" alt="Image" src="https://github.com/user-attachments/assets/dcf9488a-7cee-4a24-8e3e-c86876d379c9" />
@@ -224,25 +224,25 @@ Ask it to read, change, run and fix things in your project, like any coding agen
 
 What's in the sidebar:
 
-- **Models**: *List* (the models HeartCode uses, in order) and *Providers* (where they come from).
-- **General**: what it may do without asking, colors, thinking effort, voice input, web search,
+1. **Models**: *List* (the models HeartCode uses, in order) and *Providers* (where they come from).
+2. **General**: what it may do without asking, colors, thinking effort, voice input, web search,
   and the *Status bar* (drag and drop what it shows). **Notifications**: a sound, a desktop notification, Telegram.
-- **Skills**, **MCP servers** and **System prompt**: what HeartCode can do and what it's told.
-- **Advanced**: *Logs* and *Files* (the rest of the settings, as files).
+3. **Skills**, **MCP servers** and **System prompt**: what HeartCode can do and what it's told.
+4. **Advanced**: *Logs* and *Files* (the rest of the settings, as files).
 
 On **Models → List**, also:
 
-- **Drag rows** to fine-tune the order. **Clear sort** puts the list back in its own order; **Clear
+1. **Drag rows** to fine-tune the order. **Clear sort** puts the list back in its own order; **Clear
   all** turns off the filters too.
-- **Filter** by name, provider, test result, context, abilities or free.
-- **Helpers**: the models #1 can hand parts of a task to. In the *Helper* column, switch a model on
+2. **Filter** by name, provider, test result, context, abilities or free.
+3. **Helpers**: the models #1 can hand parts of a task to. In the *Helper* column, switch a model on
   and pick what it's good at: **UI & visuals**, **Code & logic**, **Big & hard**, **Quick & cheap**
   (hover an icon to see what it covers). *Helpers* (at the top): **Automatic** (what **Check models**
   sets) picks them and their jobs for you, from the tests and the rankings, and a job goes to the fastest helper that's good at it (from its test); if it can't
   do it, the best-ranked of the others takes over. **My picks**: yours, and *Used* sets which helper
   #1 takes first: **by score** (the default: best placed in LMArena's rankings first), in your order,
   or by your provider ranking.
-- A model *not found* in models.dev: **Retry** looks it up again, or **Set up** tells HeartCode what
+4. A model *not found* in models.dev: **Retry** looks it up again, or **Set up** tells HeartCode what
   it can do.
 
 ### Recommended: let it see what it builds
@@ -255,38 +255,38 @@ them, especially for anything with a screen.
 AI-made interfaces often look generic, crowded or broken. This skill gives the model a method
 (understand the job, break the design down, take every size and color from one system, check it)
 plus a theme, a starter page and guides for common components, in shadcn/ui's look.
-- Install: **Skills** → paste `p32929/p32929_design_skill` in *Install a skill* → **Install**.
+1. Install: **Skills** → paste `p32929/p32929_design_skill` in *Install a skill* → **Install**.
   Or type `/install_skill p32929/p32929_design_skill` in HeartCode.
-- The model loads it when a task is about how something looks. To have it in every message, set
+2. The model loads it when a task is about how something looks. To have it in every message, set
   *Who uses it* to *Always on*.
 
 **Chrome DevTools MCP**: so it can check web pages in a real browser.
 The model opens what it built in Chrome, clicks through it, reads the console errors and takes
 screenshots, instead of guessing whether it works.
-- Install: **MCP servers** → **+ Add a server** → paste `npx -y chrome-devtools-mcp@latest --isolated`
+1. Install: **MCP servers** → **+ Add a server** → paste `npx -y chrome-devtools-mcp@latest --isolated`
   → **Add server**. Its name (*chrome-devtools*) comes from the command.
-- `--isolated` gives it a fresh browser profile each time, so it never touches your own Chrome.
+2. `--isolated` gives it a fresh browser profile each time, so it never touches your own Chrome.
   Add `--headless` with the *+ flag* box to hide the window; untick a flag to turn it off.
-- Needs Google Chrome installed.
+3. Needs Google Chrome installed.
 
 **Computer use MCP**: so it can use apps outside the browser.
 Screenshots, mouse, keyboard and apps on your computer: for testing a desktop app or a game, or
 anything a browser can't reach.
-- Install: **+ Add a server** → paste `npx -y @zavora-ai/computer-use-mcp@latest` → **Add server**.
+1. Install: **+ Add a server** → paste `npx -y @zavora-ai/computer-use-mcp@latest` → **Add server**.
   Its name is *computer-use*.
-- On macOS, give your terminal app **Accessibility** and **Screen Recording** access (System
+2. On macOS, give your terminal app **Accessibility** and **Screen Recording** access (System
   Settings → Privacy & Security), and install the Xcode command line tools
   (`xcode-select --install`).
-- It can click anything on your screen. Switch it off in the list when you don't need it.
+3. It can click anything on your screen. Switch it off in the list when you don't need it.
 
 For screenshots to be useful, one of your models must be able to see images. If #1 can't, it
 hands the looking to the first of your models that can.
 
 **Also useful:**
-- **Notifications**: a sound and/or a desktop notification on this computer, or a Telegram message,
+1. **Notifications**: a sound and/or a desktop notification on this computer, or a Telegram message,
   when a task finishes, fails or waits for you (each event on its own; *Try it* plays it). For Telegram, make a bot with
   [@BotFather](https://t.me/BotFather), paste its token, press Start in the bot; HeartCode finds your chat.
-- **Advanced → Logs**: switch on only the kinds you need and read them there (by run, searched,
+2. **Advanced → Logs**: switch on only the kinds you need and read them there (by run, searched,
   live). Logs older than 3 days are deleted.
 
 ## Thanks
@@ -304,3 +304,15 @@ short) come from Karpathy's guidelines, Grill Me, Superpowers, Ponytail and Cave
 ## License
 
 [MIT](LICENSE)
+
+## Contributing
+
+Contributions are very welcome, thank you! Before you start on a pull request, please open an issue and tell me what you would like to add or change. That way we can agree on it first, and your time is not wasted on something that might not fit. Thanks for helping make HeartCode better.
+
+## Share
+
+<a href="https://p32929.github.io/share/?repo=HeartCode"><img src="https://p32929.github.io/readme/share.svg" alt="Share this with your friends in just a click" width="420"></a>
+
+## Support
+
+<a href="https://p32929.github.io/support/"><img src="https://p32929.github.io/readme/support.svg" alt="If you like my works and want to support me, feel free to support" width="420"></a>
