@@ -190,7 +190,8 @@ asks a model that can for what it
 can't do itself (a model that can't see asks one that can about a screenshot: "which tiles show a
 chair?"), several at once when there are many images or parts, and a helper that fails is handed to
 the next capable model in the user's order (with helpers picked: the next helper, then the model in
-use) until one does the job. A helper works until its job is done (no step
+use) until one does the job; the next one is told what the one before it found, did and changed,
+and goes on from there. A helper works until its job is done (no step
 limit; `--max-turns` applies to it too). Their tokens are in `usage`, and each model's in
 `modelUsage`.
 
@@ -257,8 +258,14 @@ then saying it's done without running anything since sends it back to check. A w
 changed, HeartCode opens in a headless browser itself before it accepts "done" (as `heartcode page`
 does): errors, a blank page or a canvas that draws nothing send it back. A plan of several steps is
 worked on by several helpers at once where steps stand alone (headless: nobody is asked). Nothing stops a
-task but `--max-turns`, `--max-retries` or an interrupt: a model going round in circles hands the
-work to the next model in the list. These requests are in `usage` and `modelUsage` too.
+task but `--max-turns`, `--max-retries` or an interrupt: a model going round in circles (the same
+step three times with nothing changed, also with other steps in between) hands the work to the next
+model in the list. The model can't write HeartCode's own files in `.heartcode/` (`sessions`,
+`outputs`, `worktrees`, `models.json`), and its file lists leave them out.
+
+Only in the terminal, not with `-p`: the model's `done` tool (it says it's finished; one that stops
+without saying so is asked again) and notifications (a sound, a desktop notification, Telegram).
+Your program decides when a `-p` run's work is done, and tells the user itself. These requests are in `usage` and `modelUsage` too.
 
 ## Long tasks: a stream of events
 
