@@ -2,6 +2,15 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.67 (2026-11-16)
+
+- **Helpers picked by job and speed**: the model says what kind of job it hands off (ui, code, hard,
+  quick). With *Helpers: Automatic*, it goes to the fastest helper in its test that's good at that job;
+  if it can't do it, the best-ranked of the others (with the track record) takes over. With *My picks*,
+  the first one you picked for that job, in the *Used* order.
+- **"Manual" is now "My picks"**: the helpers you switched on and what each is for; both modes
+  explained on hover.
+
 ## 0.1.66 (2026-11-16)
 
 - **"Done" said, not guessed** (in the terminal, not `-p`): when the model changed or ran something,

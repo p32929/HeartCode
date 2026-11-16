@@ -2617,11 +2617,11 @@ function drawMine(s) {
   // the order helpers are picked in when #1 starts them: your list's, or your provider ranking's
   const helperOrder = (by) => api('/api/helper-order', { by, rank: RANK }).then((r) => ((S.helperOrder = r.helperOrder), drawMine(S)), (e) => toast(e.message, true))
   // who chooses the helpers: HeartCode (from the tests and the rankings, again when those change) or you
-  const chooser = h('label', { className: 'h-order', title: 'Helpers\nWho picks the helpers: the models #1 can hand side jobs to (looking at a screenshot, a review, a part of the plan).\n\nAutomatic: HeartCode picks them, and what each is for, from the tests and the rankings, and picks again when those change.\nManual: you switch them on, and pick their jobs, in the Helper column.' },
+  const chooser = h('label', { className: 'h-order', title: 'Helpers\nWho picks the helpers: the models #1 can hand side jobs to (looking at a screenshot, a review, a part of the plan).\n\nAutomatic: HeartCode picks them, and what each is good at, from the tests and the rankings (again when those change). A job goes to the fastest helper that\'s good at it; if that one can\'t do it, the best-ranked of the others takes over.\nMy picks: you switch them on, and pick their jobs, in the Helper column. A job goes to the first one good at it, in the order set under Used; if it can\'t, the next.' },
     h('span', { className: 'mt-setl' }, ic('sparkles'), h('span', { className: 'lt', textContent: 'Helpers' })),
     h('select', { id: 'h-auto', onchange: (e) => setAuto(e.target.value === 'auto', e.target) },
-      [['auto', 'Automatic'], ['manual', 'Manual']].map(([v, t]) => h('option', { value: v, textContent: t, selected: (S.helpersAuto ? 'auto' : 'manual') === v }))))
-  const orderBy = h('span', { className: 'h-order', title: 'Used\nWhich helper #1 takes first when several fit a job.\n\nBy score: the best-ranked in public rankings (the default).\nIn list order: the first in your list.\nBy provider: by your provider ranking (Order providers).' }, h('span', { className: 'mt-setl' }, ic('bars'), h('span', { className: 'lt', textContent: 'Used' })),
+      [['auto', 'Automatic'], ['manual', 'My picks']].map(([v, t]) => h('option', { value: v, textContent: t, selected: (S.helpersAuto ? 'auto' : 'manual') === v }))))
+  const orderBy = h('span', { className: 'h-order', title: 'Used\nWhich helper #1 takes first when several fit a job (with Automatic helpers: the fastest good at it; this order when no kind of job is given).\n\nBy score: the best-ranked in public rankings (the default).\nIn list order: the first in your list.\nBy provider: by your provider ranking (Order providers).' }, h('span', { className: 'mt-setl' }, ic('bars'), h('span', { className: 'lt', textContent: 'Used' })),
     h('div', { className: 'seg', role: 'radiogroup', 'aria-label': 'The order helpers are used in' },
       [['own', 'in list order', 'when #1 starts a helper, it takes the first one that fits the job, in the list\'s order'], ['provider', 'by provider', 'when #1 starts a helper, it takes them by the provider ranking (Order providers), each provider\'s in the list\'s order. The list itself stays as it is'], ['score', 'by score', 'when #1 starts a helper, it takes the best ranked first: its best place in LMArena\'s public rankings for coding, web apps, long real tasks and hard prompts (Update model info). Models not ranked come after, in the list\'s order']].map(([v, t, about]) =>
         h('label', { className: (S.helperOrder ?? 'score') === v ? 'on' : '', title: about },
@@ -2854,7 +2854,7 @@ function helperCell(t, at) {
         h('div', { className: 'tcover', textContent: covers }),
         sugd ? h('div', { className: 'tcover', textContent: `Suggested from ${SUGGEST_WHY[j]}.` }) : null,
         S.helpersAuto && has ? h('div', { className: 'tcover', textContent: 'Chosen automatically, from the rankings and the tests.' }) : null,
-        h('div', { className: 'thint', textContent: (has ? `Click: ${t.model} isn't picked for this any more` : `Click: #1 gives these jobs to ${t.model}${jobs ? '' : ' (it becomes a helper)'}`) + (S.helpersAuto ? ' · from then on: Manual' : '') }),
+        h('div', { className: 'thint', textContent: (has ? `Click: ${t.model} isn't picked for this any more` : `Click: #1 gives these jobs to ${t.model}${jobs ? '' : ' (it becomes a helper)'}`) + (S.helpersAuto ? ' · from then on: My picks' : '') }),
       ])
     }))
 }

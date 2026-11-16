@@ -236,9 +236,11 @@ On **Models → List**, also:
 - **Helpers**: the models #1 can hand parts of a task to. In the *Helper* column, switch a model on
   and pick what it's good at: **UI & visuals**, **Code & logic**, **Big & hard**, **Quick & cheap**
   (hover an icon to see what it covers). **Suggest helpers** proposes them from the models that
-  passed **Test all** and the rankings; or set *Helpers* (at the top) to **Automatic**. *Used*:
-  which helper #1 takes first: **by score** (the default: best placed in LMArena's rankings first),
-  in your order, or by your provider ranking.
+  passed **Test all** and the rankings. *Helpers* (at the top): **Automatic** picks them and their
+  jobs for you, and a job goes to the fastest helper that's good at it (from its test); if it can't
+  do it, the best-ranked of the others takes over. **My picks**: yours, and *Used* sets which helper
+  #1 takes first: **by score** (the default: best placed in LMArena's rankings first), in your order,
+  or by your provider ranking.
 - A model *not found* in models.dev: **Retry** looks it up again, or **Set up** tells HeartCode what
   it can do.
 

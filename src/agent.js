@@ -295,6 +295,17 @@ export class Session {
     // only one model available (a pinned model, or you have just one): helpers use it, whatever was asked
     const first = !want || all.length === 1 ? all[0] : (all.find((t) => name(t) === want || `${t.provider}/${t.model}` === want) ?? all.find((t) => t.model === want || want.endsWith(` ${t.model}`) || t.model.endsWith(`/${want}`)))
     const able = (t) => !withImages || t.images
+    // a kind of job and no model named: the helpers good at it first. Picked for you (auto): the
+    // fastest of them in its test, and if it fails the best-ranked of the rest (a stronger one, by
+    // the rankings and the track record); picked by you: in your order
+    const fit = !want && helpers && HELPER_JOBS[args.job] ? helpers.filter((t) => t.jobs.includes(args.job) && able(t)) : []
+    if (fit.length) {
+      const auto = fit[0].auto
+      const fast = auto ? [...fit].sort((a, b) => (a.ms ?? Infinity) - (b.ms ?? Infinity))[0] : fit[0]
+      const rest = all.filter((t) => t !== fast && able(t))
+      const strong = auto ? rest.map((t) => ({ t, score: scoreOf(t.model) })).sort(byRecord).map((x) => x.t) : [...fit.filter((t) => t !== fast), ...rest.filter((t) => !fit.includes(t))]
+      return { order: [fast, ...strong], first: fast, all, helpers }
+    }
     let order = first ? [first, ...all.filter((t) => t !== first)].filter(able) : []
     if (first && !order.length && helpers) order = [self, ...team].filter(able) // no helper sees images: any of yours that does
     return { order, first, all, helpers }

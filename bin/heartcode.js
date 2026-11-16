@@ -859,9 +859,10 @@ class App {
     // helpers use this session's models (the set you chose, else your list), minus the one in use —
     // so a pinned single model gives no team, and a chosen set keeps helpers within it
     const now = this.s?.client.rotation?.list[this.s.client.rotation.at] ?? this.sessionModels()[0]
+    const tested = readJson(path.join(HOME, 'model-tests.json'), {}) // the settings page's tests
     return this.sessionModels()
       .filter((t) => !(t.provider === now?.provider && t.model === now?.model))
-      .map((t) => ({ ...t, ...this.abilities(t), jobs: jobsOf(this.cfg.helpers?.[`${t.provider}/${t.model}`]) })) // jobs: ticked as a helper on Your models (what for)
+      .map((t) => ({ ...t, ...this.abilities(t), jobs: jobsOf(this.cfg.helpers?.[`${t.provider}/${t.model}`]), ms: tested[`${t.provider}/${t.model}`]?.ms, auto: this.cfg.helpersAuto === true })) // jobs: ticked as a helper on Your models (what for); ms: how fast it answered its test; auto: helpers picked for you (a job goes to the fastest that's good at it)
       .sort(this.byProvider()) // helpers picked in your list's order, your provider ranking's, or by score (Your models)
   }
 

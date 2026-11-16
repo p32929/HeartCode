@@ -284,7 +284,7 @@ Besides you (tool calls, {{you}}), the user picked these helpers, in their order
 {{models}}
 
 Use them with the agent tool ("model" picks one, "images" gives it images):
-- Give a part to the helper good at it; none fits: the first one ("model" left out).{{else}}# Your other models
+- Give a part to a helper with job (ui, code, hard or quick): HeartCode picks the one for it, and another if it fails. Or name one with "model".{{else}}# Your other models
 
 Besides you (tool calls, {{you}}), the user set up these models, in their order:
 {{models}}

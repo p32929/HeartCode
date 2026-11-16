@@ -760,7 +760,8 @@ export function extraTools(s) {
     const team = s.team?.() ?? []
     const model = { type: 'string', description: team.some((t) => t.jobs) ? 'Which helper does the job ("provider model" from "Your helpers"). Left out: the first helper. "list": all of them, nothing started.' : 'Which of your models does the job ("provider model" from "Your other models"). Left out: yours, or with images you can\'t see, the first of yours that can. "list": all of them, nothing started.' }
     const images = { type: 'array', items: str, description: 'Image paths or URLs for the helper to look at. Needs a model that sees images.' }
-    out.push({ name: 'agent', get description() { return prompt('agent/tool-agent') }, parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }) }, ['description', 'prompt']) })
+    const job = { type: 'string', enum: ['ui', 'code', 'hard', 'quick'], description: 'What kind of job: ui (anything people look at), code (logic, bugs, tests, reviews), hard (planning, long or tricky work), quick (searching, reading, small edits). With "model" left out, HeartCode gives it to a helper good at it.' }
+    out.push({ name: 'agent', get description() { return prompt('agent/tool-agent') }, parameters: obj({ description: str, prompt: str, ...(team.length && { model, images }), ...(team.some((t) => t.jobs) && { job }) }, ['description', 'prompt']) })
   }
   return [...out, ...(s.director && !s.appendSystem && !s.ownSystem ? s.director.toolDefs(s) : [])] // manage (director.js); not when a program gives the instructions (--append-system-prompt, --system-prompt)
 }
