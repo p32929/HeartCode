@@ -3189,15 +3189,16 @@ async function clearAll() {
   toast(`deleted: logs on disk now ${bytes(r.size.total)}`)
 }
 // The kinds of log: requests (their own viewer), then the text logs (choices.logKinds)
-const logKindsOf = (s) => ({ requests: { label: 'Requests', about: 'each request to a model and its reply or error: which failed, which worked, which fallback answered' }, ...s.choices.logKinds })
+const logKindsOf = (s) => ({ requests: { label: 'Requests', about: 'each request to a model and its reply or error: which failed, which worked, which fallback answered', ...s.choices.logSamples?.requests }, ...s.choices.logKinds })
 function drawLogging(s) {
   drawDisk()
   const on = s.settings.logs
-  put($('l-kinds'), Object.entries(logKindsOf(s)).map(([k, { label, about }]) => h('label', { className: 'opt' },
+  // hover: what its lines look like and how much room it takes (choices: LOG_SAMPLES in log.js)
+  put($('l-kinds'), Object.entries(logKindsOf(s)).map(([k, { label, about, size, short, example }]) => h('label', { className: 'opt', title: `${label}\n${about[0].toUpperCase() + about.slice(1)}.${example ? `\n\nWhat it looks like:\n${example}` : ''}${size ? `\n\nSpace: ${size}.` : ''}` },
     h('div', { className: 't' }, h('b', { textContent: label }), h('span', { textContent: about[0].toUpperCase() + about.slice(1) }),
-      h('span', { className: 'file', textContent: k === 'requests' ? 'requests/<run>/ · a file per request' : `runs/<run>/${k}.log` }),
+      h('span', { className: 'file', textContent: `${k === 'requests' ? 'requests/<run>/ · a file per request' : `runs/<run>/${k}.log`}${short ? ` · ${short}` : ''}` }),
       k === 'requests' ? h('select', { disabled: !on.requests, 'aria-label': 'how much of each request', onchange: (e) => act('/api/setting', { name: 'logDetail', value: e.target.value }, 'saved: from the next request') },
-        [['full', 'Everything: what was sent and what came back'], ['summary', 'Only a summary: model, result, error, timings, tokens']].map(([v, l]) => h('option', { value: v, textContent: l, selected: s.settings.logDetail === v }))) : null),
+        [['full', 'Everything: what was sent and what came back (~20 kB+ a request)'], ['summary', 'Only a summary: model, result, error, timings, tokens (~1 kB a request)']].map(([v, l]) => h('option', { value: v, textContent: l, selected: s.settings.logDetail === v }))) : null),
     sw({ checked: on[k], 'aria-label': label, onchange: (e) => act('/api/log-kind', { kind: k, on: e.target.checked }, `${label}: ${e.target.checked ? 'logged from now on' : 'off'}`) }))))
   $('l-alloff').disabled = !Object.values(on).some(Boolean)
   $('l-where').textContent = s.logs.runs.replace(/[\\/]runs$/, '')

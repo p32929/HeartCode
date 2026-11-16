@@ -263,6 +263,13 @@ No answer. Decide yourself, carry on, and say in your reply what you assumed.
 Give a side job to a helper agent with a fresh context, to keep the details out of this conversation: searching or reading a lot of code, web research, reviewing changes. It has your tools (but no helpers of its own, no memory, and it can't ask the user) and sees only your prompt: say exactly what to do and what to report. Its final reply is the result. description: 3-5 words for the user.
 Several agent calls in one reply run at the same time: one helper per independent part, or the same question to several helpers to compare their answers.
 
+## helper-progress
+
+<!-- Added to a helper's job when another helper worked on it and failed. {{model}}: that helper's model; {{why}}: why it stopped; {{done}}: its calls and their results, and the files it changed. -->
+Another helper ({{model}}) already worked on this job and stopped ({{why}}). What it did, newest last:
+{{done}}
+Go on from there: use what it found and made; don't redo it. Check anything that looks unfinished.
+
 ## team
 
 <!-- In the system prompt when the user set up other models. {{models}}: the first few, one per line, in the user's order, with what each can do (and with {{helpers}}: what the user picked it for). Only the first few, then "…and N more" (the agent tool's model "list" gives them all). {{you}}: what this model can do. {{helpers}}: the user ticked helpers on Your models: only those are listed and can be started. -->

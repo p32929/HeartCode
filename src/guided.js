@@ -276,6 +276,7 @@ class Guided {
     this.st.wantsChange = await this.yesNo(prompt('guided/intent'), false) // the model says, not words in the task
     let last = ''
     let repeats = 0
+    const done = new Map() // each step's signature (and the edits made by then) → how many times this message
     // No step limit (Esc stops it); a model doing the same thing three times in a row is stopped.
     let step = 0
     for (; !this.s.maxTurns || step < this.s.maxTurns; step++) {
@@ -292,8 +293,9 @@ class Guided {
         if (missing && (this.held = (this.held ?? 0) + 1) <= 3) {
           if (this.held === 3) {
             const was = this.s.client.model
+            const gone = { provider: this.s.client.provider, model: was } // before moveOn changes them
             if (this.s.client.moveOn?.(`${was} said it was done, but ${missing === 'nothing' ? 'changed nothing' : "didn't run its change"}`)) {
-              record({ provider: this.s.client.provider, model: was }, 'handover') // its track record (record.js)
+              record(gone, 'handover') // its track record (record.js)
               this.ui.warn(`${was} said it was done, but ${missing === 'nothing' ? 'changed nothing' : "didn't run its change"}; handing over to ${this.s.client.model}`)
               this.held = 0
             }
@@ -323,13 +325,22 @@ class Guided {
       repeats = sig === last ? repeats + 1 : 0
       last = sig
       this.st.avoid = repeats ? action : null
-      if (repeats >= 2) {
-        // the next of your models carries on; with none, it goes on being told (only Esc stops it)
+      // the same step again and again, in a row or with others between (search X, something else,
+      // search X…: a small model going round): the third time, the next of your models carries on;
+      // with none, it goes on being told (only Esc stops it)
+      const key = `${sig}#${this.st.edits}` // a step again with nothing changed since (editing a file again, or reading it after an edit, is progress)
+      const times = (done.get(key) ?? 0) + 1
+      done.set(key, times)
+      if (repeats >= 2 || times >= 3) {
         const was = this.s.client.model
-        if (this.s.client.moveOn?.(`${was} did the same thing three times in a row`)) this.ui.warn(`${was} did the same thing three times in a row; handing over to ${this.s.client.model}`)
-        else this.ui.warn(`${was} did the same thing three times in a row — it carries on, told so; Esc stops it`)
+        const gone = { provider: this.s.client.provider, model: was } // before moveOn changes them
+        const why = repeats >= 2 ? 'did the same thing three times in a row' : 'kept doing the same thing (three times)'
+        record(gone, 'handover') // its track record (record.js)
+        if (this.s.client.moveOn?.(`${was} ${why}`)) this.ui.warn(`${was} ${why}; handing over to ${this.s.client.model}`)
+        else this.ui.warn(`${was} ${why} — it carries on, told so; Esc stops it`)
         this.note(null, 'warning', prompt('guided/note-repeated'))
         repeats = 0
+        done.clear()
         continue
       }
       if (repeats === 1) this.note(null, 'warning', prompt('guided/note-repeated'))

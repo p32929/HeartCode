@@ -2,6 +2,17 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.65 (2026-11-16)
+
+- **Loops caught even when broken up**: a model that keeps doing the same thing (three times) with
+  other steps in between and nothing changed hands over to the next model, not only three in a row.
+- **A stopped helper's work isn't lost**: when a helper fails or stalls, the next one is told what it
+  found, did and changed, and goes on from there instead of starting over.
+- **HeartCode's own files are off limits**: models can't write `.heartcode/sessions`, `outputs`,
+  `worktrees` or `models.json`, and file lists don't show them.
+- **Track record**: a guided-mode handover is counted against the model that handed over.
+- **Logs page**: each kind shows how much space it takes, and hovering shows what its lines look like.
+
 ## 0.1.64 (2026-11-15)
 
 - **Models added by name go to their provider, not the list**: on Providers, type one name or

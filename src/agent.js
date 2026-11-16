@@ -262,15 +262,17 @@ export class Session {
     if (!first) return `error: no model "${String(args.model).trim()}". ${helpers ? 'Your helpers' : 'Yours'}: ${all.map(name).join(', ')}`
     if (!order.length) return 'error: none of your models can see images'
     const failed = []
+    let carry = '' // what a helper that failed had done: the next one is told, not starting over
     for (const [i, t] of order.entries()) {
       if (args.part) (args.part.by = t.model), (args.part.byProvider = t.provider ?? this.client.provider), sendTodos(this) // a part of the plan: the model doing it, shown beside it
       let answer = ''
       try {
-        answer = (await this.#helper(t, task, images, args.description, id, signal, args.ownFiles, args.root))?.trim()
+        answer = (await this.#helper(t, carry ? `${task}\n\n${carry}` : task, images, args.description, id, signal, args.ownFiles, args.root))?.trim()
       } catch (e) {
         if (e.name === 'AbortError' || signal?.aborted) throw e
         if (e.maxTurns) return `error: the helper ${e.message}` // the caller's limit: every other model would stop there too
         failed.push(`${t.model}: ${clip(e.message, 150)}`)
+        if (e.progress) carry = prompt('agent/helper-progress', { model: t.model, why: clip(e.message, 150), done: e.progress })
       }
       record({ provider: t.provider ?? this.client.provider, model: t.model ?? this.client.model }, answer ? 'helped' : 'helper-failed') // its track record (record.js)
       if (answer) return t === first ? answer : `(Answered by ${name(t)}, not ${name(first)}${failed.length ? `: ${failed.join('; ')}` : ''})\n\n${answer}`
@@ -329,6 +331,9 @@ export class Session {
       const answer = await (strat.actions === 'tools' ? runNative : runGuided)(helper, task, images, signal)
       log('agent', `helper "${label}" done`, answer)
       return answer
+    } catch (e) {
+      e.progress ??= progressOf(helper) // what it did before it failed: the next helper goes on from there
+      throw e
     } finally {
       if (this.ui.helpers?.delete(label)) this.ui.render?.()
       this.#release(helper)
@@ -628,6 +633,22 @@ export const helpersOf = (team) => (team.some((t) => t.jobs) ? team.filter((t) =
 
 // Your other models and what each can do, for the agent tool's model (only when there are any): a
 // short line each, in your list's order. With helpers ticked: only them, and what each is good at.
+// What a helper did before it failed, for the one that takes its job over: its calls and what came
+// back (newest kept when it's long), and the files it changed.
+const GUIDE_TEXT = /\n\n(?:How to [^\n]*\(once; keep it in mind\)|Parts on other models \(once)[\s\S]*$/
+function progressOf(h) {
+  const out = []
+  for (const m of h.messages ?? []) {
+    if (m.role === 'assistant' && m.content && typeof m.content === 'string') out.push(`said: ${clip(m.content.replace(/\s+/g, ' '), 300)}`)
+    if (m.role === 'assistant') for (const c of m.tool_calls ?? []) out.push(`- ${c.function.name} ${clip(c.function.arguments ?? '', 200)}`)
+    if (m.role === 'tool') out.push(`  → ${clip(String(m.content ?? '').replace(GUIDE_TEXT, '').replace(/\s+/g, ' '), 300)}`) // without the guidance that came with it
+  }
+  let text = ''
+  for (let i = out.length - 1; i >= 0 && text.length < 8000; i--) text = `${out[i]}\n${text}`
+  const files = [...(h.changed ?? [])]
+  return [text.trim(), files.length && `Files it changed: ${files.join(', ')}`].filter(Boolean).join('\n')
+}
+
 // Only the first few are in the system prompt (a list of hundreds would fill it); the agent tool
 // with model "list" gives them all (teamLines).
 const TEAM_SHOWN = 5

@@ -113,7 +113,7 @@ export function listFiles(root, limit = 2000) {
     })
     return out
       .split('\0')
-      .filter((f) => f && fs.existsSync(path.join(root, f)))
+      .filter((f) => f && !OWN_DATA.test(f) && fs.existsSync(path.join(root, f))) // not HeartCode's own records
       .sort()
       .slice(0, limit)
   } catch {}
@@ -130,7 +130,7 @@ export function listFiles(root, limit = 2000) {
       if (IGNORE.has(e.name)) continue
       const p = path.join(dir, e.name)
       if (e.isDirectory()) walk(p)
-      else if (e.isFile()) files.push(path.relative(root, p))
+      else if (e.isFile() && !OWN_DATA.test(path.relative(root, p).split(path.sep).join('/'))) files.push(path.relative(root, p)) // not HeartCode's own records
     }
   }
   walk(root)
@@ -439,8 +439,13 @@ export function declined(s, ok, what) {
 const PLACEHOLDER = /(\.\.\.|…)\s*(rest|existing|remaining|unchanged|other)|rest of (the )?(code|file)|existing code (here|unchanged)/i
 
 // Shows the diff, asks the user, writes (next = null: deletes the file). Shared by both agent modes.
+// HeartCode's own records in the project: the conversations, saved outputs, worktrees and the folder's
+// model choice. A model never writes them (a small one once wrote its notes over this conversation).
+const OWN_DATA = /^\.heartcode\/(?:sessions|outputs|worktrees)(?:\/|$)|^\.heartcode\/models\.json$/
+
 export async function proposeWrite(s, rel, old, next) {
   if (old === next) return { status: 'unchanged' }
+  if (OWN_DATA.test(path.relative(s.root, resolveIn(s.root, rel)).split(path.sep).join('/'))) return { status: 'rejected', feedback: `${rel} is HeartCode's own record (this conversation and its state), not a project file: it can't be written. Put what you write in the project's own files.` }
   if (s.ui.permission === 'plan') return { status: 'rejected', feedback: prompt('agent/plan-refused', { command: false }) } // both modes write through here
   if (s.ownFiles && !s.ownFiles.includes(path.resolve(s.root, rel))) return { status: 'rejected', feedback: prompt('agent/part-files', { file: rel, files: s.ownFiles.map((f) => path.relative(s.root, f)).join(', ') }) } // a part's helper: every way of writing (a patch in run_command, guided mode)
   const ops = diffLines(old, next ?? '')

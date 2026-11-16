@@ -27,7 +27,7 @@ import { capabilities } from './capabilities.js'
 import { connect, sendTelegram, tokenHint, tgReady, EVENTS } from './telegram.js'
 import { searchSettings, testSearxng, ENGINE_NAMES } from './web.js'
 import { recordOf, unreliable, records } from './record.js'
-import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays, logSize, clearLogs, LOG_KINDS, kindsOn, listLogRuns, readLog } from './log.js'
+import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays, logSize, clearLogs, LOG_KINDS, LOG_SAMPLES, kindsOn, listLogRuns, readLog } from './log.js'
 import { fetch } from './http.js' // not the built-in one: see http.js
 
 const PAGE = new URL('./settings.html', import.meta.url)
@@ -482,7 +482,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     telegram: (({ token, bot, chatName, chatId, on, events } = {}) => ({ hint: tokenHint(token), bot: bot ?? null, chatName: chatName ?? null, connected: Boolean(token && chatId), on: on !== false, events: Object.fromEntries(Object.keys(EVENTS).map((k) => [k, events?.[k] !== false])), names: EVENTS }))(cfg.telegram),
     search: { ...(({ searxng, order, off }) => ({ searxng, order, off }))(searchSettings()), names: ENGINE_NAMES }, // web search: your SearXNG, the engines' order and switches
     capabilities: capabilities(cfg), // features that need outside tools, and whether they're here
-    choices: { permissions: PERMISSIONS, effort: EFFORTS, theme: Object.keys(THEMES), toggles: TOGGLES, statusItems: STATUS_ITEMS, logKinds: Object.fromEntries(Object.entries(LOG_KINDS).map(([k, { label, about }]) => [k, { label, about }])) },
+    choices: { permissions: PERMISSIONS, effort: EFFORTS, theme: Object.keys(THEMES), toggles: TOGGLES, statusItems: STATUS_ITEMS, logKinds: Object.fromEntries(Object.entries(LOG_KINDS).map(([k, { label, about }]) => [k, { label, about, ...LOG_SAMPLES[k] }])), logSamples: LOG_SAMPLES },
     files: FILES.map(([name, about, json, example]) => ({ name, about, json, example, text: fs.existsSync(path.join(HOME, name)) ? fs.readFileSync(path.join(HOME, name), 'utf8') : '' })),
     skills: [...loadSkills(null).values()].map((s) => ({ name: s.name, description: s.description, use: s.use, mine: s.file.startsWith(skillsDir() + path.sep), text: fs.readFileSync(s.file, 'utf8'), path: tilde(path.basename(s.file) === 'SKILL.md' ? path.dirname(s.file) : s.file), files: skillFiles(s) })), // a folder skill: its other files (guides, assets)
     mcp: mcpServers(),

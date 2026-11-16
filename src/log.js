@@ -22,7 +22,8 @@ const STAMP = process.env.HEART_LOG_STAMP || stamp()
 export const LOG_DIR = process.env.HEART_LOG === 'off' ? null : path.resolve(process.env.HEART_LOG_DIR || path.join(LOGS, 'runs', STAMP))
 
 // The kinds of text log, what each is for, and which topics (log('topic', …)) go in it. A topic not
-// listed goes in debug.
+// listed goes in debug. size and example: shown on the settings page (measured on real runs: a small
+// fix is about 10 requests, a long task a few hundred).
 export const LOG_KINDS = {
   tools: { label: 'Tools & commands', about: 'what HeartCode did on this machine: each tool call and its result, commands and background commands, MCP calls, files written', topics: ['tool', 'command', 'mcp', 'background', 'lsp', 'format', 'write', 'web', 'research', 'worktree'] },
   models: { label: 'Model choices', about: 'why a model answered or didn\'t: fallbacks, retries and quirks found', topics: ['rotate', 'retry', 'quirk'] },
@@ -30,6 +31,20 @@ export const LOG_KINDS = {
   errors: { label: 'Errors', about: 'what went wrong: errors, crashes and warnings, with where they came from', topics: ['error', 'crash', 'warn', 'exit'] },
   conversation: { label: 'Conversation', about: 'a plain transcript: the messages typed, the answers, its questions and the replies', topics: ['input', 'ask', 'answer'] },
   debug: { label: 'Debug', about: 'everything else, for a bug report: HTTP, settings, voice, Telegram, sign-ins, tabs, headless and ACP', topics: [] },
+}
+// Each kind's size and a few of its lines, for the settings page (measured on real runs)
+export const LOG_SAMPLES = {
+  requests: {
+    short: '~20 kB+ a request',
+    size: '~20 kB a request, growing with the conversation (each holds all of it): ~200 kB a small fix, tens of MB a long task. Summary: ~1 kB a request',
+    example: '0003-ok-openrouter-nemotron-3-ultra.json: the model, its place in the list, status 200, 10.9 s (first word after 10.6 s), tokens in and out, and (Everything) the whole request and reply',
+  },
+  tools: { short: '~2 kB a small fix', size: '~2 kB a small fix; up to a few MB a long task (results are written whole)', example: "[tool] read_file { path: 'math.js' }\n[tool] read_file result: 1| function add(a, b) {…\n[command] node test.js → exit code 0" },
+  models: { short: '<1 kB a task', size: 'under 1 kB a task; more when models fail and switch', example: "[rotate] this message starts on openrouter · nemotron-3-ultra\n[retry] attempt 1 failed, waiting 1000ms: 429 rate-limited\n[rotate] GLM-4.7-Flash didn't start answering within 45s → glm-5.3-flash" },
+  agent: { short: '<1 kB a task', size: 'under 1 kB a task', example: '[task] node test.js fails, fix it (tools mode)\n[review] nemotron-3-ultra: YES\n[agent] track record: openrouter/nemotron-3-ultra done' },
+  errors: { short: 'tiny', size: 'tiny: only when something goes wrong', example: '[error] task interrupted by the user\n[crash] Error: write EPIPE\n[exit] code 1' },
+  conversation: { short: '~1 kB a task', size: 'about what was typed and answered: ~1 kB a task', example: '[input] node test.js fails, fix it\n[answer] Fixed. The loop started at i = 1, skipping the first element…' },
+  debug: { short: '~140 kB a small fix', size: "big: every request's whole body too: ~140 kB a small fix, tens of MB a long task", example: '[http] → POST …/chat/completions {"model": "…", "messages": [the whole conversation]}\n[settings] taken in: models changed\n[session] openrouter · nemotron-3-ultra at https://…' },
 }
 const KIND_OF = Object.fromEntries(Object.entries(LOG_KINDS).flatMap(([k, v]) => v.topics.map((t) => [t, k])))
 export const kindOf = (topic) => KIND_OF[topic] ?? 'debug'
