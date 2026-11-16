@@ -186,7 +186,9 @@ When the user picked helpers (on *Your models*: a switch per model and what it's
 visuals, Code & logic, Big & hard, Quick & cheap), it knows only those, and a job goes to the
 helper good at it (no model named: the first helper, in the user's order or by their provider
 ranking, as they chose; with helpers picked automatically, the fastest in its test that's good at
-the job, and the best-ranked of the others if it fails); else it knows all of them, in the user's order, with what each can do. It
+the job, and the best-ranked of the others if it fails); else it knows all of them, in the user's order. For each model it's told what it can do (context, tools, images,
+thinking), its places in LMArena's rankings, how fast it answered its test, its price and its track
+record in HeartCode, and picks with that. It
 asks a model that can for what it
 can't do itself (a model that can't see asks one that can about a screenshot: "which tiles show a
 chair?"), several at once when there are many images or parts, and a helper that fails is handed to
@@ -215,7 +217,7 @@ HEART_API_KEY=… heart -u https://api.groq.com/openai/v1 -m openai/gpt-oss-120b
 A model server on this machine (Ollama on :11434, LM Studio on :1234, llama.cpp on :8080) is
 found on its own while no provider is set up yet. The user can also set everything up in a browser: `heart settings` (its link has
 the machine's network address, so it opens from another device too, for HeartCode on a server), where
-**Test all** under *Models → List* sends each model a short message to show it really answers, and how fast. A run that fails with a wrong key or an unknown model: ask the user to test it there.
+**Check models** under *Models → List* looks up each model (models.dev, rankings), picks helpers, and sends each a short message to show it really answers, and how fast. A run that fails with a wrong key or an unknown model: ask the user to test it there.
 
 ## More context for the task
 

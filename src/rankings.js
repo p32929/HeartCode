@@ -1,6 +1,7 @@
 // What each model is good at, from public rankings (LMArena: people comparing two models' answers
 // to the same prompt, by skill): overall, coding, web apps, images. Fetched once a week into
-// ~/.heart/rankings.json (with an orchestrator, or Update model info); a model is matched to its entry by name.
+// ~/.heart/rankings.json (with an orchestrator, or Check models); a model is matched to its entry by name.
+import fs from 'node:fs'
 import path from 'node:path'
 import { HOME, readJson, writeJson } from './config.js'
 import { log } from './log.js'
@@ -16,7 +17,14 @@ const FILES = 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/re
 // (agent: long real tasks, done by the model with tools; hard prompts: the hardest questions)
 const LISTS = ['text:overall', 'text:coding', 'text:hard_prompts', 'webdev:webdev', 'vision:overall', 'agent:overall']
 
-export const loadRankings = () => readJson(FILE, null)
+// read again only when the file changed (the team list in the system prompt asks at every step)
+let cache = { at: null, data: null }
+export function loadRankings() {
+  const st = fs.statSync(FILE, { throwIfNoEntry: false })
+  const at = st ? `${st.mtimeMs}:${st.size}` : ''
+  if (cache.at !== at) cache = { at, data: st ? readJson(FILE, null) : null }
+  return cache.data
+}
 
 // One ranking (text, webdev…), every category in it: { 'text:coding': [{ name, rank, score, votes }], … } (score: its rating there)
 async function fetchRanking(config, signal) {

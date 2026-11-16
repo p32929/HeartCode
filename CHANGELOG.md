@@ -2,6 +2,17 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.68 (2026-11-16)
+
+- **One button, Check models**: on *Models → List* it does what Update model info, Test all and
+  Suggest helpers did, in one go: what each model can do and costs (models.dev), its rankings
+  (LMArena), a short test of each, then helpers picked automatically from the ones that work.
+  Filtered: *Check N* tests only those shown.
+- **The model picks a helper knowing everything**: each of your other models comes with its places
+  in the rankings ("coding #36 of 416"), how fast it answered its test, its price and its track
+  record here, besides what it can do. Rankings are read again only when they change.
+- Every commit to HeartCode bumps the patch version (a git hook in `.githooks/`, no packages).
+
 ## 0.1.67 (2026-11-16)
 
 - **Helpers picked by job and speed**: the model says what kind of job it hands off (ui, code, hard,

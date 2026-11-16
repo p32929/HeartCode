@@ -7,8 +7,8 @@ import { skillFiles, readSkillFile } from './skills.js'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { est, estMessages, Client, tokensOf, COMPACT_SHARE, family } from './client.js'
-import { scoreOf } from './rankings.js'
-import { record, byRecord } from './record.js'
+import { scoreOf, rankIn, loadRankings } from './rankings.js'
+import { record, byRecord, recordOf, unreliable, records } from './record.js'
 import { pageCheck } from './check.js'
 import { runGuided } from './guided.js'
 import { markUsed, removeResearch, findResearch } from './research.js'
@@ -663,11 +663,26 @@ function progressOf(h) {
 // Only the first few are in the system prompt (a list of hundreds would fill it); the agent tool
 // with model "list" gives them all (teamLines).
 const TEAM_SHOWN = 5
+// Each of your other models, for the one answering to choose from: what it can do, its places in the
+// public rankings (LMArena), how fast it answered its test, its price, and how it did here (its track record)
+const RANKED = { 'text:coding': 'coding', 'webdev:webdev': 'web apps', 'agent:overall': 'long tasks with tools', 'text:hard_prompts': 'hard prompts', 'vision:overall': 'images' }
 const teamLines = (s) => {
   const team = s.team?.() ?? []
+  const data = loadRankings()
   const can = (t) => [t.tools === false && 'no tool calls', t.images && 'images', t.thinking && 'thinking', t.context && `${kTokens(t.context)} context`].filter(Boolean)
-  const good = (t) => (t.jobs?.length ? ` · good at: ${t.jobs.map((j) => HELPER_JOBS[j]?.[1]).filter(Boolean).join('; ')}` : '')
-  return (helpersOf(team) ?? team).map((t) => `- ${t.provider} ${t.model}${can(t).length ? `: ${can(t).join(', ')}` : ''}${good(t)}`)
+  const ranks = (t) => {
+    if (!data) return null
+    const at = Object.entries(RANKED).flatMap(([k, what]) => ((r) => (r ? [`${what} #${r.rank} of ${r.of}`] : []))(rankIn(t.model, k, data)))
+    return at.length ? `ranked ${at.join(', ')}` : 'not in the rankings'
+  }
+  const speed = (t) => (t.ms != null ? `answered its test in ${(t.ms / 1000).toFixed(1)}s` : 'not tested')
+  const price = (t) => (!t.price || (t.price.input == null && t.price.output == null) ? 'price unknown' : !t.price.input && !t.price.output ? 'free' : `$${t.price.input ?? '?'} in / $${t.price.output ?? '?'} out per M tokens`)
+  const done = (t) => {
+    const r = records.on && recordOf(t)
+    return r && r.good + r.bad >= 1 ? `here: ${Math.round(r.good)} done, ${Math.round(r.bad)} failed${unreliable(t) ? ' (fails most of its work)' : ''}` : null
+  }
+  const good = (t) => (t.jobs?.length ? `good at: ${t.jobs.map((j) => HELPER_JOBS[j]?.[1]).filter(Boolean).join('; ')}` : null)
+  return (helpersOf(team) ?? team).map((t) => `- ${t.provider} ${t.model}: ${[can(t).join(', '), ranks(t), speed(t), price(t), done(t), good(t)].filter(Boolean).join(' · ')}`)
 }
 const teamPrompt = (s) => {
   const team = s.team?.() ?? []

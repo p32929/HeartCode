@@ -862,7 +862,7 @@ class App {
     const tested = readJson(path.join(HOME, 'model-tests.json'), {}) // the settings page's tests
     return this.sessionModels()
       .filter((t) => !(t.provider === now?.provider && t.model === now?.model))
-      .map((t) => ({ ...t, ...this.abilities(t), jobs: jobsOf(this.cfg.helpers?.[`${t.provider}/${t.model}`]), ms: tested[`${t.provider}/${t.model}`]?.ms, auto: this.cfg.helpersAuto === true })) // jobs: ticked as a helper on Your models (what for); ms: how fast it answered its test; auto: helpers picked for you (a job goes to the fastest that's good at it)
+      .map((t) => ({ ...t, ...this.abilities(t), jobs: jobsOf(this.cfg.helpers?.[`${t.provider}/${t.model}`]), ms: tested[`${t.provider}/${t.model}`]?.ms, price: priceOf(t.provider, this.cfg.providers[t.provider]?.baseUrl, t.model), auto: this.cfg.helpersAuto === true })) // price: models.dev's, $ per million tokens // jobs: ticked as a helper on Your models (what for); ms: how fast it answered its test; auto: helpers picked for you (a job goes to the fastest that's good at it)
       .sort(this.byProvider()) // helpers picked in your list's order, your provider ranking's, or by score (Your models)
   }
 

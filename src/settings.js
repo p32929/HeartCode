@@ -425,26 +425,20 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   // provider is on, each with the jobs it's good at (at least one): UI & visuals and Code &
   // logic when it's in the top half of LMArena's web-app or coding ranking; Big & hard when it thinks
   // with a big context, or is in the top half of its agent (long real tasks) or hardest-prompts ranking; Quick & cheap when its test was faster than most (or it's good at none of the
-  // others). have: picks already made (a job a model has isn't picked again). { key: [jobs] }.
-  const pickHelpers = (have = {}) => {
+  // others). { key: [jobs] }.
+  const pickHelpers = () => {
     const ranked = loadRankings()
     const order = [{ provider: cfg.provider, model: cfg.model }, ...rotationOf(cfg).then]
     const pool = order.map((t) => ({ ...t, can: testedOf(t), test: tests[keyOf(t)] })).filter((t) => !cfg.providers[t.provider]?.off && t.test?.ok && t.test.ms != null) // without tool calls too: a helper then works in guided mode
     const top = (t, list) => ((x) => Boolean(x && x.rank / x.of <= 0.5))(rankIn(t.model, list, ranked))
     const times = pool.map((t) => t.test.ms).sort((x, y) => x - y)
     const fast = times[Math.floor((times.length - 1) / 2)] // the middle time: faster than that is quick
-    const picks = Object.fromEntries(pool.map((t) => {
+    return Object.fromEntries(pool.map((t) => {
       const jobs = [top(t, 'webdev:webdev') && 'ui', top(t, 'text:coding') && 'code', ((t.can?.thinking && t.can.context >= 128_000) || top(t, 'agent:overall') || top(t, 'text:hard_prompts')) && 'hard', t.test.ms <= fast && 'quick'].filter(Boolean)
       return [keyOf(t), jobs.length ? jobs : ['quick']]
     }))
-    const out = {}
-    for (const [k, jobs] of Object.entries(picks)) {
-      const fresh = jobs.filter((j) => !have[k]?.includes(j))
-      if (fresh.length) out[k] = fresh
-    }
-    return out
   }
-  // Picked for you: the helpers made again from what's known now (after Update model info, a test run,
+  // Picked for you: the helpers made again from what's known now (after Check models, a test run,
   // your list's order changed). true when they changed.
   const autoPick = () => {
     if (cfg.helpersAuto !== true) return false
@@ -496,7 +490,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
 
   const routes = {
     'GET /api/state': () => state(),
-    // LMArena's public rankings, fetched now (with models.dev: Update model info on Your models)
+    // LMArena's public rankings, fetched now (with models.dev: Check models on Your models)
     'POST /api/rankings': async () => {
       if (!(await rankings({ now: true }))) throw new Error("couldn't get the rankings (huggingface.co)")
       autoPick()
@@ -650,8 +644,6 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       if (!autoPick()) save('setting:helpersAuto')
       return { helpers: helpersOf(cfg.helpers), helpersAuto: cfg.helpersAuto === true }
     },
-    // Suggest helpers: what would be picked, beside what you have (nothing saved)
-    'POST /api/helpers/suggest': () => ({ suggest: pickHelpers(helpersOf(cfg.helpers)) }),
     'POST /api/helpers': ({ helpers }) => {
       if (!helpers || typeof helpers !== 'object') throw new Error('helpers: an object')
       cfg.helpersAuto = undefined // your own picks now
