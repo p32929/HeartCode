@@ -240,6 +240,11 @@ Your plan and checklist: first the result in one line and what "done" looks like
 Stuck: you've tried a step twice and it still doesn't work, or you don't know how to go on. Mark it stuck at once, with why (what you tried, what happened). It gets you help: a new approach, a second opinion, then another model. Saying so is expected; claiming it works when it doesn't wastes the user's time.
 Steps that stand alone can run at the same time on your other models (parallel, model, files, compare): how comes with your first list's result.
 
+## tool-done
+
+<!-- The done tool (interactive CLI only, main conversation): the model says the user's request is finished, or that only the user can unblock it. A reply that worked on the task and ends without it is sent back (not-done: undeclared). -->
+Say that what the user asked is finished: every part of it done, and checked by you just now. Call it BEFORE your final answer, in every reply where you changed or ran something; then write the answer once. checked: what you checked, item by item, and how. waiting: true when it isn't finished because only the user can unblock it (your answer says what you need). Not finished and you can go on: don't call it, go on.
+
 ## tool-web_search
 
 Search the web. Returns titles, URLs and snippets; read a page with web_fetch. When pages this project already saved match, you get those instead of a search (with the date read): use them, or search with fresh: true for something that changes (a latest version).
@@ -342,7 +347,10 @@ Write the plan with the todo tool: the result in one line, then each step with h
 
 ## not-done
 
-<!-- Sent when the model stops but isn't done. One placeholder is set, and only its part is sent. {{asked}}: it wrote questions for the user as text (only ask_user lets them answer); {{todos}}: open todo items, a "- item" per line; {{unchecked}}: files changed and not run or tested since; {{missing}}: files its answer names that don't exist; {{early}}: it named a next step but didn't take it; {{shrunk}}: files it changed that are much smaller than an earlier version (one per line); {{broken}}: HeartCode opened {{page}} in a browser and it doesn't work (the report), {{shots}} its screenshots, {{command}} the same check as a command. -->
+<!-- Sent when the model stops but isn't done. One placeholder is set, and only its part is sent. {{undeclared}}: it worked on the task (changed or ran something) and stopped without calling done; {{request}}: the user's request; {{asked}}: it wrote questions for the user as text (only ask_user lets them answer); {{todos}}: open todo items, a "- item" per line; {{unchecked}}: files changed and not run or tested since; {{missing}}: files its answer names that don't exist; {{early}}: it named a next step but didn't take it; {{shrunk}}: files it changed that are much smaller than an earlier version (one per line); {{broken}}: HeartCode opened {{page}} in a browser and it doesn't work (the report), {{shots}} its screenshots, {{command}} the same check as a command. -->
+{{#if undeclared}}(You stopped without saying the task is finished. The user asked:
+{{request}}
+Is every part of it done, and checked by you? Yes: call done with what you checked, then give your final answer. No: do the rest now with your tools. Only the user can unblock it: call done with waiting: true and say what you need.){{/if}}
 {{#if asked}}(The user can't answer questions written as text. Ask each one with the ask_user tool: question, header, options (your recommended one first), emphasis: true. Put all the calls in one reply.){{/if}}
 {{#if todos}}(Not done: your todo list has open items:
 {{todos}}

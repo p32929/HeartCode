@@ -907,7 +907,7 @@
 
     <!-- Notifications -->
     <section class="page" id="page-notify">
-      <div class="head"><div><h1>Notifications</h1><p class="lead">A phone message when HeartCode finishes a task, fails, or needs an answer: no need to watch it work.</p></div></div>
+      <div class="head"><div><h1>Notifications</h1><p class="lead">A sound, a desktop notification or a phone message when HeartCode finishes a task, fails, or needs an answer: no need to watch it work. All off until switched on.</p></div></div>
       <div class="cols">
         <div class="stack">
           <div class="card">
@@ -915,10 +915,15 @@
             <p class="sub">Through a private bot: only its owner gets its messages.</p>
             <div id="tg-setup"></div>
           </div>
+          <div class="card">
+            <h2>On this computer</h2>
+            <p class="sub">While HeartCode runs in a terminal here (not <span class="mono">-p</span>: the program that started it tells you). Its own sound: a heartbeat.</p>
+            <div id="al-setup"></div>
+          </div>
         </div>
         <div class="stack">
           <div class="card">
-            <h2>When to send one</h2>
+            <h2>When to send one to Telegram</h2>
             <p class="sub">Each on its own. A running HeartCode follows changes right away.</p>
             <div id="tg-events"></div>
           </div>
@@ -1294,7 +1299,7 @@ const BUTTON_ICONS = [
 // card titles: their icon and color
 const TITLE_ICONS = [
   [/^permissions/i, 'shield', 'green'], [/^terminal colors/i, 'palette', 'pink'], [/^behavior/i, 'toggle', 'blue'], [/^model$/i, 'cpu', 'violet'], [/^voice/i, 'mic', 'amber'],
-  [/^external tools/i, 'tool', 'slate'], [/^web search/i, 'globe', 'teal'], [/^telegram/i, 'send', 'blue'], [/^when to send/i, 'bell', 'amber'], [/^servers/i, 'server', 'teal'],
+  [/^external tools/i, 'tool', 'slate'], [/^web search/i, 'globe', 'teal'], [/^telegram/i, 'send', 'blue'], [/^when to send/i, 'bell', 'amber'], [/^on this computer/i, 'monitor', 'green'], [/^servers/i, 'server', 'teal'],
   [/^install from/i, 'download', 'violet'], [/^the run's log/i, 'file', 'gray'], [/^requests logged/i, 'activity', 'blue'], [/^requests$/i, 'activity', 'blue'], [/^lines/i, 'layout', 'slate'],
   [/^items/i, 'list', 'slate'], [/^show the status bar/i, 'layout', 'slate'],
 ]
@@ -3144,6 +3149,21 @@ function drawNotify(s) {
     h('div', { className: 't' }, h('b', { textContent: label }), h('span', { textContent: TG_EVENT_INFO[k] ?? '' })),
     sw({ checked: t.events?.[k] !== false, disabled: !t.connected, 'aria-label': label, onchange: (e) => act('/api/telegram/set', { event: k, value: e.target.checked }, `${label}: ${e.target.checked ? 'on' : 'off'}`) }))))
 }
+// --- On this computer: a sound and/or a desktop notification, and which events (alert.js) ---
+function drawAlerts(s) {
+  const a = s.alerts ?? { events: {} }
+  const on = a.sound || a.popup
+  const row = (k, title, about) => h('label', { className: 'opt' }, h('div', { className: 't' }, h('b', { textContent: title }), h('span', { textContent: about })),
+    sw({ checked: a[k], 'aria-label': title, onchange: (e) => act('/api/alerts/set', { [k]: e.target.checked }, `${title}: ${e.target.checked ? 'on' : 'off'}`) }))
+  put($('al-setup'),
+    row('sound', 'Play a sound', 'A heartbeat: rising when done, falling when it failed, twice when it waits for you.'),
+    row('popup', 'Show a desktop notification', 'The task and how it ended, in the corner of the screen.'),
+    ...Object.entries({ done: 'A task finished', failed: 'A task failed', waiting: 'HeartCode is waiting for an answer' }).map(([k, label]) => h('div', { className: 'opt' + (on ? '' : ' tg-off') }, // a div: in a label, a click on the row would press Try it
+      tile(...({ done: ['check', 'green'], failed: ['x', 'red'], waiting: ['clock', 'amber'] }[k])),
+      h('div', { className: 't' }, h('b', { textContent: label })),
+      h('button', { className: 'small ghost', type: 'button', textContent: 'Try it', title: a.popup ? 'Plays its sound and shows its notification' : 'Plays its sound', onclick: () => act('/api/alerts/test', { event: k }) }),
+      sw({ checked: a.events?.[k] !== false, disabled: !on, 'aria-label': label, onchange: (e) => act('/api/alerts/set', { event: k, value: e.target.checked }, `${label}: ${e.target.checked ? 'on' : 'off'}`) }))))
+}
 const TG_EVENT_INFO = {
   done: 'The task, how long it took, and the answer.',
   failed: 'The task and the error.',
@@ -3799,6 +3819,7 @@ function render(s) {
   drawGeneral(s)
   drawStatusBar(s)
   drawNotify(s)
+  drawAlerts(s)
   drawLogging(s)
   if (REQS) drawReqs()
   drawPrompts(s)

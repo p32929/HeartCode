@@ -915,7 +915,11 @@ async function runNative(s, task, images, signal) {
   attachNamed(s, task) // files the message names: as if already read (saves a round trip each)
   // the tools: built again each step (the model answering may change; client.js leaves them out for
   // one that can't call tools; plan mode may be left mid-message)
-  const toolList = () => [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name) && !(ui.permission === 'plan' && PLAN_HIDDEN.has(f.name)) && !(f.name === 'ask_user' && (ui.noUser || s.isSub))).map((f) => ({ type: 'function', function: f })) // ask_user: not headless, nor a helper (it reports to the main agent, which asks)
+  const toolList = () => [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name) && !(ui.permission === 'plan' && PLAN_HIDDEN.has(f.name)) && !(f.name === 'ask_user' && (ui.noUser || s.isSub)) && !(f.name === 'done' && !askDone())).map((f) => ({ type: 'function', function: f })) // ask_user: not headless, nor a helper (it reports to the main agent, which asks)
+  // done (the model says it's finished): the interactive CLI's main conversation only, not -p (its caller
+  // checks), a helper (it reports), plan mode (the plan's approval ends it) or another program's system prompt
+  const askDone = () => !s.isSub && !ui.noUser && !s.ownSystem && ui.permission !== 'plan'
+  s.saidDone = null // called done this message (tools.js): { checked, waiting }
   const guard = newGuard() // calls made again with nothing changed: the earlier result instead
   let lastCall = '' // the last call (tool and arguments), and how many times in a row
   let inRow = 0
@@ -1171,7 +1175,7 @@ async function runNative(s, task, images, signal) {
     // told it isn't done (open todos, a review's no, its own "couldn't"), and it answers again without
     // doing anything: the same answer, or one that only promises: the next of your models takes the task
     const same = (a, b) => a && b && a.replace(/\s+/g, ' ').trim().slice(0, 300) === b.replace(/\s+/g, ' ').trim().slice(0, 300)
-    if (!res.toolCalls.length && !sinceNudge && nudged && !s.isSub && client.rotation && (s.stuckHandovers ?? 0) < 2 && (same(res.content, lastFinal) || PROMISED_MORE.test(res.content) || SAYS_FAILED.test(res.content.slice(0, 400)) || s.proofFails > 0)) {
+    if (!res.toolCalls.length && !sinceNudge && nudged && !s.undeclaredSent && !s.isSub && client.rotation && (s.stuckHandovers ?? 0) < 2 && (same(res.content, lastFinal) || PROMISED_MORE.test(res.content) || SAYS_FAILED.test(res.content.slice(0, 400)) || s.proofFails > 0)) {
       handOver(s.proofFails > 0 ? `was told its page doesn't work when HeartCode opens it, and said it's done without changing anything` : `was told it isn't done and answered again without doing anything`)
       s.stuckHandovers++
       sinceNudge = true
@@ -1181,15 +1185,22 @@ async function runNative(s, task, images, signal) {
     // its page is still broken in HeartCode's check and nobody's left to take over: said, not hidden behind "done"
     if (!res.toolCalls.length && !sinceNudge && s.proofFails > 0 && !s.isSub) ui.warn(`HeartCode's own check: the page still doesn't work (errors, or nothing shown or drawn); this answer isn't proven`)
     if (!res.toolCalls.length) {
-      const more = sinceNudge && ((await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal)))
+      // worked on the task (changed or ran something) and stopped without saying it's finished: asked
+      // whether every part is done and checked, with the request. No cap: it ends when it calls done,
+      // or answers again without doing anything (sinceNudge), or Esc
+      const undeclared = sinceNudge && askDone() && !s.saidDone && (s.changed?.size || s.ran?.length) ? prompt('agent/not-done', { undeclared: true, request: clip(task, 3000) }) : null
+      s.undeclaredSent = Boolean(undeclared) // answering that again with nothing done isn't a handover
+      if (undeclared) log('task', 'stopped without calling done; asked whether it is finished')
+      const more = sinceNudge && (undeclared ?? (s.saidDone?.waiting ? null : (await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal))))
       showHeld(res.content) // after the review's line
       if (!more) {
-        if (!s.isSub && (s.changed?.size || s.ran?.length)) record(client, s.proofFails > 0 ? 'not-proven' : 'done') // work done (not a chat answer): its track record (record.js)
+        if (!s.isSub && (s.changed?.size || s.ran?.length) && !s.saidDone?.waiting && (s.saidDone || !askDone())) record(client, s.proofFails > 0 ? 'not-proven' : 'done') // work done (not a chat answer): its track record (record.js)
         s.wrapUpLater?.(task, res.content) // after the answer, beside what comes next
         return res.content
       }
       nudged++
       sinceNudge = false
+      s.saidDone = null // sent back: said again once it's finished
       s.messages.push({ role: 'user', content: more })
       // said done twice and its page is still broken in HeartCode's own check: the best-ranked model takes over
       if (s.proofFails >= 2 && !s.isSub && client.rotation) {
@@ -1253,7 +1264,9 @@ async function runNative(s, task, images, signal) {
               ? [args.action, args.kind, args.name, args.id && `#${args.id}`].filter(Boolean).join(' ')
               : name === 'agent'
                 ? ''
-                : name === 'todo' || name === 'ask_user'
+                : name === 'done'
+                  ? `${args.waiting ? 'waiting for you: ' : ''}${String(args.checked ?? '').split('\n').find((l) => l.trim()) ?? ''}`
+                  : name === 'todo' || name === 'ask_user'
                   ? ''
                   : (args.path ?? args.url ?? args.query ?? args.filter ?? args.name ?? '')
       if (name !== 'run_command' && !together.has(call.id) && !askedWith.has(call.id)) ui.step(name, name === 'agent' && args ? helperLine(args) : clip(detail, 80), name === 'agent' ? '' : client.model) // asked together: shown once, with the first; named by the model that made the call (an agent line names the helper's)

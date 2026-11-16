@@ -2,6 +2,17 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.66 (2026-11-16)
+
+- **"Done" said, not guessed** (in the terminal, not `-p`): when the model changed or ran something,
+  it says it's finished with the `done` tool (what it checked, or that it waits for you) before it
+  answers, shown as a `● done` line. One that stops without saying so gets the request back: is every
+  part done and checked? No cap; it ends when it says done, answers again without doing anything, or Esc.
+- **Notifications on this computer**: a sound (HeartCode's own heartbeat: rising when done, falling
+  when it failed, twice when it waits for you) and/or a desktop notification (macOS, Windows, Linux
+  with notify-send). Asked once at the first start; `/notifications` changes it any time; *Settings →
+  Notifications* has each event on its own and *Try it*. Off unless you choose it.
+
 ## 0.1.65 (2026-11-16)
 
 - **Loops caught even when broken up**: a model that keeps doing the same thing (three times) with

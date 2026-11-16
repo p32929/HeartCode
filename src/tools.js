@@ -682,6 +682,7 @@ export const TOOL_DEFS = [
   { name: 'run_command', get description() { return prompt('agent/tool-run_command') }, parameters: obj({ command: str, wait: int, background: { type: 'boolean' } }, ['command']) },
   { name: 'background', get description() { return prompt('agent/tool-background') }, parameters: obj({ action: { type: 'string', enum: ['output', 'list', 'stop'] }, id: int, wait: int }, ['action']) },
   { name: 'todo', get description() { return prompt('agent/tool-todo') }, parameters: obj({ todos: { type: 'array', items: obj({ content: str, status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'stuck'] }, why: str, parallel: { type: 'boolean' }, compare: { type: 'boolean' }, model: str, files: { type: 'array', items: str } }, ['content', 'status']) } }, ['todos']) },
+  { name: 'done', get description() { return prompt('agent/tool-done') }, parameters: obj({ checked: str, waiting: { type: 'boolean' } }, ['checked']) },
   { name: 'web_search', get description() { return prompt('agent/tool-web_search') }, parameters: obj({ query: str, fresh: { type: 'boolean' } }, ['query']) },
   { name: 'web_fetch', get description() { return prompt('agent/tool-web_fetch') }, parameters: obj({ url: str, look_for: str, start: int }, ['url']) },
   { name: 'ask_user', get description() { return prompt('agent/tool-ask_user') }, parameters: obj({ question: str, header: str, options: { type: 'array', items: str }, multiple: { type: 'boolean' }, emphasis: { type: 'boolean' } }, ['question', 'options']) }, // one question a call (small models manage that); several calls in one reply are one dialog (agent.js)
@@ -1777,6 +1778,9 @@ async function tool(name, args, s, signal, id) {
         return memoryTool(s, args)
       case 'todo':
         return await todoTool(s, args, signal, id)
+      case 'done':
+        s.saidDone = { checked: String(args.checked ?? ''), waiting: args.waiting === true }
+        return s.saidDone.waiting ? 'Noted. Now ask the user exactly what you need, once.' : 'Noted. Now write your final answer, once. Already wrote it? Then only what is new since, or nothing.'
       case 'web_search':
       case 'web_fetch':
         return await webTool(s, name, args, signal)

@@ -73,7 +73,12 @@ has none, so there's nothing for anyone to poison.
 - **Tabs** (`Alt+T`) and git worktrees, for work kept apart.
 - **Servers in the background**: the model starts a dev server and keeps working. `Alt+B` shows
   the running ones' logs live (`A`: the stopped ones too).
-- **Telegram messages** when a task finishes, fails or waits for you.
+- **Notifications** when a task finishes, fails or waits for you: a sound (HeartCode's own heartbeat), a
+  desktop notification and/or a Telegram message. Asked once at the first start; `/notifications`
+  changes it any time (or `/settings` → Notifications, each event on its own).
+- **"Done" said, not guessed**: when the model changed or ran something, it says it's finished (and
+  what it checked) before it answers; one that stops without saying so is asked whether every part
+  is done and checked. In the terminal, not in `heart -p`.
 - **Logs** of exactly what you choose (seven kinds, all off by default), readable on the settings page.
 - **`heart -p`** runs one task without the screen, for other tools and AI agents, like `claude -p`
   (see [SKILL.md](SKILL.md)). A program can add its own instructions (`--append-system-prompt`) or
@@ -219,7 +224,7 @@ What's in the sidebar:
 
 - **Models**: *List* (the models HeartCode uses, in order) and *Providers* (where they come from).
 - **General**: what it may do without asking, colors, thinking effort, voice input, web search,
-  and the *Status bar* (drag and drop what it shows). **Notifications**: Telegram.
+  and the *Status bar* (drag and drop what it shows). **Notifications**: a sound, a desktop notification, Telegram.
 - **Skills**, **MCP servers** and **System prompt**: what HeartCode can do and what it's told.
 - **Advanced**: *Logs* and *Files* (the rest of the settings, as files).
 
@@ -275,7 +280,8 @@ For screenshots to be useful, one of your models must be able to see images. If 
 hands the looking to the first of your models that can.
 
 **Also useful:**
-- **Notifications**: a Telegram message when a task finishes, fails or waits for you. Make a bot with
+- **Notifications**: a sound and/or a desktop notification on this computer, or a Telegram message,
+  when a task finishes, fails or waits for you (each event on its own; *Try it* plays it). For Telegram, make a bot with
   [@BotFather](https://t.me/BotFather), paste its token, press Start in the bot; HeartCode finds your chat.
 - **Advanced → Logs**: switch on only the kinds you need and read them there (by run, searched,
   live). Logs older than 3 days are deleted.

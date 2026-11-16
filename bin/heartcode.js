@@ -13,7 +13,8 @@ import { checkUpdate, installKind, UPDATE_COMMANDS, packageDir, whatsNew } from 
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
 import { UI, c, PERMISSIONS, duration, copyText, overSsh, prettyKey, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width, shortError, wrapWords } from '../src/ui.js'
 import { listFiles, runCommand, clip } from '../src/tools.js'
-import { notify } from '../src/telegram.js'
+import { notify as telegram } from '../src/telegram.js'
+import { alert, playSound } from '../src/alert.js'
 import { log, LOG_FILE, LOG_DIR, requestLog, useRequestLog, useLogs, pruneLogs, logDays, forceLogs } from '../src/log.js'
 import { prompt, usePromptsFrom, reloadPrompts } from '../src/prompts.js'
 import { newChat, saveChat, listChats, loadChat, restoreFiles, ago, forkChat, exportChat } from '../src/sessions.js'
@@ -111,6 +112,7 @@ const SECTIONS = [
     ['/select_model', 'pick the model(s) for this session: one pins it, several rotate among them, auto = the whole list', true],
   ]],
   ['settings', [
+    ['/notifications', 'a sound and/or a desktop notification when a task finishes, fails or waits for you: on or off'],
     ['/toggle_thinking', "the model's thinking: its last two lines, or all of it (Alt+O)"],
     ['/todos', 'the whole plan of the task at work, every step and its state (Alt+L)'],
     ['/voice', 'dictate a message (or Space in an empty box, once voice is set up): it shows in the box while speaking, Enter sends it, Esc cancels'],
@@ -152,7 +154,7 @@ for (const [, list] of SECTIONS) list.sort(byName) // alphabetical, in /help and
 const COMMANDS = SECTIONS.flatMap(([, list]) => list).sort(byName)
 // Typed while a task works, these run at once, beside it: they leave the conversation alone. The
 // others (/compact, /rewind, /resume, /init…) wait in the queue until it's done.
-const RIGHT_AWAY = new Set(['help', 'todos', 'cost', 'context', 'background', 'model_info', 'diff', 'copy', 'mcp', 'doctor', 'toggle_thinking', 'btw', 'rename', 'export', 'tab', 'close_tab', 'exit', 'quit', 'settings', 'login_mcp', 'install_skill', 'import', 'voice', 'select_model'])
+const RIGHT_AWAY = new Set(['help', 'todos', 'cost', 'context', 'background', 'model_info', 'diff', 'copy', 'mcp', 'doctor', 'toggle_thinking', 'notifications', 'btw', 'rename', 'export', 'tab', 'close_tab', 'exit', 'quit', 'settings', 'login_mcp', 'install_skill', 'import', 'voice', 'select_model'])
 const helpText = (sections) => sections.map(([title, list]) => `  ${c.bold(title)}\n` + list.map(([n, d]) => `  ${c.cyan(n.padEnd(17))}  ${d}`).join('\n')).join('\n\n')
 const SLASH = helpText(SECTIONS)
 
@@ -1759,6 +1761,8 @@ async function slash(app, line, working = false) {
     }
     case 'todos':
       return ui.showPlan()
+    case 'notifications':
+      return askAlerts(app)
     case 'toggle_thinking':
       ui.showThinking = !ui.showThinking
       ui.print(c.dim(ui.showThinking ? 'thinking shown: all of it (Alt+O: last two lines)' : 'thinking shown: its last two lines (Alt+O: all of it)'))
@@ -1792,6 +1796,32 @@ async function slash(app, line, working = false) {
 }
 
 // true: done; false: stopped or failed; null: no model to run it
+// a task finished, failed or waits for you: Telegram and this computer, each if set up
+const notify = (cfg, event, text) => (telegram(cfg, event, text), alert(cfg, event, text))
+
+// Notifications on this computer (alert.js): asked once at the first start in the terminal, and
+// any time with /notifications. Saved whatever the answer (Esc: off), so the first start's question
+// isn't asked again; how to change it is said each time.
+let alertsAsked = false
+async function askAlerts(app, first = false) {
+  const { ui, cfg } = app
+  const a = cfg.alerts ?? {}
+  const now = a.sound && a.popup ? 'both' : a.sound ? 'sound' : a.popup ? 'popup' : 'off'
+  const items = [
+    { label: 'A sound and a desktop notification', key: 'both', sound: true, popup: true },
+    { label: 'Only a sound', desc: "HeartCode's own: a heartbeat", key: 'sound', sound: true, popup: false },
+    { label: 'Only a desktop notification', key: 'popup', sound: false, popup: true },
+    { label: first ? 'No, thanks' : 'Off', key: 'off', sound: false, popup: false },
+  ].map((it) => (!first && it.key === now ? { ...it, label: `${it.label} ${c.faint('(now)')}` } : it))
+  const it = await ui.pick(first ? 'Let HeartCode tell you when a task finishes, fails or waits for you?' : 'Notifications on this computer', items)
+  const pick = it ?? (first ? items.at(-1) : null)
+  if (!pick) return
+  cfg.alerts = { ...a, sound: pick.sound, popup: pick.popup }
+  saveConfig(cfg)
+  ui.print(`${c.ok('✓')} ${c.muted(`notifications: ${pick.key === 'off' ? 'off' : pick.key === 'both' ? 'a sound and a desktop notification' : pick.key === 'sound' ? 'a sound' : 'a desktop notification'}`)} ${c.faint('· change it any time:')} ${c.cyan('/notifications')} ${c.faint('or')} ${c.cyan('/settings')} ${c.faint('→ Notifications (each event on its own, Try it, Telegram)')}`)
+  if (pick.sound && first) playSound('done') // what it sounds like
+}
+
 async function runTask(app, task, ctl) {
   const { ui } = app
   try {
@@ -1948,6 +1978,11 @@ async function repl(app, f = {}) {
         ui.render?.()
       })
       .catch(() => {})
+  // the first start: whether to be told when a task finishes (once, in one tab)
+  if (cfg.alerts === undefined && !alertsAsked) {
+    alertsAsked = true
+    await askAlerts(app, true)
+  }
   for (;;) {
     const line = await ui.ask(` ${c.magenta('♥')} `, { suggest: true, initial: app.nextInput, history: true })
     app.nextInput = undefined

@@ -25,6 +25,7 @@ const ranksOf = (model, data) => (data ? Object.fromEntries(Object.entries(RANKE
 import { installSkill, findImports } from './importer.js'
 import { capabilities } from './capabilities.js'
 import { connect, sendTelegram, tokenHint, tgReady, EVENTS } from './telegram.js'
+import { alert, ALERT_EVENTS } from './alert.js'
 import { searchSettings, testSearxng, ENGINE_NAMES } from './web.js'
 import { recordOf, unreliable, records } from './record.js'
 import { log, LOGS, REQUESTS, useRequestLog, listRequests, readRequest, pruneLogs, logDays, logSize, clearLogs, LOG_KINDS, LOG_SAMPLES, kindsOn, listLogRuns, readLog } from './log.js'
@@ -480,6 +481,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     statusBar: cfg.statusBar === undefined ? null : cfg.statusBar, // false (off), a list of lines, or null (default)
     // Telegram notifications: never the token itself, only a hint of it
     telegram: (({ token, bot, chatName, chatId, on, events } = {}) => ({ hint: tokenHint(token), bot: bot ?? null, chatName: chatName ?? null, connected: Boolean(token && chatId), on: on !== false, events: Object.fromEntries(Object.keys(EVENTS).map((k) => [k, events?.[k] !== false])), names: EVENTS }))(cfg.telegram),
+    // this computer: a sound and/or a desktop notification, off until switched on (alert.js)
+    alerts: { sound: Boolean(cfg.alerts?.sound), popup: Boolean(cfg.alerts?.popup), events: Object.fromEntries(ALERT_EVENTS.map((k) => [k, cfg.alerts?.events?.[k] !== false])) },
     search: { ...(({ searxng, order, off }) => ({ searxng, order, off }))(searchSettings()), names: ENGINE_NAMES }, // web search: your SearXNG, the engines' order and switches
     capabilities: capabilities(cfg), // features that need outside tools, and whether they're here
     choices: { permissions: PERMISSIONS, effort: EFFORTS, theme: Object.keys(THEMES), toggles: TOGGLES, statusItems: STATUS_ITEMS, logKinds: Object.fromEntries(Object.entries(LOG_KINDS).map(([k, { label, about }]) => [k, { label, about, ...LOG_SAMPLES[k] }])), logSamples: LOG_SAMPLES },
@@ -877,6 +880,25 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
         cfg.telegram.events = { ...cfg.telegram.events, [event]: value }
       }
       save('setting:telegram')
+      return state()
+    },
+    'POST /api/alerts/set': ({ sound, popup, event, value }) => {
+      const a = { ...cfg.alerts }
+      if (typeof sound === 'boolean') a.sound = sound
+      if (typeof popup === 'boolean') a.popup = popup
+      if (event !== undefined) {
+        if (!ALERT_EVENTS.includes(event) || typeof value !== 'boolean') throw new Error(`event: ${ALERT_EVENTS.join(', ')}, on or off`)
+        a.events = { ...a.events, [event]: value }
+      }
+      cfg.alerts = a
+      save('setting:alerts')
+      return state()
+    },
+    // what each event sounds and looks like, whatever is switched on
+    'POST /api/alerts/test': ({ event }) => {
+      if (!ALERT_EVENTS.includes(event)) throw new Error(`event: ${ALERT_EVENTS.join(', ')}`)
+      const texts = { done: '✅ Done · a test from the settings', failed: '❌ Failed · a test from the settings', waiting: '⏳ Waiting for an answer · a test from the settings' }
+      alert({ alerts: { sound: true, popup: Boolean(cfg.alerts?.popup), events: {} } }, event, texts[event])
       return state()
     },
     'POST /api/telegram/remove': () => {

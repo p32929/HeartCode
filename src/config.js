@@ -19,7 +19,7 @@ export function projectDir(root, what) {
   return dir
 }
 
-const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director', 'theme', 'format', 'lsp', 'voice', 'queue', 'rotation', 'statusBar', 'log', 'logRequests', 'logDetail', 'logDays', 'telegram', 'search', 'testTimeout', 'updateCheck', 'logs', 'replyStart', 'replyIdle', 'mouse', 'helpers', 'helpersAuto', 'helperOrder', 'providerRank', 'trackRecord']
+const SETTINGS = ['context', 'effort', 'permissions', 'autoCompact', 'director', 'theme', 'format', 'lsp', 'voice', 'queue', 'rotation', 'statusBar', 'log', 'logRequests', 'logDetail', 'logDays', 'telegram', 'search', 'testTimeout', 'updateCheck', 'logs', 'replyStart', 'replyIdle', 'mouse', 'helpers', 'helpersAuto', 'helperOrder', 'providerRank', 'trackRecord', 'alerts']
 // How long a reply may take (the settings page's Your models), in seconds, with the defaults:
 // replyStart: a reply must start within it, else that model failed; replyIdle: a reply that stops
 // sending for it is stalled.
