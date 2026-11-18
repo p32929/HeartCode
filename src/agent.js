@@ -297,7 +297,7 @@ export class Session {
     const able = (t) => !withImages || t.images
     // a kind of job and no model named: the helpers good at it first. Picked for you (auto): the
     // fastest of them in its test, and if it fails the best-ranked of the rest (a stronger one, by
-    // the rankings and the track record); picked by you: in your order
+    // the rankings and the track record); picked by you: best-ranked first
     const fit = !want && helpers && HELPER_JOBS[args.job] ? helpers.filter((t) => t.jobs.includes(args.job) && able(t)) : []
     if (fit.length) {
       const auto = fit[0].auto
@@ -639,7 +639,7 @@ const SYSTEM = (s) => {
     .join('\n\n')
 }
 
-// The helpers you ticked on Your models (jobs: what for), in your order; null when none are.
+// The helpers you ticked on Your models (jobs: what for), best-ranked first; null when none are.
 export const helpersOf = (team) => (team.some((t) => t.jobs) ? team.filter((t) => t.jobs) : null)
 
 // Your other models and what each can do, for the agent tool's model (only when there are any): a

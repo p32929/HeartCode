@@ -1144,10 +1144,10 @@
   <div class="actions"><span class="spacer"></span><button id="imp-cancel" type="button">Cancel</button><button class="primary" id="imp-go" type="button">Import selected</button></div>
 </dialog>
 <dialog id="h-test" aria-labelledby="h-test-title">
-  <h2 id="h-test-title">Check the models</h2>
-  <p class="sub">1. What each model can do and costs (models.dev), and its places in the public rankings (LMArena).<br>2. A short test message to each: which really answer, and how fast.<br>3. Helpers picked automatically from the ones that work, each for what it's good at (Helpers: Automatic).</p>
+  <h2 id="h-test-title">Test the models first</h2>
+  <p class="sub">Helpers are picked from the models that answer a short test. None has answered one yet.</p>
   <p class="sub" id="h-test-cost"></p>
-  <div class="actions"><span class="spacer"></span><button id="h-test-no" type="button" class="ghost">Cancel</button><button id="h-test-go" type="button" class="primary">Check them</button></div>
+  <div class="actions"><span class="spacer"></span><button id="h-test-no" type="button" class="ghost">Cancel</button><button id="h-test-go" type="button" class="primary">Test all, then pick</button></div>
 </dialog>
 <dialog id="small-screen" aria-labelledby="small-screen-title">
   <h2 id="small-screen-title">Works best on a desktop</h2>
@@ -1830,7 +1830,7 @@ async function tryModel(t) {
   return r
 }
 let testingAll = false // a run is going (on the server)
-let lookingUp = false // models.dev and the rankings are being looked up (Check models)
+let lookingUp = false // Update model info is going
 // while either goes, the list holds still: no filtering, sorting, dragging, selecting or changing rows
 const locked = () => testingAll || lookingUp
 // a run of tests: all your models, or the ones given
@@ -1860,7 +1860,6 @@ function showRun(run) {
     for (const [key, r] of Object.entries(TRIES)) if (r.going) r.before ? (TRIES[key] = r.before) : delete TRIES[key] // stopped before it: as it was
     job('test-all')
     if (run?.over && afterTests) {
-      const then = afterTests
       afterTests = null
       setAuto(true, $('h-auto'))
     } else if (!run?.over) afterTests = null // never started
@@ -1876,7 +1875,7 @@ function showRun(run) {
   mineSoon()
 }
 
-// models.dev looked up again: one model (its Retry), or all of yours with their rankings (Check models)
+// models.dev looked up again: one model (its Retry), or all of yours with their rankings (Update model info)
 const retry = (t) => h('button', { className: 'small', textContent: 'Retry', title: 'look it up in models.dev again', onclick: (e) => (e.stopPropagation(), lookUp(t)) })
 async function lookUp(t) {
   job('models.dev', { where: ['catalog', 'table'], what: t ? `Looking up ${t.model} in models.dev` : 'Updating the models: models.dev and LMArena', detail: t ? 'context, tool calls, thinking, images' : 'context, tool calls, thinking, images, price; scores' })
@@ -1884,7 +1883,11 @@ async function lookUp(t) {
   const [r, scored] = await Promise.all([act('/api/models-dev', t ? { provider: t.provider, model: t.model } : {}), t ? null : act('/api/rankings', {})])
   if (!t) (lookingUp = false), mineSoon()
   job('models.dev')
-  if (r) toast(t ? (r.found ? `${t.model}: found in models.dev` : `${t.model}: still not in models.dev`) : `models.dev: ${r.found} of ${r.of} found${scored ? ' · rankings updated' : ''}`)
+  // all of them: the helpers marked from what's known now (Automatic: picked again by the server;
+  // My picks: added to yours, what you picked stays)
+  const marked = !t && r && !S.helpersAuto ? await api('/api/helpers/mark', {}).catch((e) => (toast(e.message, true), null)) : null
+  if (marked) Object.assign(S, { helpers: marked.helpers, helpersAuto: marked.helpersAuto }), drawMine(S)
+  if (r) toast(t ? (r.found ? `${t.model}: found in models.dev` : `${t.model}: still not in models.dev`) : `models.dev: ${r.found} of ${r.of} found${scored ? ' · rankings updated' : ''}${marked?.marked ? ` · ${marked.marked} model${marked.marked === 1 ? '' : 's'} marked as helpers` : ''}`)
   return r
 }
 
@@ -2436,7 +2439,6 @@ $('pr-save').onclick = () => {
   RANK = [...list, ...RANK.filter((n) => !list.includes(n))] // providers not in your list now keep their place for later
   savePref('rank', RANK)
   $('pr').close()
-  if (S.helperOrder === 'provider') api('/api/helper-order', { by: 'provider', rank: RANK }).catch((e) => toast(e.message, true)) // helpers by the new ranking
   setSort(SORT.some((x) => x.key === 'provider') ? SORT : [{ key: 'provider', dir: 'down' }, ...SORT]) // sorted by it now
 }
 const firstDir = (key) => COLS[key].first // up: A to Z, low to high
@@ -2610,22 +2612,16 @@ function drawMine(s) {
   $('mt-lead').textContent = 'The models HeartCode uses: #1 answers; when a model fails, another takes over (the best-ranked one not tried yet). Hover a setting to see what it does.'
   const busy = locked()
   $('mt-actions').inert = false // Save list works at any time; the rest wait while something runs (below)
-  // the order helpers are picked in when #1 starts them: your list's, or your provider ranking's
-  const helperOrder = (by) => api('/api/helper-order', { by, rank: RANK }).then((r) => ((S.helperOrder = r.helperOrder), drawMine(S)), (e) => toast(e.message, true))
   // who chooses the helpers: HeartCode (from the tests and the rankings, again when those change) or you
-  const chooser = h('label', { className: 'h-order', title: 'Helpers\nWho picks the helpers: the models #1 can hand side jobs to (looking at a screenshot, a review, a part of the plan).\n\nAutomatic: HeartCode picks them, and what each is good at, from the tests and the rankings (again when those change). A job goes to the fastest helper that\'s good at it; if that one can\'t do it, the best-ranked of the others takes over.\nMy picks: you switch them on, and pick their jobs, in the Helper column. A job goes to the first one good at it, in the order set under Used; if it can\'t, the next.' },
+  const chooser = h('label', { className: 'h-order', title: 'Helpers\nWho picks the helpers: the models #1 can hand side jobs to (looking at a screenshot, a review, a part of the plan).\n\nAutomatic: HeartCode picks them, and what each is good at, from the tests and the rankings (again when those change). A job goes to the fastest helper that\'s good at it; if that one can\'t do it, the best-ranked of the others takes over.\nMy picks: you switch them on, and pick their jobs, in the Helper column. A job goes to the best-ranked one good at it; if it can\'t, the next.' },
     h('span', { className: 'mt-setl' }, ic('sparkles'), h('span', { className: 'lt', textContent: 'Helpers' })),
     h('select', { id: 'h-auto', onchange: (e) => setAuto(e.target.value === 'auto', e.target) },
       [['auto', 'Automatic'], ['manual', 'My picks']].map(([v, t]) => h('option', { value: v, textContent: t, selected: (S.helpersAuto ? 'auto' : 'manual') === v }))))
-  const orderBy = h('span', { className: 'h-order', title: 'Used\nWhich helper #1 takes first when several fit a job (with Automatic helpers: the fastest good at it; this order when no kind of job is given).\n\nBy score: the best-ranked in public rankings (the default).\nIn list order: the first in your list.\nBy provider: by your provider ranking (Order providers).' }, h('span', { className: 'mt-setl' }, ic('bars'), h('span', { className: 'lt', textContent: 'Used' })),
-    h('div', { className: 'seg', role: 'radiogroup', 'aria-label': 'The order helpers are used in' },
-      [['own', 'in list order', 'when #1 starts a helper, it takes the first one that fits the job, in the list\'s order'], ['provider', 'by provider', 'when #1 starts a helper, it takes them by the provider ranking (Order providers), each provider\'s in the list\'s order. The list itself stays as it is'], ['score', 'by score', 'when #1 starts a helper, it takes the best ranked first: its best place in LMArena\'s public rankings for coding, web apps, long real tasks and hard prompts (Check models). Models not ranked come after, in the list\'s order']].map(([v, t, about]) =>
-        h('label', { className: (S.helperOrder ?? 'score') === v ? 'on' : '', title: about },
-          h('input', { type: 'radio', name: 'helper-order', checked: (S.helperOrder ?? 'score') === v, disabled: v === 'provider' && !order.some((t) => t.provider !== order[0]?.provider), onchange: () => helperOrder(v) }), t))))
   put($('mt-actions'),
     ((why) => h('span', { title: why ?? '' }, h('button', { className: 'small', textContent: 'Order providers', disabled: Boolean(why), title: why ? '' : 'drag the providers into order; the Provider column sorts by it', onclick: openRanking })))( // disabled: why, on a span (a disabled button shows no tooltip in every browser)
       !order.some((t) => t.provider !== order[0]?.provider) ? 'All the models are from one provider: nothing to order' : null),
-    h('button', { className: 'small', textContent: filtered ? `Check ${n(shown.length)}` : 'Check models', disabled: locked() || !shown.length, title: `All in one:\n1. what each model can do (context, tools, thinking, images, price) from models.dev, and its places in LMArena's public rankings (coding, web apps, vision${S.rankings ? `; last ${new Date(S.rankings.fetched).toLocaleDateString()}` : ''})\n2. ${filtered ? 'the models shown' : 'each model'} sent a short message: which really answer, and how fast\n3. helpers picked automatically from the ones that work (Helpers: Automatic)`, onclick: () => checkModels(filtered ? shown : order) }),
+    h('button', { className: 'small', textContent: 'Update model info', disabled: !order.length, title: `what each model can do (context, tools, thinking, images, price) from models.dev, and its places in LMArena's public rankings (coding, web apps, vision${S.rankings ? `; rankings from ${new Date(S.rankings.fetched).toLocaleDateString()}` : ''})`, onclick: () => lookUp() }),
+    h('button', { className: 'small', textContent: filtered ? `Test ${n(shown.length)}` : 'Test all', disabled: testingAll || !shown.length, title: `send ${filtered ? 'the models shown' : 'each model'} a short message to see which really answer, and how fast`, onclick: () => tryAll(filtered ? shown : order) }),
     // always there: the list as it's shown (sorted, filtered), saved whenever
     h('button', { className: 'small primary' + (drift ? ' attn' : ''), textContent: filtered ? `Use only these ${n(view.length)}` : drift ? 'Save this order' : 'Save list', disabled: !view.length, title: (drift ? `The order shown isn't the one HeartCode uses: its #1 is ${order[0].model}, here at row ${view.indexOf(order[0]) + 1} (sorted ${dirText(SORT[0].key, SORT[0].dir)}). ` : '') + (filtered ? `HeartCode uses only these ${n(view.length)}, in the order shown (the others stay under Providers)` : 'save the list as shown: HeartCode uses them in this order (#1 first)'), onclick: saveList }))
   for (const b of $('mt-actions').children) if (!b.classList.contains('primary')) b.inert = busy // all but Save list wait while something runs
@@ -2670,7 +2666,7 @@ function drawMine(s) {
         h('select', { onchange: (e) => saveOrder(S.order, 'saved', { next: e.target.value }) },
           [['first', '#1'], ['stay', 'last working']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.next === v })))),
       h('span', { className: 'mt-div', 'aria-hidden': 'true' }),
-      chooser, orderBy))
+      chooser))
 
   // --- beside the filters: what's shown · what you do with it (the sorts show in the column heads) ---
   const line = h('div', { className: 'mt-line' },
@@ -2771,8 +2767,8 @@ const yes = (v) => h('span', { className: (v ? 'yes' : 'no') + ' mid', textConte
 const RANK_OF = { coding: 'coding', web: 'web apps (WebDev)', vision: 'vision' }
 const rankCell = (t, k) => {
   const r = t.ranks?.[k]
-  if (!r) return h('span', { className: 'num rk', textContent: '–', title: S.rankings ? `${COLS[k].label}: not in LMArena's ${RANK_OF[k]} ranking` : 'no scores yet: Check models, at the top' })
-  return h('span', { className: 'num rk' + (r.rank / r.of <= 0.1 ? ' top' : ''), title: `${COLS[k].label}: ${r.score != null ? `score ${r.score}${r.votes ? ` from ${r.votes.toLocaleString()} votes` : ''}, ` : ''}#${r.rank} of ${r.of} models in LMArena's ${RANK_OF[k]} ranking (as "${r.as}")${r.score == null ? '. Check models for the scores' : ''}` },
+  if (!r) return h('span', { className: 'num rk', textContent: '–', title: S.rankings ? `${COLS[k].label}: not in LMArena's ${RANK_OF[k]} ranking` : 'no scores yet: Update model info, at the top' })
+  return h('span', { className: 'num rk' + (r.rank / r.of <= 0.1 ? ' top' : ''), title: `${COLS[k].label}: ${r.score != null ? `score ${r.score}${r.votes ? ` from ${r.votes.toLocaleString()} votes` : ''}, ` : ''}#${r.rank} of ${r.of} models in LMArena's ${RANK_OF[k]} ranking (as "${r.as}")${r.score == null ? '. Update model info for the scores' : ''}` },
     `#${r.rank}`)
 }
 const src = (t) => {
@@ -2847,27 +2843,25 @@ function helperCell(t, at) {
 const JOB_ICON = { ui: 'monitor', code: 'code', hard: 'mountain', quick: 'zap' }
 // Helpers are picked from the models that answered their test: how many did
 const working = () => S.order.filter((t) => TRIES[keyOf(t)]?.ok && !TRIES[keyOf(t)].going).length
-// Check models: models.dev and the rankings, then a test of each (the ones given), then helpers picked
-// for you from the ones that work. Asked first: each test is a short message, which a paid model charges for
+// No test yet: ask before testing them all (each gets a short message, which a paid model charges for);
+// then the helpers are picked for you (Automatic) from the ones that worked
 let afterTests = null
-function checkModels(only = S.order) {
-  if (locked()) return toast('a check is running: wait for it, or stop it', true)
+function testFirst() {
   const n = (x) => x.toLocaleString()
-  const paid = only.filter((t) => t.price && (t.price.input > 0 || t.price.output > 0)).length
-  const unknown = only.filter((t) => !t.price).length
-  $('h-test-cost').textContent = `The test sends each of the ${n(only.length)} models a short message. ${paid ? `${n(paid)} of them aren't free: each charges for its few tokens. ` : ''}${unknown ? `${n(unknown)} have no price we know of, and may charge too. ` : ''}`
-  $('h-test-go').onclick = async () => {
+  const paid = S.order.filter((t) => t.price && (t.price.input > 0 || t.price.output > 0)).length
+  const unknown = S.order.filter((t) => !t.price).length
+  $('h-test-cost').textContent = `Test all sends each of the ${n(S.order.length)} models a short message. ${paid ? `${n(paid)} of them aren't free: each charges for its few tokens. ` : ''}${unknown ? `${n(unknown)} have no price we know of, and may charge too. ` : ''}When it's done, helpers are picked from the ones that worked.`
+  $('h-test-go').onclick = () => {
     $('h-test').close()
-    await lookUp()
     afterTests = 'auto'
-    tryAll(only)
+    tryAll(S.order)
   }
   $('h-test-no').onclick = () => $('h-test').close()
   $('h-test').showModal()
 }
 // Picked for you (HeartCode makes them from what's known, again whenever that changes) or by you
 async function setAuto(on, select) {
-  if (on && !working()) return (select.value = 'manual'), checkModels() // nothing to pick from yet
+  if (on && !working()) return (select.value = 'manual'), testFirst() // nothing to pick from yet
   select.disabled = true
   try {
     const r = await api('/api/helpers/auto', { on })

@@ -275,8 +275,15 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   // How long a model test waits for its answer (cfg.testTimeout, seconds; the settings page sets it).
   const testWait = () => testWaitOf(cfg) * 1000
   const noAnswer = () => `no answer within ${testWait() / 1000} seconds`
-  // A provider's models tested a few at a time (more for a long list: startRun)
-  const AT_ONCE = 4
+  // A run's order within a provider: names with the word "auto" (a router) first, then "free", then the
+  // rest, each A to Z (a word: "openrouter/auto", "llama:free"; not "autoglm"). The name only, never the price.
+  const word = (w) => new RegExp(`(^|[^a-z0-9])${w}([^a-z0-9]|$)`, 'i')
+  const AUTO = word('auto')
+  const FREE = word('free')
+  const testOrder = (a, b) => {
+    const group = (t) => (AUTO.test(t.model) ? 0 : FREE.test(t.model) ? 1 : 2)
+    return group(a) - group(b) || a.model.localeCompare(b.model, undefined, { sensitivity: 'base' })
+  }
   // Never throws: { ok, ms, reply } or { ok: false, ms, status, error }; { stopped } when stop
   // (a run's Stop) cancels it.
   async function tryOne({ provider, model }, stop) {
@@ -326,9 +333,9 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     emit('tested', { key, result })
     return result
   }
-  // The run going now: every provider at once, and from each a few models at a time: one per 100
-  // models being tested (100: one at a time, 200: two…). A provider that says it's busy (429)
-  // isn't a result about the model: that provider goes down to one at a time and pauses (as long
+  // The run going now: every provider at once, and from each one model at a time (testOrder: "auto",
+  // then "free", then the rest). A provider that says it's busy (429)
+  // isn't a result about the model: that provider pauses (as long
   // as it asks, else 15s, 30s… up to 2 minutes), and the model is tried again later; it's kept as
   // a 429 only after the provider refused it RATE_TRIES times. A model taken off your list while
   // it runs isn't tested. Stop: each provider finishes the one it's on.
@@ -347,13 +354,14 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   }
   const wait = (ms) => new Promise((r) => setTimeout(r, ms))
   async function startRun(list, some) {
-    const each = Math.max(AT_ONCE, Math.ceil(list.length / 100))
+    const each = 1 // one model at a time from each provider; the providers side by side
     run = { total: list.length, done: 0, good: 0, each, busy: new Map(), now: new Set(), pending: new Set(list.map((t) => `${t.provider}/${t.model}`)), stopping: false, some, started: Date.now(), providers: new Map(), cancel: new AbortController() }
     emit('testrun', runState())
     for (const t of list) {
       if (!run.providers.has(t.provider)) run.providers.set(t.provider, { queue: [], cap: each, until: 0, pausedAt: 0, backoff: 15_000, refused: new Map() })
       run.providers.get(t.provider).queue.push(t)
     }
+    for (const p of run.providers.values()) p.queue.sort(testOrder)
     const ticker = setInterval(() => run && Object.keys(runState().paused).length && emit('testrun', runState()), 1000) // the pauses counting down
     // a provider's worker n: its next model, while there's one and n is under its cap (a busy
     // provider's cap goes down to one: the others stop; the last one left never does)
@@ -421,24 +429,33 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
 
   const keyOf = (t) => `${t.provider}/${t.model}`
 
-  // Helpers picked from what's known: every model of yours (#1 too) that answered its test and whose
-  // provider is on, each with the jobs it's good at (at least one): UI & visuals and Code &
-  // logic when it's in the top half of LMArena's web-app or coding ranking; Big & hard when it thinks
-  // with a big context, or is in the top half of its agent (long real tasks) or hardest-prompts ranking; Quick & cheap when its test was faster than most (or it's good at none of the
-  // others). { key: [jobs] }.
-  const pickHelpers = () => {
+  // Helpers picked from what's known: every model of yours (#1 too) whose provider is on and that
+  // didn't fail its test, each with the jobs it's good at: UI & visuals and Code & logic when it's in
+  // the top half of LMArena's web-app or coding ranking; Big & hard when it thinks with a big context,
+  // or is in the top half of its agent (long real tasks) or hardest-prompts ranking; Quick & cheap when
+  // its test was faster than most (a tested model good at none of the others: that). A model not
+  // tested and good at none isn't picked. have: picks already made (a job a model has isn't picked
+  // again). { key: [jobs] }.
+  const pickHelpers = (have = {}) => {
     const ranked = loadRankings()
     const order = [{ provider: cfg.provider, model: cfg.model }, ...rotationOf(cfg).then]
-    const pool = order.map((t) => ({ ...t, can: testedOf(t), test: tests[keyOf(t)] })).filter((t) => !cfg.providers[t.provider]?.off && t.test?.ok && t.test.ms != null) // without tool calls too: a helper then works in guided mode
+    const pool = order.map((t) => ({ ...t, can: testedOf(t), test: tests[keyOf(t)] })).filter((t) => cfg.providers[t.provider] && !cfg.providers[t.provider].off && !(t.test && !t.test.ok)) // without tool calls too: a helper then works in guided mode
+    const ran = (t) => t.test?.ok && t.test.ms != null
     const top = (t, list) => ((x) => Boolean(x && x.rank / x.of <= 0.5))(rankIn(t.model, list, ranked))
-    const times = pool.map((t) => t.test.ms).sort((x, y) => x - y)
+    const times = pool.filter(ran).map((t) => t.test.ms).sort((x, y) => x - y)
     const fast = times[Math.floor((times.length - 1) / 2)] // the middle time: faster than that is quick
-    return Object.fromEntries(pool.map((t) => {
-      const jobs = [top(t, 'webdev:webdev') && 'ui', top(t, 'text:coding') && 'code', ((t.can?.thinking && t.can.context >= 128_000) || top(t, 'agent:overall') || top(t, 'text:hard_prompts')) && 'hard', t.test.ms <= fast && 'quick'].filter(Boolean)
-      return [keyOf(t), jobs.length ? jobs : ['quick']]
+    const picks = Object.fromEntries(pool.flatMap((t) => {
+      const jobs = [top(t, 'webdev:webdev') && 'ui', top(t, 'text:coding') && 'code', ((t.can?.thinking && t.can.context >= 128_000) || top(t, 'agent:overall') || top(t, 'text:hard_prompts')) && 'hard', ran(t) && t.test.ms <= fast && 'quick'].filter(Boolean)
+      return jobs.length ? [[keyOf(t), jobs]] : ran(t) ? [[keyOf(t), ['quick']]] : []
     }))
+    const out = {}
+    for (const [k, jobs] of Object.entries(picks)) {
+      const fresh = jobs.filter((j) => !have[k]?.includes(j))
+      if (fresh.length) out[k] = fresh
+    }
+    return out
   }
-  // Picked for you: the helpers made again from what's known now (after Check models, a test run,
+  // Picked for you: the helpers made again from what's known now (after Update model info, a test run,
   // your list's order changed). true when they changed.
   const autoPick = () => {
     if (cfg.helpersAuto !== true) return false
@@ -466,7 +483,6 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     rankings: ranked && { fetched: ranked.fetched, source: ranked.source },
     rotation: (({ then, ...opts }) => opts)(rotationOf(cfg)),
     helpers: helpersOf(cfg.helpers), // { 'provider/model': [jobs] }
-    helperOrder: cfg.helperOrder === 'provider' || cfg.helperOrder === 'own' ? cfg.helperOrder : 'score', // the order helpers are picked in: by their rankings (the default), your list's, or your provider ranking's
     helpersAuto: cfg.helpersAuto === true, // picked for you (pickHelpers), again whenever what's known changes: the models #1 may start as helpers, and what you picked each for
     jobs: HELPER_JOBS,
     settings: { permissions: cfg.permissions ?? 'all', effort: cfg.effort ?? 'default', theme: cfg.theme ?? 'dark', context: cfg.context ?? null, ...Object.fromEntries(Object.keys(TOGGLES).map((k) => [k, cfg[k] !== false])), logs: kindsOn(cfg), logDetail: cfg.logDetail === 'summary' ? 'summary' : 'full', logDays: logDays(cfg), testTimeout: testWaitOf(cfg), ...speedOf(cfg) },
@@ -490,7 +506,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
 
   const routes = {
     'GET /api/state': () => state(),
-    // LMArena's public rankings, fetched now (with models.dev: Check models on Your models)
+    // LMArena's public rankings, fetched now (with models.dev: Update model info on Your models)
     'POST /api/rankings': async () => {
       if (!(await rankings({ now: true }))) throw new Error("couldn't get the rankings (huggingface.co)")
       autoPick()
@@ -644,6 +660,15 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       if (!autoPick()) save('setting:helpersAuto')
       return { helpers: helpersOf(cfg.helpers), helpersAuto: cfg.helpersAuto === true }
     },
+    // Update model info, with your picks: the helpers picked from what's known now, added to yours
+    // (saved; what you picked stays). marked: how many models got a job they didn't have
+    'POST /api/helpers/mark': () => {
+      const add = pickHelpers(helpersOf(cfg.helpers))
+      const next = { ...helpersOf(cfg.helpers) }
+      for (const [k, jobs] of Object.entries(add)) next[k] = [...new Set([...(next[k] ?? []), ...jobs])]
+      if (Object.keys(add).length) (cfg.helpers = next), save('setting:helpers')
+      return { helpers: helpersOf(cfg.helpers), helpersAuto: cfg.helpersAuto === true, marked: Object.keys(add).length }
+    },
     'POST /api/helpers': ({ helpers }) => {
       if (!helpers || typeof helpers !== 'object') throw new Error('helpers: an object')
       cfg.helpersAuto = undefined // your own picks now
@@ -656,12 +681,6 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     // the order helpers are picked in: 'score' (the default: best placed in LMArena's rankings first),
     // 'own' (your list's) or 'provider' (your provider ranking's, each provider's in your list's order;
     // rank: the ranking as the page has it, kept for HeartCode to use)
-    'POST /api/helper-order': ({ by, rank }) => {
-      cfg.helperOrder = by === 'provider' || by === 'own' ? by : undefined
-      cfg.providerRank = cfg.helperOrder === 'provider' ? (Array.isArray(rank) ? rank.filter((x) => typeof x === 'string') : readJson(PREFS, {}).rank) : undefined
-      save('setting:helperOrder')
-      return { helperOrder: cfg.helperOrder ?? 'score' }
-    },
     // the model list, in order (#1 is the model), and when to go on to the next
     'POST /api/order': ({ list, on, retries, next }) => {
       if (!Array.isArray(list)) throw new Error('a list of models is needed')

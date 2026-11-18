@@ -1,6 +1,6 @@
 # tests.md
 
-What the settings page's Test asks your models (a row's Test, Check models). Each `## name` below is one prompt.
+What the settings page's Test asks your models (Test, Test all). Each `## name` below is one prompt.
 A `<!-- … -->` note under a heading explains it and is never sent. To change one, copy its section
 into ~/.heart/prompts/tests.md, or edit it on the settings page.
 

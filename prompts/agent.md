@@ -277,16 +277,16 @@ Go on from there: use what it found and made; don't redo it. Check anything that
 
 ## team
 
-<!-- In the system prompt when the user set up other models. {{models}}: the first few, one per line, in the user's order, with what each can do, its places in LMArena's rankings ("#3 of 200": lower is better), how fast it answered its test, its price, its track record in HeartCode, and (with {{helpers}}) what it's good at. Only the first few, then "…and N more" (the agent tool's model "list" gives them all). {{you}}: what this model can do. {{helpers}}: the user ticked helpers on Your models: only those are listed and can be started. -->
+<!-- In the system prompt when the user set up other models. {{models}}: the first few, one per line, best-ranked first, with what each can do, its places in LMArena's rankings ("#3 of 200": lower is better), how fast it answered its test, its price, its track record in HeartCode, and (with {{helpers}}) what it's good at. Only the first few, then "…and N more" (the agent tool's model "list" gives them all). {{you}}: what this model can do. {{helpers}}: the user ticked helpers on Your models: only those are listed and can be started. -->
 {{#if helpers}}# Your helpers
 
-Besides you (tool calls, {{you}}), the user picked these helpers, in their order, each with what it can do, its places in public rankings (#1 is best), how fast it answered a test, its price, how it did here, and what it's good at:
+Besides you (tool calls, {{you}}), the user picked these helpers, best-ranked first, each with what it can do, its places in public rankings (#1 is best), how fast it answered a test, its price, how it did here, and what it's good at:
 {{models}}
 
 Use them with the agent tool ("model" picks one, "images" gives it images):
 - Give a part to a helper with job (ui, code, hard or quick): HeartCode picks the one for it, and another if it fails. Or name one with "model".{{else}}# Your other models
 
-Besides you (tool calls, {{you}}), the user set up these models, in their order, each with what it can do, its places in public rankings (#1 is best), how fast it answered a test, its price and how it did here:
+Besides you (tool calls, {{you}}), the user set up these models, best-ranked first, each with what it can do, its places in public rankings (#1 is best), how fast it answered a test, its price and how it did here:
 {{models}}
 
 Use them with the agent tool ("model" picks one, "images" gives it images):

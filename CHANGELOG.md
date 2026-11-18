@@ -2,6 +2,19 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.69 (2026-11-18)
+
+- **Update model info and Test all are separate buttons again** (as in 0.1.67), instead of one
+  Check models: each runs on its own, when you want it.
+- **Update model info marks the helpers** (no Suggest helpers button any more): from the rankings and
+  the tests, each model for what it's good at, added to the ones you picked. No test needed: a model
+  good at something by its rankings is marked; one whose test failed isn't.
+- **Test all goes one model at a time per provider** (the providers side by side): models named
+  "auto" first, then "free", then the rest, each A to Z. Fewer "busy" refusals, and each test's time
+  is the model's own.
+- **No *Used* setting**: helpers are always taken best-ranked first (LMArena, with the track record),
+  and the model sees your other models in that order.
+
 ## 0.1.68 (2026-11-16)
 
 - **One button, Check models**: on *Models → List* it does what Update model info, Test all and

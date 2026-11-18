@@ -1,6 +1,6 @@
 // What each model is good at, from public rankings (LMArena: people comparing two models' answers
 // to the same prompt, by skill): overall, coding, web apps, images. Fetched once a week into
-// ~/.heart/rankings.json (with an orchestrator, or Check models); a model is matched to its entry by name.
+// ~/.heart/rankings.json (with an orchestrator, or Update model info); a model is matched to its entry by name.
 import fs from 'node:fs'
 import path from 'node:path'
 import { HOME, readJson, writeJson } from './config.js'

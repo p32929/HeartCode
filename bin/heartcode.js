@@ -863,30 +863,22 @@ class App {
     return this.sessionModels()
       .filter((t) => !(t.provider === now?.provider && t.model === now?.model))
       .map((t) => ({ ...t, ...this.abilities(t), jobs: jobsOf(this.cfg.helpers?.[`${t.provider}/${t.model}`]), ms: tested[`${t.provider}/${t.model}`]?.ms, price: priceOf(t.provider, this.cfg.providers[t.provider]?.baseUrl, t.model), auto: this.cfg.helpersAuto === true })) // price: models.dev's, $ per million tokens // jobs: ticked as a helper on Your models (what for); ms: how fast it answered its test; auto: helpers picked for you (a job goes to the fastest that's good at it)
-      .sort(this.byProvider()) // helpers picked in your list's order, your provider ranking's, or by score (Your models)
+      .sort(this.byScore()) // best-ranked first
   }
 
-  // Your models' "Helper order": by your provider ranking, a sort that puts the higher-ranked
-  // provider's models first (each provider's in your list's order; providers not ranked after, A to
-  // Z); in your list's order, one that keeps it.
-  // By score: the best placed in LMArena's rankings first (its best share of a list: #5 of 200 is 2.5%),
-  // across the lists the helpers are picked by (coding, web apps, long real tasks, hard prompts);
-  // models not in them after, in your list's order.
-  byProvider() {
-    if ((this.cfg.helperOrder ?? 'score') === 'score') { // the default: a small model early in your list isn't who looks at a screenshot
-      const data = loadRankings()
-      const share = new Map()
-      const of = (t) => {
-        const k = `${t.provider}/${t.model}`
-        if (!share.has(k)) share.set(k, scoreOf(t.model, data))
-        return share.get(k)
-      }
-      return (a, b) => byRecord({ t: a, score: of(a) }, { t: b, score: of(b) }) // Infinity (not ranked) last; ties keep your order; moved by the track record (record.js)
+  // Helpers in order: the best placed in LMArena's rankings first (its best share of a list: #5 of 200
+  // is 2.5%), across coding, web apps, long real tasks and hard prompts, moved by the track record;
+  // models not in them after, in your list's order. A small model early in your list isn't who looks
+  // at a screenshot.
+  byScore() {
+    const data = loadRankings()
+    const share = new Map()
+    const of = (t) => {
+      const k = `${t.provider}/${t.model}`
+      if (!share.has(k)) share.set(k, scoreOf(t.model, data))
+      return share.get(k)
     }
-    const rank = this.cfg.helperOrder === 'provider' && Array.isArray(this.cfg.providerRank) ? this.cfg.providerRank : null
-    if (!rank) return () => 0
-    const at = (p) => (rank.includes(p) ? rank.indexOf(p) : rank.length)
-    return (a, b) => at(a.provider) - at(b.provider) || (at(a.provider) === rank.length ? a.provider.localeCompare(b.provider) : 0)
+    return (a, b) => byRecord({ t: a, score: of(a) }, { t: b, score: of(b) }) // Infinity (not ranked) last; ties keep your order (record.js)
   }
 
   // What a model can do, from its saved profile or models.dev (guessed: neither knows it).
@@ -1276,7 +1268,7 @@ function applySettings(apps, cfg, what) {
     const { ui } = app
     const busy = Boolean(ui.busySince || app.working)
     const now = (fn) => (busy ? app.later.push(fn) : fn())
-    if (app.cfg !== cfg) for (const k of ['providers', 'provider', 'model', 'effort', 'theme', 'context', 'autoCompact', 'director', 'format', 'lsp', 'voice', 'rotation', 'statusBar', 'helpers', 'helpersAuto', 'helperOrder', 'providerRank', 'replyStart', 'replyIdle', 'telegram', 'queue', 'mouse']) app.cfg[k] = cfg[k]
+    if (app.cfg !== cfg) for (const k of ['providers', 'provider', 'model', 'effort', 'theme', 'context', 'autoCompact', 'director', 'format', 'lsp', 'voice', 'rotation', 'statusBar', 'helpers', 'helpersAuto', 'replyStart', 'replyIdle', 'telegram', 'queue', 'mouse']) app.cfg[k] = cfg[k]
     // a model pinned in this CLI (/select_model) is a session choice: a model/order change on the
     // settings page leaves it alone (only /select_model auto here returns it to the list)
     if (what === 'model' && !app.cfg.session) {

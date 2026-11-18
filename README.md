@@ -150,60 +150,59 @@ On **Models → Providers**:
    **Add N to the list**. Or click a model to add just that one.
 3. Do the same for every provider you have.
 
-### 5. Check models
+### 5. Update model info
 
-On **Models → List**, click **Check models** (and **Check them** in the box that asks). One click does
-three things:
+On **Models → List**, click **Update model info**. It fetches what each model can do and costs
+(from [models.dev](https://models.dev)) and its places in LMArena's public rankings for coding, web
+apps and vision. The rankings become columns you can sort by (step 9).
 
-1. Fetches what each model can do and costs (from [models.dev](https://models.dev)) and its places in
-   LMArena's public rankings for coding, web apps and vision. The rankings become columns you can
-   sort by (step 8).
-2. Sends each model a short message and shows in the *Works?* column which ones answer, and how fast.
-3. Picks the helpers for you (*Helpers: Automatic*): from the models that work, each for what it's
-   good at; a job then goes to the fastest one good at it.
+### 6. Test all
+
+Click **Test all**. It sends each model a short message and shows in the *Works?* column which ones
+answer, and how fast. The providers are tested side by side, one model at a time from each: models
+named "auto" first, then those named "free", then the rest, each A to Z.
 
 Why: most providers have free and paid models side by side, and not every model they list works
 for your key. The test shows which ones really answer for you. (A paid model charges for its few
 tokens.)
 
-The three time limits above the list are already set the way I use them:
+The three time limits next to the buttons are already set the way I use them:
 
 | Setting | Default | What it does |
 |---|---|---|
 | **Give up** | 45 s | How long a model gets to start answering (its first word, thought or tool call). Nothing by then: it counts as failed and the next model takes over. |
 | **Stalled** | 60 s | How long a reply may go quiet once it has started. A model that keeps sending is never cut off; one silent for this long is asked again, or another takes over. |
-| **Tests wait** | 60 s | Only for the tests (Check models, or a row's ▷): how long each model gets to answer the test message. No answer by then shows as *no answer*. |
+| **Tests wait** | 60 s | Only for the Test buttons: how long each model gets to answer the test message. No answer by then shows as *no answer*. |
 
 Give up and Stalled apply to real work too. They're kept consistent: Stalled and Tests wait are
 never shorter than Give up. Change one so they would clash and the other moves with it (the page
 says so). Hover any setting for what it does.
 
-### 6. Wait for the check to finish
+### 7. Wait for every test to finish
 
-With many models this takes a while. When it's done, a message says how many work, and *Helpers*
-shows **Automatic**.
+With many models this takes a while. When it's done, a message says how many work.
 
-### 7. Keep only the ones that work
+### 8. Keep only the ones that work
 
 In the filters above the list, set *Result* to **✓ Works**. Only the models that answered show.
 
-### 8. Sort by coding
+### 9. Sort by coding
 
 Click the **`</>`** column header (*Coding*): the 9th header counting from *#*, right after the
 wrench, bulb and image icons, before the globe and eye. The models best placed in LMArena's coding ranking come first. #1 is
 the one HeartCode uses first, so the best coder answers, and the next ones take over when it fails.
 
-### 9. Save
+### 10. Save
 
 Click **Use only these N**. HeartCode uses just these models, in the order shown. The others stay
 under Providers, and the sort and filter stay as they are for next time.
 
-### 10. Back to HeartCode
+### 11. Back to HeartCode
 
 Go back to the terminal. While the settings page is on, HeartCode shows a dialog and waits.
 **Turn off** is selected: press Enter to stop the settings page. Your changes are already in.
 
-### 11. Start coding
+### 12. Start coding
 
 Ask it to read, change, run and fix things in your project, like any coding agent.
 
@@ -237,11 +236,12 @@ On **Models → List**, also:
 2. **Filter** by name, provider, test result, context, abilities or free.
 3. **Helpers**: the models #1 can hand parts of a task to. In the *Helper* column, switch a model on
   and pick what it's good at: **UI & visuals**, **Code & logic**, **Big & hard**, **Quick & cheap**
-  (hover an icon to see what it covers). *Helpers* (at the top): **Automatic** (what **Check models**
-  sets) picks them and their jobs for you, from the tests and the rankings, and a job goes to the fastest helper that's good at it (from its test); if it can't
-  do it, the best-ranked of the others takes over. **My picks**: yours, and *Used* sets which helper
-  #1 takes first: **by score** (the default: best placed in LMArena's rankings first), in your order,
-  or by your provider ranking.
+  (hover an icon to see what it covers). *Helpers* (at the top): **Automatic** picks them and their
+  jobs for you (again after **Update model info** or **Test all**), and a job goes to the fastest
+  helper that's good at it (from its test); if it can't do it, the best-ranked of the others takes
+  over. **My picks**: yours; **Update model info** also marks helpers, from the rankings and the tests
+  (added to yours: what you picked stays; a model whose test failed isn't marked). A job goes to the
+  best-ranked helper good at it.
 4. A model *not found* in models.dev: **Retry** looks it up again, or **Set up** tells HeartCode what
   it can do.
 
