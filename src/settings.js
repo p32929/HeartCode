@@ -13,7 +13,7 @@ import { newer } from './update.js'
 import { DEFAULT_SERVERS, mcpAuth, serverName } from './mcp.js'
 import { sections, BUILTIN_PROMPTS, prompt, reloadPrompts } from './prompts.js'
 import { Client } from './client.js'
-import { clisInfo, installCli, cliOf } from './clis.js'
+import { clisInfo, installCli, cliOf, cliUrl, CLIS } from './clis.js'
 import { clip, TOOL_DEFS } from './tools.js'
 import { loadProfile, strategy, profilePath, profileFrom } from './probe.js'
 import { loadPrices, priceOf, limitsOf } from './usage.js'
@@ -572,6 +572,20 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     },
     // the coding CLIs (clis.js): which are installed, how to install the rest, an install going on
     'GET /api/clis': () => clisInfo(),
+    // several CLIs added at once (Add CLIs): each a provider named after it; one added already is skipped
+    'POST /api/clis/add': ({ ids }) => {
+      if (!Array.isArray(ids) || !ids.length) throw new Error('no CLI picked')
+      for (const id of ids) {
+        if (!CLIS[id]) throw new Error(`no CLI "${id}"`)
+        if (Object.values(cfg.providers).some((p) => cliOf(p.baseUrl) === id)) continue
+        const name = cfg.providers[id] ? `${id}-cli` : id
+        cfg.providers[name] = { baseUrl: cliUrl(id) }
+        forgetList(name)
+      }
+      save('model')
+      autoPick()
+      return state()
+    },
     'POST /api/cli/install': ({ id }) => (installCli(id, () => emit('clis', {})), clisInfo()),
     'POST /api/provider/delete': ({ name }) => {
       if (!cfg.providers[name]) throw new Error(`no provider "${name}"`)

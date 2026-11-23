@@ -146,9 +146,9 @@ computer. Only that link works: it has a secret key. A running HeartCode picks u
 On **Models → Providers**:
 
 1. **+ Add a provider**: its name, base URL and API key. A preset fills in the URL.
-   Or pick a **coding CLI** on this machine (Claude Code, Codex, opencode, Junie, Kilo Code, Cline,
-   GitHub Copilot, Cursor, Qwen Code and more): one that isn't installed installs from there; no key,
-   it uses its own sign-in. Its models are listed and tested like any provider's, and a message
+   Coding CLIs on this machine (Claude Code, Codex, opencode, Junie, Kilo Code, Cline, GitHub
+   Copilot, Cursor, Qwen Code and more): **+ Add CLIs**, tick the ones you want, **Add**. One that
+   isn't installed installs from there; no key, each uses its own sign-in. Its models are listed and tested like any provider's, and a message
    answered by one is worked on by that CLI with its own tools, its steps shown in HeartCode.
 2. **Pick models.** I take all of them: tick the box at the top (*select every model shown*), then
    **Add N to the list**. Or click a model to add just that one.

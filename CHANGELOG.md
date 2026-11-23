@@ -2,6 +2,14 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.84 (2026-11-23)
+
+- **+ Add CLIs** (Providers, beside + Add a provider): every coding CLI on one dialog with a checkbox.
+  The installed ones not added yet come ticked; untick what you don't want (or Tick all / Untick all)
+  and **Add N CLIs** adds them all at once, their models loading side by side. One not installed has
+  its Install button there (ticked once it's in); one added already shows as added. The CLIs left
+  Add a provider, which is for APIs again.
+
 ## 0.1.83 (2026-11-23)
 
 - **Guides for kinds of work**, so any model (the smallest too) knows how to do it: web, API, mobile,
