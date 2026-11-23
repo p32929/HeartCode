@@ -2,6 +2,12 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.89 (2026-11-23)
+
+- **An icon before each provider's name** (Models list, Providers, "HeartCode uses"): a terminal
+  `>_` for a coding CLI, a server for an API provider; hover says which. The list's Provider column
+  is a little wider for it.
+
 ## 0.1.88 (2026-11-23)
 
 - **Select all on Providers selects every model shown again**, on or off (0.1.86 left out the

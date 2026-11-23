@@ -478,7 +478,7 @@
   .pill .again:hover:not(:disabled) { color: var(--text); }
   .pill.on { border-color: var(--accent); background: var(--accent-soft); }
   .pill.on .again { border-left-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-  .mt-h, .mtable li { display: grid; grid-template-columns: 14px 16px 28px minmax(120px, 1fr) 80px 148px 52px 26px 26px 26px 44px 44px 44px 94px 74px 104px; /* the last: Test · Request · Edit · ✕, as wide as they are */ align-items: center; column-gap: 4px; padding: 8px 12px; }
+  .mt-h, .mtable li { display: grid; grid-template-columns: 14px 16px 28px minmax(120px, 1fr) 100px 148px 52px 26px 26px 26px 44px 44px 44px 94px 74px 104px; /* the last: Test · Request · Edit · ✕, as wide as they are */ align-items: center; column-gap: 4px; padding: 8px 12px; }
   .mt-h button.mid, .mtable .mid { text-align: center; }
   @media (min-width: 861px) and (max-width: 1400px) { .mt-h, .mtable li { padding-left: 6px; padding-right: 6px; } .mt, .mt-h.mt-hpick { min-width: 1012px; } } /* a small laptop (1280): narrower rows */
   .mt-h > :nth-child(15), .mtable .try { padding-left: 12px; } /* Works?: a little room after the right-aligned price */
@@ -502,6 +502,8 @@
   .mtable li:first-child .n { color: var(--accent); }
   .mtable .m { font-family: var(--mono); font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mtable .p { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .picon { width: 13px; height: 13px; margin-right: 5px; vertical-align: -2px; color: var(--faint); }
+  .picon.cli { color: var(--accent); }
   .mtable .yes { color: var(--ok); }
   /* Helper: a switch (can #1 start it for side jobs?), then what it's good at, as pills */
   .hp { display: flex; align-items: center; gap: 4px; min-width: 0; }
@@ -1309,6 +1311,15 @@ const ICON = {
   mountain: 'M3 20L9.5 9l4 6.5 2.5-4 5 8.5z',
   image: 'M3 5h18v14H3zM8.5 11a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 19',
   bulb: 'M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V16h8v-1.3A7 7 0 0 0 12 2z',
+}
+// before a provider's name: a terminal for a coding CLI (cli://), a server for an API
+const provIcon = (name) => {
+  const cli = /^cli:\/\//i.test(S?.providers.find((p) => p.name === name)?.baseUrl ?? '')
+  const el = ic(cli ? 'terminal' : 'server', `picon${cli ? ' cli' : ''}`)
+  el.title = cli ? 'a coding CLI' : 'an API provider'
+  el.removeAttribute('aria-hidden')
+  el.setAttribute('aria-label', el.title)
+  return el
 }
 const ic = (name, cls = '') => {
   const el = document.createElement('span')
@@ -2518,7 +2529,7 @@ function buildCatalog(s) {
           h('input', { type: 'checkbox', checked: !p.off, 'aria-label': `${p.name} on`, onchange: (e) => act('/api/provider/on', { name: p.name, on: e.target.checked }, e.target.checked ? `${p.name} is on` : `${p.name} is off: HeartCode skips its models`) }),
           h('i')),
         h('div', { className: 'who' },
-          h('span', { className: 'name', textContent: p.name }),
+          h('span', { className: 'name' }, provIcon(p.name), p.name),
           p.off ? h('span', { className: 'tag', textContent: 'off' }) : null,
           m.off ? h('span', { className: 'tag', textContent: 'list off', title: "its list isn't loaded: add a model by its name, in the box on the right" }) : m.loading ? h('span', { className: 'tag', textContent: 'loading…' }) : m.error ? h('span', { className: 'tag err', textContent: "can't list its models", title: m.error }) : h('span', { className: 'tag', textContent: `${m.list.length} model${m.list.length === 1 ? '' : 's'}` }),
           h('span', { className: 'tag inlist' }),
@@ -3069,7 +3080,7 @@ function tableRow(t, at, pick, row = at) {
     h('span', { className: 'n', textContent: `#${row + 1}`, title: row !== at ? `#${at + 1} in the list HeartCode uses (Save list to use the order shown)` : '' }),
     h('span', { className: 'm' }, h('span', { className: 'name', textContent: t.model, title: t.model + (t.record ? `\nTrack record (recent work): ${t.record.done} done, ${t.record.failed} failed` : '') }), tag,
       t.record?.poor ? h('span', { className: 'tag warn', textContent: '⚠', 'aria-label': 'failing', title: `Failing: it failed most of its recent work (${t.record.failed} failed, ${t.record.done} done: handed over, reviews that said no, broken replies). HeartCode picks it last and doesn't start a message with it while another can. Turn off "Learn from each model's track record" in Settings to use your order only.` }) : null),
-    h('span', { className: 'p', textContent: isOff(t.provider) ? `${t.provider} · off` : t.provider, title: t.provider }),
+    h('span', { className: 'p', title: t.provider }, provIcon(t.provider), isOff(t.provider) ? `${t.provider} · off` : t.provider),
     helperCell(t, at),
     h('span', { className: 'num', textContent: ctx ? `${t.tested?.sure === false ? '~' : ''}${kTok(ctx)}` : '–', title: ctx ? `${ctx.toLocaleString()} tokens${t.tested?.sure === false ? ' (assumed: the server and models.dev don\'t say)' : ''}` : '' }),
     yes(c.tools), yes(c.thinking), yes(c.images),
@@ -3103,7 +3114,7 @@ function drawUsing(s) {
   const o = s.order.filter((t) => !isOff(t.provider))
   $('using').hidden = page() === 'providers' // there it's on the page itself
   const first = inUse() ?? o[0]
-  put($('using'), o.length ? [h('span', { className: 'k', textContent: 'HeartCode uses' }), h('b', { textContent: first.model, title: first !== o[0] ? `${o[0].model} (#1) failed most of its recent work, so messages start with ${first.model} until it does better` : '' }), h('span', { className: 'k', textContent: `${first.provider}${first !== o[0] ? ' · #1 is failing' : ''}${o.length > 1 ? ` · ${o.length - 1} fallback${o.length > 2 ? 's' : ''}` : ''}` })] : s.order.length ? [h('span', { className: 'k', textContent: 'The providers of all the models are switched off' }), h('a', { href: '#providers', textContent: 'Switch one on' })] : [h('span', { className: 'k', textContent: 'No model chosen yet' }), h('a', { href: '#providers', textContent: 'Choose one' })])
+  put($('using'), o.length ? [h('span', { className: 'k', textContent: 'HeartCode uses' }), h('b', { textContent: first.model, title: first !== o[0] ? `${o[0].model} (#1) failed most of its recent work, so messages start with ${first.model} until it does better` : '' }), h('span', { className: 'k' }, provIcon(first.provider), `${first.provider}${first !== o[0] ? ' · #1 is failing' : ''}${o.length > 1 ? ` · ${o.length - 1} fallback${o.length > 2 ? 's' : ''}` : ''}`)] : s.order.length ? [h('span', { className: 'k', textContent: 'The providers of all the models are switched off' }), h('a', { href: '#providers', textContent: 'Switch one on' })] : [h('span', { className: 'k', textContent: 'No model chosen yet' }), h('a', { href: '#providers', textContent: 'Choose one' })])
 }
 
 // --- General ---
