@@ -2,7 +2,7 @@
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { Client, limitSaid, estMessages } from '../src/client.js'
-import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, TEMP, AUTO_MODEL, isAuto, parseModel, takeIn, whatOf, VERSION, speedOf, jobsOf } from '../src/config.js'
+import { loadConfig, saveConfig, readJson, writeJson, providerName, CONFIG_FILE, HOME, TEMP, AUTO_MODEL, isAuto, parseModel, takeIn, whatOf, VERSION, speedOf, jobsOf, track } from '../src/config.js'
 import { loadProfile, strategy, describe, profilePath, profileFrom } from '../src/probe.js'
 import { learnFromUsage, LIMIT_MS, RATE_CAP_MS } from '../src/context.js'
 import { loadRankings, scoreOf } from '../src/rankings.js'
@@ -508,7 +508,7 @@ class App {
     }
     this.setChat(chat)
     ui.setLog(chat.log)
-    ui.print(c.dim(`resumed "${chat.title}" · ${chat.turns.length} message${chat.turns.length > 1 ? 's' : ''} · ${ago(chat.updated)}`))
+    ui.notice(`resumed "${chat.title}" · ${chat.turns.length} message${chat.turns.length > 1 ? 's' : ''} · ${ago(chat.updated)}`, 8000)
   }
 
   // /rewind: back to before one of your messages; the conversation, the files HeartCode changed, or both.
@@ -541,7 +541,7 @@ class App {
       log('rewind', `files restored to before "${turn.task}":`, files)
       for (const t of chat.turns.slice(i)) t.files = {}
       chat.messages?.push({ role: 'user', content: prompt('agent/files-restored', { task: turn.task, files: files.join(', ') }) })
-      ui.print(c.dim(`restored ${files.join(', ')} to before "${turn.task.split('\n')[0].slice(0, 60)}"`))
+      ui.notice(`restored ${files.join(', ')} to before "${turn.task.split('\n')[0].slice(0, 60)}"`, 8000)
     }
     if (how.conversation) {
       // what came after is kept as a branch (/tree), never lost: with its files as they are now,
@@ -550,8 +550,7 @@ class App {
       const { files } = move(chat, null, i, { code: Boolean(how.code) })
       log('rewind', `files restored to before "${turn.task}":`, files)
       ui.setLog(chat.log)
-      if (how.code) ui.print(c.dim(`restored ${files.join(', ') || 'nothing (no file differed)'}`))
-      ui.print(c.dim('the messages after it are kept as a branch: /tree goes back to them'))
+      ui.notice(`${how.code ? `Restored ${files.join(', ') || 'nothing (no file differed)'} · ` : ''}the messages after it are kept as a branch: /tree goes back to them`, 8000)
       this.nextInput = turn.task // back in the input, to edit and send again
     }
     log('rewind', `to before message ${i + 1}`, { conversation: Boolean(how.conversation), code: Boolean(how.code) })
@@ -597,7 +596,7 @@ class App {
     }
     const { left, files } = move(chat, it.branch, go.keep, { code })
     ui.setLog(chat.log)
-    if (files.length) ui.print(c.dim(`files now as on this branch: ${files.join(', ')}`))
+    if (files.length) ui.notice(`files now as on this branch: ${files.join(', ')}`, 8000)
     if (code && unknown.length) ui.warn(`not known how ${unknown.join(', ')} looked there; left as they are`)
     if (summarize) {
       const s = await this.session()
@@ -616,7 +615,7 @@ class App {
         }
       }
     }
-    ui.print(c.dim(`${go.edit ? 'edit the message and send it: a new branch' : 'here now'} · the branch left behind stays in /tree`))
+    ui.notice(`${go.edit ? 'edit the message and send it: a new branch' : 'here now'} · the branch left behind stays in /tree`, 8000)
     if (go.edit) this.nextInput = it.task
     if (this.s) this.s.client.lastTokens = 0
     this.save()
@@ -1285,15 +1284,15 @@ function applySettings(apps, cfg, what) {
     // settings page leaves it alone (only /select_model auto here returns it to the list)
     if (what === 'model' && !app.cfg.session) {
       app.lists = {}
-      if (app.s && !(cfg.providers[cfg.provider] && cfg.model)) now(() => ((app.s = null), ui.print(c.dim('settings: no model chosen'))))
-      else if (app.s && !app.myModels().length) now(() => ((app.s = null), ui.print(c.dim('settings: the providers of all the models are switched off'))))
+      if (app.s && !(cfg.providers[cfg.provider] && cfg.model)) now(() => ((app.s = null), ui.notice('settings: no model chosen')), 8000)
+      else if (app.s && !app.myModels().length) now(() => ((app.s = null), ui.notice('settings: the providers of all the models are switched off')), 8000)
     }
     // your model list: into the running session now, its next request goes to the new #1
     if (['model', 'setting:rotation'].includes(what) && !app.cfg.session && app.s && cfg.providers[cfg.provider] && cfg.model) {
       const was = `${app.s.client.provider} · ${app.s.client.model}`
       app.useRotation()
       const is = `${app.s.client.provider} · ${app.s.client.model}`
-      if (is !== was) ui.print(c.dim(`settings: ${is} now`))
+      if (is !== was) ui.notice(`settings: ${is} now`, 8000)
     }
     if (what === 'provider') app.lists = {} // its list switched on or off, a model added by name
     if (what === 'setting:permissions' && !ui.noUser) ui.setPermission(cfg.permissions) // -p and ACP keep the mode they were given (--permission-mode, the editor's)
@@ -1539,8 +1538,9 @@ async function slash(app, line, working = false) {
       const notes = await whatsNew(u.current, u.latest)
       if (kind === 'git') return ui.showText(`HeartCode ${u.latest} is out (this is ${u.current})`, `${notes || '(no changelog found)'}\n\nThis HeartCode runs from a git checkout (${packageDir}): update it there with git pull.`)
       const cmd = UPDATE_COMMANDS[kind]
-      ui.showText(`HeartCode ${u.latest} is out (this is ${u.current})`, notes || '(no changelog found)')
-      if ((await ui.confirm(`Update now with ${c.bold(cmd)}?`, 'command')) !== true) return ui.print(c.dim('not updated'))
+      // what changed and the question in one dialog (a question closed the notes before they could be read)
+      const go = await ui.pick(`HeartCode ${u.latest} is out (this is ${u.current}). Update now with ${cmd}?`, [{ label: 'Update now', yes: true }, { label: 'Not now' }], { body: notes || '(no changelog found)' })
+      if (!go?.yes) return ui.notice('Not updated', 3000)
       ui.spinner(`running ${cmd}`)
       const r = await runCommand(process.cwd(), cmd, { timeout: 300_000 })
       ui.stopSpin()
@@ -1813,12 +1813,12 @@ async function askAlerts(app, first = false) {
     { label: 'Only a desktop notification', key: 'popup', sound: false, popup: true },
     { label: first ? 'No, thanks' : 'Off', key: 'off', sound: false, popup: false },
   ].map((it) => (!first && it.key === now ? { ...it, label: `${it.label} ${c.faint('(now)')}` } : it))
-  const it = await ui.pick(first ? 'Let HeartCode tell you when a task finishes, fails or waits for you?' : 'Notifications on this computer', items)
+  const it = await ui.pick(first ? 'Let HeartCode tell you when a task finishes, fails or waits for you?' : 'Notifications on this computer', items, { quiet: true }) // not a message: nothing left in the conversation
   const pick = it ?? (first ? items.at(-1) : null)
   if (!pick) return
   cfg.alerts = { ...a, sound: pick.sound, popup: pick.popup }
   saveConfig(cfg)
-  ui.print(`${c.ok('✓')} ${c.muted(`notifications: ${pick.key === 'off' ? 'off' : pick.key === 'both' ? 'a sound and a desktop notification' : pick.key === 'sound' ? 'a sound' : 'a desktop notification'}`)} ${c.faint('· change it any time:')} ${c.cyan('/notifications')} ${c.faint('or')} ${c.cyan('/settings')} ${c.faint('→ Notifications (each event on its own, Try it, Telegram)')}`)
+  ui.notice(`Notifications: ${pick.key === 'off' ? 'off' : pick.key === 'both' ? 'a sound and a desktop notification' : pick.key === 'sound' ? 'a sound' : 'a desktop notification'} · change them any time: /notifications or /settings → Notifications`, 10000)
   if (pick.sound && first) playSound('done') // what it sounds like
 }
 
@@ -1900,6 +1900,7 @@ async function repl(app, f = {}) {
       if (last && app.tabs) app.tabs.quitting = true
       ctl?.abort()
       ui.cancelAsk()
+      app.mcp?.dispose?.() // its servers stop now, and their exit hook goes
       ui.close()
     } finally {
       closing = false
@@ -1986,7 +1987,7 @@ async function repl(app, f = {}) {
     const yes = await ui.pick(`This folder has its own HeartCode setup (${files.join(', ')}). Its hooks and MCP servers run commands on this computer. Use it?`, [
       { label: 'Yes, use it', desc: 'for these files as they are now; asked again if they change', use: true },
       { label: 'No', desc: 'HeartCode works here without them' },
-    ])
+    ], { quiet: true })
     if (yes?.use) trust(app.root), reloadPrompts()
     else ui.notice(`This folder's own setup isn't used (${files.join(', ')}); you're asked again next time`, 8000)
   }
@@ -2009,6 +2010,7 @@ async function repl(app, f = {}) {
     ui.busy(command ? 400 : 0, { task: !command }) // the spinner stays until this line's work is done (a command: if it takes a while)
     if (command) {
       const mark = ui.mark?.() // what it prints goes back out of the conversation when it's done
+      ui.inCommand = true // its own questions aren't echoed (one line said: above the input, not a box)
       try {
         if ((await slash(app, t)) === 'exit') {
           if (app.tabs) app.tabs.quitting = true
@@ -2019,6 +2021,7 @@ async function repl(app, f = {}) {
         log('error', e.stack)
         ui.print(c.red(`error: ${e.message}`))
       }
+      ui.inCommand = false
       if (mark) ui.unmark(mark, /^\S+/.exec(t)[0])
     } else {
       if (process.stdout.isTTY) process.stdout.write(`\x1b]0;● ${path.basename(app.root)} · HeartCode\x07`)
@@ -2036,8 +2039,8 @@ async function repl(app, f = {}) {
         ok = await runTask(app, prompt('agent/plan-approved'), ctl)
       }
       if (ui.busySince && ok !== null) ui.print(c.faint(c.italic(`✻ took ${duration(ui.worked())}`))) // fixed once the reply is in (not when no model ran)
-      // done, said by the terminal too: its title, and after a long task a bell and a notification (OSC 9)
-      if (process.stdout.isTTY) process.stdout.write(`\x1b]0;${ok === null ? '♥' : '✓'} ${path.basename(app.root)} · HeartCode\x07` + (ok !== null && !ctl.signal.aborted && ui.worked() > 10_000 ? '\x07\x1b]9;HeartCode: done\x07' : ''))
+      // done, said by the terminal too: its title (the desktop notification and sound: notify, as chosen)
+      if (process.stdout.isTTY) process.stdout.write(`\x1b]0;${ok === null ? '♥' : '✓'} ${path.basename(app.root)} · HeartCode\x07` + (ok !== null && !ctl.signal.aborted && ui.worked() > 10_000 && overSsh && cfg.alerts?.popup ? '\x1b]9;HeartCode: done\x07' : '')) // the terminal's own popup only over SSH (this computer's can't reach you there), and only when you chose notifications
     }
     ui.idle()
     ctl = null
@@ -2232,7 +2235,7 @@ async function main() {
     const saved = readJson(TABS_FILE, {})[root] // before this run's first tab replaces it
     const asked = f.continue || f.resume || f['resume-id'] || f['session-id'] // a session was chosen already
     const tabs = new Tabs((tab, o) => {
-      const app = newApp(o.first ? cfg : { ...cfg }, o.root, tab)
+      const app = newApp(o.first ? cfg : track({ ...cfg }, cfg), o.root, tab) // its own copy, its own changes saved (config.js track)
       Object.assign(tab, { app, ui: app.ui })
       Object.assign(app.ui, tab.hooks)
       Object.assign(app, { tabs, tab, worktree: o.wt ?? null })

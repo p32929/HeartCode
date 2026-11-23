@@ -201,17 +201,20 @@ function saved(cfg) {
 // Several HeartCodes (and the settings page in each) keep a copy of the settings. A save writes only
 // what this one changed since it last read or wrote the file, onto the file as it is now, and
 // takeIn brings in what the others changed: no copy undoes another's change with an old value.
-// file: config.json as last read or written here; mine: what this run's cfg stood for then (a -m
-// model for this run is no change of its own, so a save doesn't write it as #1).
+// file: config.json as last read or written here; mine: what each cfg (a tab's own copy too) stood
+// for then (a -m model for this run is no change of its own, so a save doesn't write it as #1).
 let file = null
-let mine = null
+const mine = new WeakMap()
+// A tab's copy of the settings: it starts from what the one it was copied from stood for, so its
+// saves write only its own changes (not its old values over another tab's)
+export const track = (copy, from) => (mine.set(copy, mine.get(from) ?? saved(copy)), copy)
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const keysOf = (...objs) => [...new Set(objs.flatMap((o) => Object.keys(o ?? {})))]
-const synced = (cfg, disk) => ((file = disk), (mine = saved(cfg)))
+const synced = (cfg, disk) => ((file = disk), mine.set(cfg, saved(cfg)))
 
 export function saveConfig(cfg) {
   const out = saved(cfg)
-  const was = mine ?? {}
+  const was = mine.get(cfg) ?? {}
   const disk = readJson(CONFIG_FILE, {})
   for (const k of keysOf(out, was)) {
     if (k === 'providers') {
@@ -242,6 +245,6 @@ export function takeIn(cfg) {
   }
   oneEach(cfg)
   file = disk
-  mine = saved(cfg)
+  mine.set(cfg, saved(cfg))
   return keys
 }

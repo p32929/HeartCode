@@ -1140,7 +1140,8 @@ export class UI {
     // which took the input box and the status bar with it)
     this.out.on('resize', () => setImmediate(() => ((this.frameSize = this.lastFrame = null), this.render())))
     this.#rl()
-    process.on('exit', () => this.leaveFullscreen())
+    this.onExit = () => this.leaveFullscreen()
+    process.on('exit', this.onExit) // taken off when this UI closes (a tab each: they'd pile up)
   }
 
   // Hands the terminal to another program (an editor) and takes it back afterwards.
@@ -1901,8 +1902,9 @@ export class UI {
       if (finishing) return this.notice('transcribing the last part… (Esc cancels)', 60 * 60_000, '')
       this.notice(mic ? `${c.red('●')} listening ${Math.floor(mic.seconds())}s · Space to pause · ${keys}` : `paused · Space to go on · ${keys}`, 60 * 60_000, '')
     }
+    const cancel = new AbortController() // Esc while the last part is transcribed: that request stops too
     const heard = (pcm, fast) =>
-      transcribePcm(pcm, voice, providers, { fast }).catch((e) => {
+      transcribePcm(pcm, voice, providers, { fast, signal: AbortSignal.any([cancel.signal, AbortSignal.timeout(30_000)]) }).catch((e) => { // a provider that hangs: given up on, never the keyboard held
         log('voice', e.message)
         failed = e.message
         return null
@@ -1940,7 +1942,7 @@ export class UI {
     let go = await new Promise((resolve) => {
       this.recording = {
         key: (key, bound) => {
-          if (key.name === 'escape') resolve(false)
+          if (key.name === 'escape' || (key.ctrl && key.name === 'c')) resolve(false) // Ctrl+C: as Esc (it stops the recording, never lost)
           else if (key.name === 'return' || bound === 'voice') resolve(true)
           else if (key.name === 'space') mic ? pause() : start()
         },
@@ -1948,7 +1950,7 @@ export class UI {
     })
     clearInterval(tick)
     // the last part being transcribed: keys still wait (an Enter now would send half of it); Esc cancels
-    this.recording = { key: (key) => key.name === 'escape' && (go = false) }
+    this.recording = { key: (key) => (key.name === 'escape' || (key.ctrl && key.name === 'c')) && ((go = false), cancel.abort()) }
     if (!go) mic?.cancel(), (mic = null)
     else if (mic) (finishing = true), pause()
     await busy
@@ -2112,7 +2114,7 @@ export class UI {
   }
 
   ask(prompt, { initial = '', suggest = false, history = false } = {}) {
-    const own = ownAsk.getStore() // asked by a command you ran beside the task (its answer comes from a key, outside it)
+    const own = ownAsk.getStore() || this.inCommand // asked by a command you ran (its answer comes from a key, outside it): not echoed into the conversation
     if (this.dialog && !history) this.setDialog(null) // a question (a permission, a picker) needs you: the dialog makes way
     if (this.full && (this.asking || (this.recording && !history))) return this.#free().then(() => this.ask(prompt, { initial, suggest, history }))
     if (history && this.kept) [initial, this.kept] = [initial || this.kept, ''] // typed before a submit()
@@ -2128,7 +2130,11 @@ export class UI {
       const l = together ? msgs.join('\n\n') : this.ahead.shift()
       if (together) this.ahead = this.ahead.filter((x) => this.isCommand(x))
       log('input', `${prompt.trim()} ${l} (typed while working)`)
-      this.write(prompt.replace(/^ /, '') + c.bright(l) + '\n')
+      this.remember(l) // in ↑'s history, as a message typed at the prompt is
+      if (this.isCommand(l.trim())) return Promise.resolve(l) // a command: not echoed (its own output says what it did)
+      const echo = prompt.replace(/^ /, '')
+      this.inputMark = this.log.length - 1 // where this message starts, for /rewind
+      this.write(echo + c.bright(l.replace(/\n/g, '\n' + ' '.repeat(width(echo.replace(/\x1b\[[0-9;]*m/g, ''))))) + '\n') // its lines under its first, as typed ones
       return Promise.resolve(l)
     }
     // a question in the middle of work: what's being typed for later waits until it's answered
@@ -2580,6 +2586,7 @@ export class UI {
   }
 
   close() {
+    if (this.onExit) process.off('exit', this.onExit)
     this.busySince = null // closing ends any work in progress: the spinner stops too
     clearInterval(this.dialogTimer)
     this.stopSpin()

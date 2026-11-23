@@ -2,6 +2,24 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.78 (2026-11-23)
+
+- **Going back to a message queued while working** keeps the conversation before it on screen (it
+  cut one message too many); queued messages are in ↑'s history and their lines line up.
+- **Tabs don't undo each other's settings**: a save in one tab no longer writes its old values over
+  what another tab changed (notifications, permissions, the queue…).
+- **More notes out of the conversation**: what a rewind, `/resume`, `/tree` and a settings change say,
+  the first-start questions and their answers, and a command's own question all show above the
+  input instead (they were saved into the session too). A command that asks, then says one line,
+  no longer opens a box to close.
+- **`/update`** shows what changed and asks in one dialog (the question closed the notes before).
+- **An MCP server that quits right away** no longer shows "HeartCode hit an error… EPIPE".
+- **Voice**: Ctrl+C stops the recording like Esc, Esc also stops the last part's transcription, and
+  a transcription that hangs is given up on after 30 s (the keyboard was held).
+- **No terminal bell or popup with notifications off** (after a long task); over SSH the terminal's
+  popup comes when you chose notifications.
+- Closing a tab stops its MCP servers and takes its exit hooks off (a 4th tab printed a warning).
+
 ## 0.1.77 (2026-11-23)
 
 - **A command run while a task works is yours**: its lists and questions (`/select_model`, Alt+W,

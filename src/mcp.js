@@ -168,6 +168,7 @@ class Server {
       }
     })
     child.stderr.on('data', (d) => log('mcp', `${this.name} stderr: ${String(d).trim()}`))
+    child.stdin.on('error', (e) => log('mcp', `${this.name} stdin: ${e.message}`)) // it quit while being written to (EPIPE): its exit says so, not a crash
     const gone = new Promise((_, reject) => {
       child.on('error', (e) => reject(new Error(`${this.name} could not start: ${e.message}`)))
       child.on('exit', (code) => {
@@ -258,7 +259,15 @@ class Server {
   }
 
   #send(msg) {
-    if (!this.url) return this.child.stdin.write(JSON.stringify(msg) + '\n')
+    if (!this.url) {
+      if (!this.child?.stdin.writable) {
+        log('mcp', `${this.name}: not running, ${msg.method ?? 'reply'} not sent`) // stopped, or gone
+        const p = this.pending.get(msg.id)
+        if (p) this.pending.delete(msg.id), p.reject(new Error(`${this.name} isn't running`)) // not left waiting
+        return
+      }
+      return this.child.stdin.write(JSON.stringify(msg) + '\n')
+    }
     this.#post(msg).catch((e) => {
       const p = this.pending.get(msg.id)
       if (!p) return log('mcp', `${this.name}: ${e.message}`)
