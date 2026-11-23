@@ -2,6 +2,13 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.93 (2026-11-23)
+
+- **Turn just the selected providers off or on**: tick providers (their own box, or any of their
+  models) and the bar under the list has **Turn off N providers** / **Turn on N providers** for those
+  only; the button at the top says **Turn N selected off/on** while some are ticked, and **Turn all
+  off/on** when none are.
+
 ## 0.1.92 (2026-11-23)
 
 - **Test all runs at most 10 tests at a time**: still one model at a time from each provider, but with

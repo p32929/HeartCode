@@ -1870,10 +1870,18 @@ const costOf = (d) => (d?.price ? (d.price.input ?? 0) + (d.price.output ?? 0) :
 let searchOpen = false
 const FOLDED = new Set()
 // Turn all off while any is on, else Turn all on
+// The providers selected: those with a model ticked (a provider's own box ticks all of its models)
+const selProviders = () => [...PICKED_CAT].filter(([name, ids]) => ids.size && S?.providers.some((p) => p.name === name)).map(([name]) => name)
+// Turn on or off: the selected providers when some are, else all (off while any of them is on)
+const offOf = (names) => S.providers.filter((p) => names.includes(p.name))
 function onAllLabel() {
-  $('on-all').textContent = S?.providers.some((p) => !p.off) ? 'Turn all off' : 'Turn all on'
+  const sel = selProviders()
+  const anyOn = (sel.length ? offOf(sel) : S?.providers ?? []).some((p) => !p.off)
+  $('on-all').textContent = sel.length ? `Turn ${sel.length} selected ${anyOn ? 'off' : 'on'}` : anyOn ? 'Turn all off' : 'Turn all on'
+  $('on-all').title = sel.length ? `switch the ${sel.length} selected provider${sel.length === 1 ? '' : 's'} ${anyOn ? 'off' : 'on'} (selected: a model of it ticked, or its own box)` : 'switch every provider on or off (off: kept, but HeartCode skips its models)'
   $('on-all').hidden = !S?.providers.length
 }
+const switchProviders = (names, on) => act('/api/provider/on', { names, on }, `${names.length === 1 ? names[0] : `${names.length} providers`} ${on ? 'on' : 'off'}${on ? '' : ': HeartCode skips their models'}`)
 function applyFolds() {
   $('fold-all').textContent = allFolded() ? 'Expand all' : 'Collapse all'
   onAllLabel()
@@ -1894,6 +1902,8 @@ const fold = (name) => (settle(), FOLDED.has(name) ? FOLDED.delete(name) : FOLDE
 // one button: collapse them all, or (all collapsed) expand them all
 const allFolded = () => Boolean(S?.providers.length) && S.providers.every((p) => FOLDED.has(p.name))
 $('on-all').onclick = () => {
+  const sel = selProviders()
+  if (sel.length) return switchProviders(sel, !offOf(sel).some((p) => !p.off))
   const on = !S?.providers.some((p) => !p.off)
   act('/api/provider/on', { on }, on ? 'every provider is on' : 'every provider is off: HeartCode skips their models until you turn one on')
 }
@@ -2201,7 +2211,7 @@ function drawProviders(s) {
   const unlisted = order.filter((t) => !(MODELS[t.provider]?.list ?? []).includes(t.model)).map(keyOf).sort()
   const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + ((MODELS[p.name] ?? { loading: true }).loading ? 'loading' : '')), modelQuery.trim(), catSort, freeOnly, onOnly, catKind, unlisted])
   if (shape !== catalogShape) (buildCatalog(s), applyFolds())
-  onAllLabel()
+  drawPicks() // its buttons follow the providers (switched on or off)
   catalogShape = shape
   markCatalog()
   $('m-search').placeholder = `Search ${Object.values(MODELS).reduce((n, m) => n + (m.list?.length ?? 0), 0) || 'all'} models…`
@@ -2476,8 +2486,17 @@ function drawPicks() {
     h('span', { className: 'n', textContent: `${all.length} selected` }),
     h('button', { className: 'small ghost', textContent: 'Clear', onclick: () => (PICKED_CAT.clear(), drawPicks()) }),
     h('button', { className: 'small', textContent: `Test ${all.length}`, title: 'send each ticked model "Hello" and see which answer', onclick: () => helloAll(all) }),
+    ...(() => { // the providers of what's ticked: switched off or on, just those
+      const sel = selProviders()
+      const on = offOf(sel).filter((p) => !p.off).map((p) => p.name)
+      const off = offOf(sel).filter((p) => p.off).map((p) => p.name)
+      const n = (k) => `${k} provider${k === 1 ? '' : 's'}`
+      return [on.length ? h('button', { className: 'small', textContent: `Turn off ${n(on.length)}`, title: `switch off: ${on.join(', ')}`, onclick: () => switchProviders(on, false) }) : null,
+        off.length ? h('button', { className: 'small', textContent: `Turn on ${n(off.length)}`, title: `switch on: ${off.join(', ')}`, onclick: () => switchProviders(off, true) }) : null]
+    })(),
     toTake.length ? h('button', { className: 'small danger', textContent: `Remove ${toTake.length} from the list`, onclick: take }) : null,
     toAdd.length ? h('button', { className: 'small primary', textContent: `Add ${toAdd.length} to the list`, onclick: () => (PICKED_CAT.clear(), saveOrder([...S.order, ...toAdd], `${toAdd.length} added: the list has ${S.order.length + toAdd.length} models`)) }) : null)
+  onAllLabel()
   if (was !== $('picks').hidden) fillHeight() // the list gives it room
 }
 function buildCatalog(s) {
