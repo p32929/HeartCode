@@ -2,6 +2,17 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.95 (2026-11-23)
+
+- **The Providers page, rewritten**: one state (the filters, the folds, the ticked models) and one way
+  to draw it, so what you see always matches what you did.
+  - **Search and Free only filter the models again** (0.1.94 broke them).
+  - Every row is a real row (no more redrawn windows of a long list): ticks, folds and your place in
+    the list stay put while lists load, tests finish or the list changes; scrolling doesn't jump.
+  - Ticks are kept while you search or filter; the bar says how many are ticked but not shown.
+  - A search shows folded providers open while it's typed; your folds come back after.
+  - Collapse all / Expand all and Select all work on what the filters show.
+
 ## 0.1.94 (2026-11-23)
 
 - **On Providers, models with "auto", "free" or "default" anywhere in the name come first** under
