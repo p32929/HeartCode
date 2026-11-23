@@ -911,6 +911,7 @@
             <input type="search" id="m-search" placeholder="Search all models…">
             <label class="free-only" title="only the models their provider lists at $0 (a provider whose list has no prices can't say)"><input type="checkbox" id="free-only">Free only</label>
             <label class="free-only" title="only the providers that are on (their switch): the ones off are hidden"><input type="checkbox" id="on-only">On only</label>
+            <select id="m-kind" aria-label="which providers to show" title="all of them, only the API providers, or only the coding CLIs"><option value="all">All</option><option value="api">Providers only</option><option value="cli">CLIs only</option></select>
             <select id="m-sort" aria-label="sort the models"><option value="name">Sort by name</option><option value="price">Sort by price (free first)</option></select>
             <button class="small ghost" id="fold-all" type="button">Collapse all</button>
             <button class="small ghost" id="on-all" type="button" title="switch every provider on or off (off: kept, but HeartCode skips its models)"></button>
@@ -1836,6 +1837,14 @@ $('on-only').onchange = (e) => {
   savePref('onOnly', onOnly)
   if (S) drawProviders(S)
 }
+// all, only the API providers, or only the coding CLIs (cli://)
+let catKind = 'all'
+const isCli = (p) => /^cli:\/\//i.test(p.baseUrl ?? '')
+$('m-kind').onchange = (e) => {
+  catKind = e.target.value
+  savePref('catKind', catKind)
+  if (S) drawProviders(S)
+}
 const isOn = (name) => !S?.providers.find((p) => p.name === name)?.off
 $('m-sort').onchange = (e) => {
   catSort = e.target.value
@@ -2177,7 +2186,7 @@ function drawProviders(s) {
   // list only updates the rows it touches (markCatalog), so the list stays where you scrolled it
   // (but one of yours a provider doesn't list gets a row of its own).
   const unlisted = order.filter((t) => !(MODELS[t.provider]?.list ?? []).includes(t.model)).map(keyOf).sort()
-  const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + ((MODELS[p.name] ?? { loading: true }).loading ? 'loading' : '')), modelQuery.trim(), catSort, freeOnly, onOnly, unlisted])
+  const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + ((MODELS[p.name] ?? { loading: true }).loading ? 'loading' : '')), modelQuery.trim(), catSort, freeOnly, onOnly, catKind, unlisted])
   if (shape !== catalogShape) (buildCatalog(s), applyFolds())
   onAllLabel()
   catalogShape = shape
@@ -2501,6 +2510,7 @@ function buildCatalog(s) {
     if (q && !ids.length) return null // searching: only the providers with a match
     if (freeOnly && !ids.length) return null // free only: the providers with a free one
     if (onOnly && p.off) return null // on only: the ones switched on
+    if ((catKind === 'cli') !== isCli(p) && catKind !== 'all') return null // providers only, or CLIs only
     return h('section', { 'data-provider': p.name, className: p.off ? 'off' : '' },
       // the header folds it (a click on it, or its arrow; not on its buttons and switch)
       h('div', { className: 'prov-h', onclick: (e) => !e.target.closest('button:not(.fold), input, label, a') && fold(p.name) },
@@ -2532,7 +2542,8 @@ function buildCatalog(s) {
       m.off && !ids.length ? h('div', { className: 'cat-note', textContent: "Its list is off: add a model by its name, in the box above." }) : null,
       m.loading ? h('div', { className: 'cat-note', textContent: 'Loading its models…' }) : null)
   }))
-  if (onOnly && !freeOnly && !$('p-list').querySelector('section') && s.providers.length) put($('p-list'), h('div', { className: 'cat-note', textContent: 'Every provider is off. Turn one on (Turn all on), or untick On only.' }))
+  if (catKind !== 'all' && !$('p-list').querySelector('section') && s.providers.length) put($('p-list'), h('div', { className: 'cat-note', textContent: catKind === 'cli' ? 'No coding CLI added yet (or none matches): + Add CLIs.' : 'No API provider added yet (or none matches): + Add a provider.' }))
+  else if (onOnly && !freeOnly && !$('p-list').querySelector('section') && s.providers.length) put($('p-list'), h('div', { className: 'cat-note', textContent: 'Every provider is off. Turn one on (Turn all on), or untick On only.' }))
   if (freeOnly && !$('p-list').querySelector('section')) put($('p-list'), h('div', { className: 'cat-note', textContent: "No provider lists a model at $0. (A provider whose model list has no prices can't say what's free: Free only leaves those out.)" }))
 }
 // --- Your models page: the list as a table; sorted by several columns at once (each a tie-break
@@ -3914,6 +3925,8 @@ function render(s) {
     $('free-only').checked = freeOnly
     onOnly = p.onOnly === true
     $('on-only').checked = onOnly
+    catKind = ['api', 'cli'].includes(p.catKind) ? p.catKind : 'all'
+    $('m-kind').value = catKind
     FOLDED.clear()
     for (const n of Array.isArray(p.folded) ? p.folded : []) FOLDED.add(n)
     const flip = (x) => (['provider', 'works'].includes(x.key) ? { ...x, dir: x.dir === 'up' ? 'down' : 'up' } : x) // an older page's sort: these two ran the other way

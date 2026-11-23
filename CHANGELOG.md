@@ -2,6 +2,11 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.87 (2026-11-23)
+
+- **All / Providers only / CLIs only** on Providers (beside Sort): show every provider, only the API
+  ones, or only the coding CLIs. Select all picks what's shown. Kept for next time; All by default.
+
 ## 0.1.86 (2026-11-23)
 
 - **Select all on Providers picks only the providers that are on**: turn off the ones you don't want,
