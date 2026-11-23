@@ -2,6 +2,13 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.86 (2026-11-23)
+
+- **Select all on Providers picks only the providers that are on**: turn off the ones you don't want,
+  tick the box at the top, Add: only the on ones' models are added (a provider's own box still picks
+  its models, on or off). The providers that are on come first; **On only** (beside Free only) hides
+  the ones that are off.
+
 ## 0.1.85 (2026-11-23)
 
 - **Turn all off / Turn all on** on Providers (beside Collapse all): every provider's switch in one

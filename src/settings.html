@@ -910,6 +910,7 @@
             <input type="checkbox" id="pick-shown" aria-label="select every model shown">
             <input type="search" id="m-search" placeholder="Search all models…">
             <label class="free-only" title="only the models their provider lists at $0 (a provider whose list has no prices can't say)"><input type="checkbox" id="free-only">Free only</label>
+            <label class="free-only" title="only the providers that are on (their switch): the ones off are hidden"><input type="checkbox" id="on-only">On only</label>
             <select id="m-sort" aria-label="sort the models"><option value="name">Sort by name</option><option value="price">Sort by price (free first)</option></select>
             <button class="small ghost" id="fold-all" type="button">Collapse all</button>
             <button class="small ghost" id="on-all" type="button" title="switch every provider on or off (off: kept, but HeartCode skips its models)"></button>
@@ -1828,6 +1829,14 @@ $('free-only').onchange = (e) => {
   savePref('freeOnly', freeOnly)
   if (S) drawProviders(S)
 }
+// only the providers switched on (the ones off: hidden)
+let onOnly = false
+$('on-only').onchange = (e) => {
+  onOnly = e.target.checked
+  savePref('onOnly', onOnly)
+  if (S) drawProviders(S)
+}
+const isOn = (name) => !S?.providers.find((p) => p.name === name)?.off
 $('m-sort').onchange = (e) => {
   catSort = e.target.value
   savePref('catSort', catSort)
@@ -1867,8 +1876,9 @@ $('on-all').onclick = () => {
   act('/api/provider/on', { on }, on ? 'every provider is on' : 'every provider is off: HeartCode skips their models until you turn one on')
 }
 $('fold-all').onclick = () => (settle(), allFolded() ? FOLDED.clear() : S?.providers.forEach((p) => FOLDED.add(p.name)), folds())
+// every model shown from the providers that are on (one that's off: its own box picks its models)
 $('pick-shown').onchange = (e) => {
-  for (const [provider, ids] of SHOWN) for (const id of ids) e.target.checked ? pickedOf(provider).add(id) : PICKED_CAT.get(provider)?.delete(id)
+  for (const [provider, ids] of SHOWN) if (isOn(provider) || !e.target.checked) for (const id of ids) e.target.checked ? pickedOf(provider).add(id) : PICKED_CAT.get(provider)?.delete(id)
   drawPicks()
 }
 $('p-mine').onclick = () => (location.hash = 'models')
@@ -2167,7 +2177,7 @@ function drawProviders(s) {
   // list only updates the rows it touches (markCatalog), so the list stays where you scrolled it
   // (but one of yours a provider doesn't list gets a row of its own).
   const unlisted = order.filter((t) => !(MODELS[t.provider]?.list ?? []).includes(t.model)).map(keyOf).sort()
-  const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + ((MODELS[p.name] ?? { loading: true }).loading ? 'loading' : '')), modelQuery.trim(), catSort, freeOnly, unlisted])
+  const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + ((MODELS[p.name] ?? { loading: true }).loading ? 'loading' : '')), modelQuery.trim(), catSort, freeOnly, onOnly, unlisted])
   if (shape !== catalogShape) (buildCatalog(s), applyFolds())
   onAllLabel()
   catalogShape = shape
@@ -2414,7 +2424,7 @@ const pickedOf = (name) => PICKED_CAT.get(name) ?? PICKED_CAT.set(name, new Set(
 function drawPicks() {
   if (!S) return
   const all = [...PICKED_CAT].flatMap(([provider, ids]) => [...ids].map((model) => ({ provider, model })))
-  const shown = [...SHOWN].flatMap(([provider, ids]) => ids.map((model) => ({ provider, model })))
+  const shown = [...SHOWN].filter(([provider]) => isOn(provider)).flatMap(([provider, ids]) => ids.map((model) => ({ provider, model }))) // the top box: providers that are on
   const isPicked = (t) => Boolean(PICKED_CAT.get(t.provider)?.has(t.model))
   const toAdd = all.filter((t) => placeOf(t.provider, t.model) === undefined)
   const toTake = all.filter((t) => placeOf(t.provider, t.model) !== undefined)
@@ -2430,7 +2440,8 @@ function drawPicks() {
   top.checked = n > 0 && n === shown.length
   top.indeterminate = n > 0 && n < shown.length
   top.disabled = !shown.length
-  top.title = top.checked ? 'unselect every model shown' : `select every model shown (${shown.length}${modelQuery.trim() ? ': the matches' : ''})`
+  const offs = [...SHOWN.keys()].filter((p) => !isOn(p)).length
+  top.title = top.checked ? 'unselect every model shown' : `select every model shown from the providers that are on (${shown.length}${modelQuery.trim() ? ': the matches' : ''})${offs ? `; ${offs} off left out` : ''}`
   const take = () => {
     const off = new Set(toTake.map(keyOf))
     const rest = S.order.filter((t) => !off.has(keyOf(t)))
@@ -2451,7 +2462,7 @@ function drawPicks() {
 function buildCatalog(s) {
   const q = modelQuery.trim()
   SHOWN.clear()
-  put($('p-list'), s.providers.map((p) => {
+  put($('p-list'), [...s.providers].sort((a, b) => Boolean(a.off) - Boolean(b.off)).map((p) => { // the ones on first
     if (!p.list) MODELS[p.name] = { list: [], details: {}, off: true } // its list switched off: never asked for
     else loadModels(p.name, MODELS[p.name]?.off)
     const m = MODELS[p.name] ?? { loading: true }
@@ -2489,6 +2500,7 @@ function buildCatalog(s) {
     }
     if (q && !ids.length) return null // searching: only the providers with a match
     if (freeOnly && !ids.length) return null // free only: the providers with a free one
+    if (onOnly && p.off) return null // on only: the ones switched on
     return h('section', { 'data-provider': p.name, className: p.off ? 'off' : '' },
       // the header folds it (a click on it, or its arrow; not on its buttons and switch)
       h('div', { className: 'prov-h', onclick: (e) => !e.target.closest('button:not(.fold), input, label, a') && fold(p.name) },
@@ -2520,6 +2532,7 @@ function buildCatalog(s) {
       m.off && !ids.length ? h('div', { className: 'cat-note', textContent: "Its list is off: add a model by its name, in the box above." }) : null,
       m.loading ? h('div', { className: 'cat-note', textContent: 'Loading its models…' }) : null)
   }))
+  if (onOnly && !freeOnly && !$('p-list').querySelector('section') && s.providers.length) put($('p-list'), h('div', { className: 'cat-note', textContent: 'Every provider is off. Turn one on (Turn all on), or untick On only.' }))
   if (freeOnly && !$('p-list').querySelector('section')) put($('p-list'), h('div', { className: 'cat-note', textContent: "No provider lists a model at $0. (A provider whose model list has no prices can't say what's free: Free only leaves those out.)" }))
 }
 // --- Your models page: the list as a table; sorted by several columns at once (each a tie-break
@@ -3899,6 +3912,8 @@ function render(s) {
     $('m-sort').value = catSort
     freeOnly = p.freeOnly === true
     $('free-only').checked = freeOnly
+    onOnly = p.onOnly === true
+    $('on-only').checked = onOnly
     FOLDED.clear()
     for (const n of Array.isArray(p.folded) ? p.folded : []) FOLDED.add(n)
     const flip = (x) => (['provider', 'works'].includes(x.key) ? { ...x, dir: x.dir === 'up' ? 'down' : 'up' } : x) // an older page's sort: these two ran the other way

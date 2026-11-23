@@ -154,7 +154,7 @@ const LIST_V = 2 // how a saved list was read (2: airforce's cents, Cloudflare's
 // The page's own choices (sorts, folded providers, the provider ranking): kept here, not in the
 // browser, whose storage is per address (a new port each time)
 const PREFS = path.join(HOME, 'settings-page.json')
-const PREF_KEYS = ['catSort', 'freeOnly', 'folded', 'sort', 'sorts', 'rank', 'filters']
+const PREF_KEYS = ['catSort', 'freeOnly', 'onOnly', 'folded', 'sort', 'sorts', 'rank', 'filters']
 // The saved lists (a MB or more): kept in memory, read again only when the file changes
 let lists = null
 const readLists = () => {
