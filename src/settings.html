@@ -1774,7 +1774,7 @@ function loadModels(name, again = false) {
     .then(() => (listLoads.done++, show(), S && drawProviders(S)))
 }
 const useModel = (provider, model) => act('/api/model', { provider, model }, `HeartCode now uses ${provider} · ${model}`)
-const saveOrder = (list, done, opts = {}) => act('/api/order', { list, ...opts }, done)
+const saveOrder = (list, done, opts = {}) => act('/api/order', { list: list.map(({ provider, model }) => ({ provider, model })), ...opts }, done) // only what the server keeps: a whole row each (tests, models.dev…) made a long list too big to send
 
 let editing = null
 function openForm(p = null) {

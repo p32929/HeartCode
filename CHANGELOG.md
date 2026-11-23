@@ -2,6 +2,11 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.91 (2026-11-23)
+
+- **Save list works with thousands of models**: it said "too big" (each model went with everything
+  shown about it, over the page's 1 MB limit); now only each model's provider and name are sent.
+
 ## 0.1.90 (2026-11-23)
 
 - **No dialog on the settings page is bigger than 80% of the window**, either way; what doesn't fit
