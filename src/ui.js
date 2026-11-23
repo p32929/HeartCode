@@ -2135,7 +2135,7 @@ export class UI {
       return Promise.resolve(l)
     }
     if (this.closed) return Promise.resolve(null)
-    if (this.busySince && !history) this.onWaiting?.(prompt) // asked mid-task: you may be away (Telegram)
+    if (this.busySince && this.busyTask && !history) this.onWaiting?.(prompt) // asked mid-task: you may be away (a notification, Telegram); a command you just ran (rewind's list…): you're right here
     this.menu.on = Boolean(suggest && (this.suggest || this.menu.pick) && this.full)
     this.histOn = history
     this.histAt = -1
@@ -2548,8 +2548,10 @@ export class UI {
   // Full screen: from the moment work starts until it's done (a task, a probe, a command), the
   // spinner row stays on, whatever gets printed meanwhile. It steps aside while asking the user.
   // later: the spinner only if it's still at work then (a command that answers at once shows none)
-  busy(later = 0) {
+  // task: the model at work (not a command you ran): its questions may tell you (onWaiting)
+  busy(later = 0, { task = true } = {}) {
     if (!this.full) return
+    this.busyTask = task
     this.busySince = Date.now()
     this.waited = 0
     clearTimeout(this.busyLater)

@@ -2005,7 +2005,7 @@ async function repl(app, f = {}) {
     app.signal = ctl.signal // Esc stops whatever this line started (a task, a probe, …)
     ui.escArm = 0 // a fresh task: a first Esc from before doesn't count toward stopping this one
     const command = app.isCommand(t)
-    ui.busy(command ? 400 : 0) // the spinner stays until this line's work is done (a command: if it takes a while)
+    ui.busy(command ? 400 : 0, { task: !command }) // the spinner stays until this line's work is done (a command: if it takes a while)
     if (command) {
       const mark = ui.mark?.() // what it prints goes back out of the conversation when it's done
       try {

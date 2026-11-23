@@ -2,6 +2,12 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.75 (2026-11-23)
+
+- **No "waiting for an answer" notification for your own commands**: Esc Esc (going back to a
+  message), `/select_model`, `/notifications` and the like open a list you're looking at; only a
+  question the model asks while it works notifies you.
+
 ## 0.1.74 (2026-11-23)
 
 - **Give up, Stalled and Tests wait show with one model too** (Models → List, above the search):
