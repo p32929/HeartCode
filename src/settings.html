@@ -1864,6 +1864,7 @@ $('m-sort').onchange = (e) => {
   savePref('catSort', catSort)
   if (S) drawProviders(S)
 }
+const TOP = /auto|free|default/i // models with these anywhere in the name come first under each provider (routers, free ones, the default)
 const costOf = (d) => (d?.price ? (d.price.input ?? 0) + (d.price.output ?? 0) : Infinity)
 // Providers folded on the page (kept: savePref). Typing a search opens them all, until you fold or
 // unfold one (or all) again.
@@ -2509,7 +2510,7 @@ function buildCatalog(s) {
     // and the models added by name (and any of yours it doesn't list), marked as yours
     const listed = new Set(m.list ?? [])
     const yours = [...new Set([...p.added, ...s.order.filter((t) => t.provider === p.name).map((t) => t.model)])].filter((id) => !listed.has(id))
-    const ids = [...listed, ...yours].sort((a, b) => (catSort === 'price' && costOf(m.details?.[a]) - costOf(m.details?.[b])) || byName(a, b)).filter((id) => id.toLowerCase().includes(q.toLowerCase()) && (!freeOnly || isFree(m.details?.[id])))
+    const ids = [...listed, ...yours].sort((a, b) => (TOP.test(b) - TOP.test(a)) || (catSort === 'price' && costOf(m.details?.[a]) - costOf(m.details?.[b])) || byName(a, b)) // "auto", "free" or "default" in the name: first.filter((id) => id.toLowerCase().includes(q.toLowerCase()) && (!freeOnly || isFree(m.details?.[id])))
     const row = (id, own) =>
       h('button', { className: 'mrow', 'data-provider': p.name, 'data-model': id, onclick: () => (placeOf(p.name, id) === undefined ? addModel(p.name, id) : removeMine(p.name, id)) },
         h('span', { className: 'id', title: id }, id, canCell(m.details?.[id], S.order[placeOf(p.name, id)])),

@@ -2,6 +2,11 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.94 (2026-11-23)
+
+- **On Providers, models with "auto", "free" or "default" anywhere in the name come first** under
+  each provider (routers, free models, a CLI's default), then the rest by name or price.
+
 ## 0.1.93 (2026-11-23)
 
 - **Turn just the selected providers off or on**: tick providers (their own box, or any of their
