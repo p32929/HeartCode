@@ -2,6 +2,10 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.73 (2026-11-23)
+
+- **The settings page loads again**: a help text in 0.1.72 broke its script (nothing showed).
+
 ## 0.1.72 (2026-11-23)
 
 - **A command can't stop HeartCode** (macOS, Linux): `kill`, `pkill` and `killall` in the commands it
