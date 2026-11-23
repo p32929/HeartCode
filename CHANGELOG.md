@@ -2,6 +2,16 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.71 (2026-11-23)
+
+- **Each step is one line that says how it went**: `✓ Read src/app.js · 90 lines`, `✗ Read old.js ·
+  not found`, `✓ Search "listen" · 12 matches in 4 files`, `✓ Run npm test · ok · 2s`, `✗ Run … · exit 1
+  · 2s` (its error lines under it, in red), `⊘ … · declined`. The ● spins while it runs; no more "⎿"
+  line under each step.
+- **Steps of one kind in a row are one entry**: `✓ Read 8 files · 237 lines` with the names under it
+  (the folder said once); searches, lists and fetches the same. A failed one stands on its own line.
+- A search's step says what it looked for, not where.
+
 ## 0.1.70 (2026-11-23)
 
 - **The model's thinking shows in full in the conversation**, as it comes, and stays there (no more

@@ -425,6 +425,9 @@ export function wrapParts(line, cols, sep = ' · ') {
 
 // 4000 → "4s", 75000 → "1m 15s", 2h 3m: a clock that fits on a busy line
 // a step's line says what it does, in words (the tools' own names stay the model's)
+// steps of these kinds in a row are one entry: [verb, one, many, while running]
+const ONE = { lines: 'line', matches: 'match', entries: 'entry', results: 'result', files: 'file' }
+const GROUPS = { read_file: ['Read', 'file', 'files', 'reading'], search: ['Searched', 'time', 'times', 'searching'], list_files: ['Listed', 'folder', 'folders', 'listing'], web_fetch: ['Fetched', 'page', 'pages', 'fetching'], web_search: ['Searched the web', 'time', 'times', 'searching'] }
 export const STEP_NAMES = { read_file: 'Read', write_file: 'Write', edit_file: 'Edit', run: 'Run', run_command: 'Run', 'run in background': 'Run in background', search: 'Search', list_files: 'List', web_fetch: 'Fetch', web_search: 'Web search', todo: 'Plan', agent: 'Helper', ask_user: 'Ask', changes: 'Changes', find_command: 'Find command', lsp: 'Code check', mcp: 'Tool', memory: 'Memory', skill: 'Skill', background: 'Background', done: 'Done' }
 
 const short = (ms) => {
@@ -1348,7 +1351,7 @@ export class UI {
     const spin = this.timer && !this.asking ? c.brand(FRAMES[this.frame % FRAMES.length]) : null
     let last = this.log.length - 1
     while (last >= 0 && !this.log[last]) last--
-    const live = spin && this.liveStep && this.log[last] === this.liveStep ? last : -1 // only while nothing came after it
+    const live = spin && this.liveStep ? [last, last - 1].find((i) => i >= 0 && this.log[i] === this.liveStep) ?? -1 : -1 // only while nothing came after it (but a group's names)
     const out = []
     this.log.forEach((line, i) => {
       if (i === live) return out.push(...wrapHang(line.replace('●', spin), cols)) // not kept: it changes every frame
@@ -2355,35 +2358,130 @@ export class UI {
   print(s = '') {
     this.write(s + '\n')
   }
-  // who: the model that made this call (named after it)
-  // The same call again right after it (nothing printed between but its result, as a model polling a
-  // page does): the line it has counts it (×2, ×3…) instead of another of the same, and its result
-  // makes way for the new one's.
-  step(name, detail = '', who = '') {
-    name = STEP_NAMES[name] ?? name.replace(/_/g, ' ').replace(/^./, (x) => x.toUpperCase())
-    if (who && who === this.stepWho) who = '' // the model's name only when another one takes the next step
-    else if (who) this.stepWho = who
-    const line = `${c.accent('●')} ${c.accent(c.bold(name))}${detail ? ` ${c.info(detail)}` : ''}${who ? c.faint(` · ${who}`) : ''}`
-    const was = this.lastStep
-    const end = this.log.length - 1 // the line being written (empty, after a whole line)
-    if (this.full && was?.line === line && was.log === this.log && this.log[was.at] === was.shown && !plainOf(this.log[end]) && (end === was.at + 1 || end === was.after)) {
-      const open = this.log[end]
-      this.log.length = was.at + 1 // its result out: the new one's comes
-      this.log.push(open)
-      was.shown = `${line}${c.faint(` ×${++was.n}`)}`
-      this.log[was.at] = this.liveStep = was.shown // its ● spins until its result (#rows)
-      return this.render()
+  // A step: one line that says what it does, at what, and (once its result is in) how it went:
+  //   ● Read src/app.js            while it runs (the ● spins)
+  //   ✓ Read src/app.js · 90 lines  worked;  ✗ … · file not found  failed;  ⊘ … · declined  not done
+  // Steps of one kind in a row that worked (reads, searches, lists, fetches) are one entry, counted:
+  //   ✓ Read 8 files · 237 lines
+  //     in src/: app.js, util.js, … +3 more
+  // a failed one stands on its own line. The same call again right after it: counted (×2) on its line.
+  // who: the model that made the call, named only when it changes. sub: a helper's label (its steps
+  // are indented under it, kept apart from the others')
+  // note: says what happened (learned, reviewed, removed), no result to wait for; ok false: a bad one
+  step(name, detail = '', who = '', { sub = '', note = false, ok = true } = {}) {
+    const key = sub
+    if (note) {
+      if (this.afterBlock) this.gap()
+      this.afterBlock = false
+      return this.print(this.#stepLines({ name, label: STEP_NAMES[name] ?? name.replace(/_/g, ' ').replace(/^./, (x) => x.toUpperCase()), sub, items: [{ detail, texts: [], done: true, ok }] })[0])
+    }
+    this.finishSteps(key) // one before it still without a result: done
+    this.stepWho ??= new Map()
+    if (who && who === this.stepWho.get(key)) who = '' // the model's name only when another one takes the next step
+    else if (who) this.stepWho.set(key, who)
+    if (this.full) {
+      this.steps ??= new Map()
+      const was = this.steps.get(key)
+      const last = was && was.log === this.log && !plainOf(this.log.at(-1)) && this.log.length - 2 === was.end && was.items.every((i) => i.done && i.ok && !i.refused)
+      if (last && was.name === name && was.items.length === 1 && was.items[0].detail === detail) {
+        was.count = (was.count ?? 1) + 1
+        Object.assign(was.items[0], { done: false, texts: [] })
+        return this.#drawStep(was)
+      }
+      if (last && was.name === name && GROUPS[name]) {
+        was.items.push({ detail, texts: [] })
+        return this.#drawStep(was)
+      }
     }
     if (this.afterBlock) this.gap()
     this.afterBlock = false
-    this.print(line)
-    this.liveStep = line // its ● spins until its result (#rows)
-    this.lastStep = { line, shown: line, n: 1, log: this.log, at: this.log.length - 2 }
+    const st = { name, label: STEP_NAMES[name] ?? name.replace(/_/g, ' ').replace(/^./, (x) => x.toUpperCase()), who, sub, items: [{ detail, texts: [] }], log: this.log }
+    st.at = st.end = this.log.length - 1 // the line it's on (the open line, written next)
+    this.steps?.set(key, st)
+    this.print(this.#stepLines(st)[0])
+    this.liveStep = this.log[st.at] // its ● spins until its result (#rows)
   }
-  result(text) {
-    this.liveStep = null
-    this.print(`  ${c.ghost('⎿')} ${c.faint(text)}`)
-    if (this.lastStep?.log === this.log && this.lastStep.at === this.log.length - 3) this.lastStep.after = this.log.length - 1 // its step's, right under it
+  // The outcome of the last step (of this helper, sub): text (a few words); ok false: it failed;
+  // refused: not done (declined, held); none: found nothing (said, not a failure); n, unit: what it
+  // got, summed over a group (90 lines, 12 matches); files: the files a search found them in.
+  // Called again for the same step: its words are added (an edit: "formatted with prettier").
+  result(text = '', { ok = true, refused = false, none = false, n, unit, files, sub = '' } = {}) {
+    const st = this.steps?.get(sub)
+    const item = st?.items.at(-1)
+    if (!this.full || !st || st.log !== this.log) {
+      if (!text) return
+      this.liveStep = null
+      return this.print(`${sub ? '    ' : '  '}${!ok ? c.err('✗') : refused ? c.warn('⊘') : c.ghost('⎿')} ${c.faint(text)}`)
+    }
+    if (text && !item.texts.includes(text)) item.texts.push(text)
+    Object.assign(item, { done: true, ok: item.ok !== false && ok, refused: item.refused || refused, none: none && !item.n, n: n ?? item.n, unit: unit ?? item.unit, files: files ?? item.files })
+    // a failed or refused one in a group: out of it, on its own line under it
+    if (st.items.length > 1 && (!item.ok || item.refused)) {
+      st.items.pop()
+      this.#drawStep(st)
+      const own = { ...st, who: '', items: [item], count: 1, at: this.log.length - 1, end: this.log.length - 1 }
+      this.steps.set(sub, own)
+      this.print(this.#stepLines(own)[0])
+      return this.render()
+    }
+    this.#drawStep(st)
+  }
+  // Steps still waiting for a result (one that never gets one, the work stopped): shown as done.
+  // key: only that helper's (undefined: all)
+  finishSteps(key) {
+    for (const [k, st] of this.steps ?? []) {
+      if ((key !== undefined && k !== key) || st.log !== this.log || st.items.every((i) => i.done)) continue
+      for (const i of st.items) if (!i.done) Object.assign(i, { done: true, ok: i.ok !== false })
+      this.#drawStep(st)
+    }
+  }
+  // a step's line(s) in the conversation, again (its state changed)
+  #drawStep(st) {
+    const lines = this.#stepLines(st)
+    const had = st.end - st.at + 1
+    this.log.splice(st.at, had, ...lines)
+    st.end = st.at + lines.length - 1
+    this.liveStep = st.items.some((i) => !i.done) ? this.log[st.at] : null
+    this.render()
+  }
+  #stepLines(st) {
+    const pad = st.sub ? '  ' : ''
+    const name = st.sub ? `${st.sub} › ${st.label}` : st.label
+    const who = st.who ? c.faint(` · ${st.who}`) : ''
+    const items = st.items
+    const running = items.find((i) => !i.done)
+    const icon = (x) => (running ? c.accent('●') : !x.ok ? c.err('✗') : x.refused ? c.warn('⊘') : x.none ? c.faint('✓') : c.ok('✓'))
+    const words = (x) => (x.texts.length ? x.texts.join(' · ') : '')
+    if (items.length === 1) {
+      const x = items[0]
+      const said = words(x)
+      const paint = !x.ok ? c.err : x.refused ? c.warn : c.faint
+      return [`${pad}${icon(x)} ${(x.ok ? c.accent : c.err)(c.bold(name))}${x.detail ? ` ${c.info(x.detail)}` : ''}${st.count > 1 ? c.faint(` ×${st.count}`) : ''}${said && !running ? paint(` · ${said}`) : ''}${who}`]
+    }
+    // a group: how many, what they got in all; then what each was at, on one row
+    const [verb, one, many, doing] = GROUPS[st.name]
+    const sum = items.reduce((a, i) => a + (i.n ?? 0), 0)
+    const unit = items.find((i) => i.unit)?.unit
+    const files = new Set(items.flatMap((i) => i.files ?? []))
+    const got = running ? `${doing} ${running.detail}…` : [sum && unit ? `${sum} ${sum === 1 ? (ONE[unit] ?? unit) : unit}` : 'nothing found', files.size ? `in ${files.size} file${files.size === 1 ? '' : 's'}` : ''].filter(Boolean).join(' ')
+    const head = `${pad}${icon(items[0])} ${c.accent(c.bold(`${st.sub ? `${st.sub} › ` : ''}${verb} ${items.length} ${many}`))}${c.faint(` · ${got}`)}${who}`
+    // the folder they share said once, then the names
+    const all = items.map((i) => i.detail)
+    const dirs = all.map((d) => d.slice(0, d.lastIndexOf('/') + 1))
+    const dir = (st.name === 'read_file' || st.name === 'list_files') && dirs.every((d) => d && d === dirs[0]) ? dirs[0] : '' // all in one folder
+    const names = all.map((d) => d.slice(dir.length))
+    const room = Math.max(20, (this.out.columns || 80) - pad.length - 4 - (dir ? dir.length + 5 : 0))
+    let list = ''
+    for (let k = 0; k < names.length; k++) {
+      const more = names.length - k - 1 ? `, +${names.length - k - 1} more` : ''
+      const next = list ? `${list}, ${names[k]}` : names[k]
+      if (width(next + more) > room && list) {
+        list += `, +${names.length - k} more`
+        break
+      }
+      list = next
+    }
+    return [head, `${pad}    ${dir ? c.faint(`in ${dir}: `) : ''}${c.info(list)}`]
   }
   // another model takes over: one dim shape for all of them (not a warning: nothing to do)
   handover(to, why) {
@@ -2459,6 +2557,7 @@ export class UI {
     return Date.now() - this.busySince - this.waited - (this.asking ? Date.now() - this.askedAt : 0)
   }
   idle() {
+    this.finishSteps()
     clearTimeout(this.busyLater)
     this.busySince = null
     this.stopSpin()

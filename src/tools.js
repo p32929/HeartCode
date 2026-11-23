@@ -527,17 +527,17 @@ export function searchesOutside(cmd, root) {
 export async function runConfirmed(s, cmd, signal, background = false, wait) {
   s.ui.step(background ? 'run in background' : 'run', cmd, s.client?.model)
   if (s.ui.permission === 'plan' && !readOnlyCommand(cmd)) {
-    s.ui.result('not run: plan mode')
+    s.ui.result('not run: plan mode', { refused: true })
     return prompt('agent/plan-refused', { command: true })
   }
   if (searchesOutside(cmd, s.root)) {
     log('command', `refused (searches outside the project): ${cmd}`)
-    s.ui.result('not run: searches outside the project')
+    s.ui.result('not run: searches outside the project', { refused: true })
     return prompt('agent/outside-project', { root: s.root, wide: true })
   }
   const ok = s.ui.permission === 'plan' ? true : await s.ui.confirm(`Run ${c.bold(cmd)}?`, 'command') // plan mode: only read-only ones get here
   if (ok !== true) {
-    s.ui.result('declined')
+    s.ui.result('declined', { refused: true })
     return declined(s, ok, 'The user declined to run this command.')
   }
   const secs = Number(wait) > 0 ? Number(wait) : background ? 3 : 30
@@ -555,7 +555,7 @@ export async function runConfirmed(s, cmd, signal, background = false, wait) {
   if (!job.exited) {
     if (signal?.aborted && !background) {
       removeJob(job) // Esc stops what it was waiting on
-      s.ui.result('stopped')
+      s.ui.result('stopped', { refused: true })
       return `Stopped by the user (Esc) after ${Math.round((Date.now() - job.started) / 1000)}s.`
     }
     s.ui.result(`still running: #${job.id} in the background`)
@@ -569,12 +569,13 @@ export async function runConfirmed(s, cmd, signal, background = false, wait) {
   try {
     lines = fs.readFileSync(job.file, 'utf8').split(/\r?\n|\r/).filter((l) => l.trim()).length
   } catch {}
-  s.ui.result(job.code === 0 ? (lines ? `${lines} line${lines === 1 ? '' : 's'} of output` : 'no output') : `failed (exit ${job.code})`)
+  const took = `${Math.max(0, Math.round((job.ended - job.started) / 100) / 10)}s`
+  s.ui.result(job.code === 0 ? `ok · ${took}${lines ? '' : ' · no output'}` : `exit ${job.code} · ${took}`, { ok: job.code === 0 })
   // its last lines under it; failed: the last error line and what follows it (a stack's end says
   // nothing), else the last lines
   const tail = tailLines(job, 40).filter((x) => x.trim())
   const at = job.code !== 0 ? tail.findLastIndex((l) => /\b(error|exception|failed|fail|assert\w*|cannot|not found|denied)\b/i.test(l)) : -1
-  for (const l of at === -1 ? tail.slice(-3) : tail.slice(at, at + 3)) s.ui.print(`${s.isSub ? '      ' : '    '}${c.faint(clip(l.trimEnd(), 120))}`)
+  for (const l of at === -1 ? tail.slice(-3) : tail.slice(at, at + 3)) s.ui.print(`${s.isSub ? '      ' : '    '}${(job.code === 0 ? c.faint : c.err)(clip(l.trimEnd(), 120))}`)
   const changed = changesSince(s, before)
   return `exit code ${left ? 0 : job.code}\n${output.trim() || '(no output)'}${changed ? `\nFiles this command changed: ${changed}` : ''}${left ? `\n${prompt('agent/left-running', { id: job.id })}` : ''}`
 }
@@ -868,7 +869,7 @@ export async function stuckSaid(s, step, why, signal, id, answer = false) {
   let advice = ''
   const other = n === 2 && !s.isSub && s.subagent && secondOpinionModel(s)
   if (other) {
-    s.ui.step('stuck', `asking ${other.model} for a second opinion`)
+    s.ui.step('stuck', `asking ${other.model} for a second opinion`, '', { note: true })
     const tried = (s.ran ?? []).slice(-12).map((r) => `- ${r.command} → ${r.result}`).join('\n')
     try {
       advice = await s.subagent({ prompt: prompt('agent/second-opinion', { task: s.task ?? '', step: t.content, why: t.why, tried }), model: `${other.provider} ${other.model}`, description: 'second opinion' }, signal, id)
@@ -935,7 +936,7 @@ async function runParts(s, todos, signal, id) {
   const shown = todos.map((t) => ({ ...t })) // as printed: after the parts, what they changed
   for (const t of parts) t.status = 'in_progress'
   log('parts', parts.map((t) => `${t.content}${t.model ? ` (${t.model})` : ''}${t.files ? ` [${t.files.join(', ')}]` : ''}`))
-  s.ui.step('parts', `${parts.length} part${parts.length > 1 ? 's' : ''} at once: ${parts.map((t) => `${clip(t.content, 40)}${t.model ? ` (${t.model})` : ''}`).join(' · ')}`)
+  s.ui.step('parts', `${parts.length} part${parts.length > 1 ? 's' : ''} at once: ${parts.map((t) => `${clip(t.content, 40)}${t.model ? ` (${t.model})` : ''}`).join(' · ')}`, '', { note: true })
   const plan = todos.map((t) => `- ${t.content}`).join('\n')
   const choices = (s.chat?.choices ?? []).join('; ')
   const reports = await Promise.all(
@@ -977,7 +978,7 @@ async function comparePart(s, t, brief, signal, id) {
   if (!first || !second) return null
   const pair = [first, second]
   const name = (x) => `${x.provider} ${x.model}`
-  s.ui.step('compare', `${clip(t.content, 50)}: ${first.model} and ${second.model}, each in a copy`)
+  s.ui.step('compare', `${clip(t.content, 50)}: ${first.model} and ${second.model}, each in a copy`, '', { note: true })
   const copies = pair.map(() => copyProject(s.root))
   try {
     const outs = await Promise.all(pair.map((x, i) => s.subagent({ prompt: brief, model: name(x), description: `${clip(t.content, 30)} · ${x.model}`, ownFiles: t.files, root: copies[i] }, signal, id).catch((e) => (e.name === 'AbortError' || signal?.aborted ? Promise.reject(e) : `error: ${e.message}`))))
@@ -1017,7 +1018,7 @@ async function comparePart(s, t, brief, signal, id) {
         }
       }
     }
-    s.ui.step('compare', pick < 0 ? `${clip(t.content, 50)}: neither worked` : `kept ${pair[pick].model}'s (${why})`)
+    s.ui.step('compare', pick < 0 ? `${clip(t.content, 50)}: neither worked` : `kept ${pair[pick].model}'s (${why})`, '', { note: true })
     if (pick < 0) t.status = 'pending'
     if (pick < 0) return `## ${t.content}: not done\n${results.map((r) => `${r.model.model}: ${clip(r.said, 800)}${r.check?.broken ? `\nHeartCode's check: ${clip(r.check.report, 400)}` : ''}`).join('\n\n')}`
     // the better one's files into the project, each recorded for /rewind and the checks
@@ -1671,7 +1672,7 @@ async function toolRun(name, args, s, signal, id) {
   const stop = pre.block ? prompt('agent/hook', { reason: pre.block, blocked: true }) : notMine ? prompt('agent/part-files', { file: notMine, files: s.ownFiles.map((f) => path.relative(s.root, f)).join(', ') }) : null
   if (stop && name === 'run_command') {
     s.ui.step('run', String(args?.command ?? ''), s.client?.model) // a command's lines are shown where it runs, which this one never reaches
-    s.ui.result(refusal(stop))
+    s.ui.result(refusal(stop), { refused: true })
   }
   if (stop) return stop
   let out = await tool(name, args, s, signal, id)

@@ -318,7 +318,7 @@ class Guided {
         sig = await this[action]()
       } catch (e) {
         if (e.name === 'AbortError' || e.name === 'TimeoutError' || e.status || /cannot reach/.test(e.message)) throw e
-        this.ui.result(c.red(e.message))
+        this.ui.result(e.message, { ok: false })
         this.note(null, `${action} failed`, e.message)
         sig = `${action}:error`
       }
@@ -371,7 +371,7 @@ class Guided {
       const post = await runHooks(s, 'PostToolUse', { tool_name: name, tool_input: args, tool_response: out }, this.signal)
       if (post.block) out += `\n\n${prompt('agent/hook', { reason: post.block, after: true })}`
     }
-    if (!pre || pre.block || notMine) this.ui.result(c.red(clip(out, 120)))
+    if (!pre || pre.block || notMine) this.ui.result(clip(out, 120), { ok: false })
     s.onEvent?.({ type: 'tool', id, name, output: out, model: `${s.client.provider}/${s.client.model}` })
     return out
   }
@@ -471,7 +471,7 @@ class Guided {
     if (next === null) return `edit:${f}`
     const lost = lostNames(old, next, this.task)
     if (lost.length) {
-      this.ui.result(c.yellow(`that edit deleted ${lost.join(', ')}; retrying`))
+      this.ui.result(`that edit deleted ${lost.join(', ')}; retrying`, { refused: true })
       const again = await this.editRewrite(f, old, prompt('guided/keep-names', { names: lost.join(', '), them: lost.length > 1 ? 'them' : 'it' }))
       const still = again === null ? lost : lostNames(old, again, this.task)
       if (again !== null && !still.length) next = again
@@ -557,7 +557,7 @@ class Guided {
   }
 
   failed(f, why) {
-    this.ui.result(c.red(`edit failed: ${why}`))
+    this.ui.result(`edit failed: ${why}`, { ok: false })
     this.note(null, `editing ${f} failed`, why)
     return null
   }

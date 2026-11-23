@@ -70,7 +70,7 @@ export async function runHooks(s, event, data = {}, signal) {
     const reason = (json?.reason ?? json?.stopReason ?? stderr.trim()) || output.trim() || `blocked by the hook ${h.command}`
     if (code === 2 || json?.decision === 'block' || json?.continue === false) {
       s.ui.step('hook', `${event}: ${clip(h.command, 50)}`)
-      s.ui.result(`blocked: ${clip(reason.split('\n')[0], 100)}`)
+      s.ui.result(`blocked: ${clip(reason.split('\n')[0], 100)}`, { refused: true })
       return { block: clip(reason, 4000), context: context.join('\n') }
     }
     if (code !== 0) s.ui.warn(`hook ${h.command} (${event}) failed: exit ${code}${stderr.trim() ? `: ${clip(stderr.trim().split('\n')[0], 120)}` : ''}`)

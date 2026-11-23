@@ -212,7 +212,8 @@ Ask it to read, change, run and fix things in your project, like any coding agen
 4. While it works, `Enter` queues a message; `↑` takes the last one back into the box to change or
   drop, without stopping the work.
 5. `Shift+Enter` (or `Option+Enter`) adds a new line. The model's thinking shows in full in the
-  conversation, as it comes. `Alt+L` shows the whole plan (one line of it shows while it works). The
+  conversation, as it comes. `Alt+L` shows the whole plan (one line of it shows while it works). Each step is one
+  line that says how it went (✓ worked, ✗ failed), and reads or searches in a row are one entry. The
   same call made again and again shows once, with a count (×4).
 6. While it works, commands that don't change the conversation (`/help`, `/cost`, `/diff`,
   `/settings`…) run at once; the ones that do (`/compact`, `/rewind`…) wait until it's done.

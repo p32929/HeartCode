@@ -403,7 +403,7 @@ export class Session {
         }
         if (said) {
           by = seer.model
-          this.ui.step('image', `${seer.model} described image ${i + 1}`)
+          this.ui.step('image', `${seer.model} described image ${i + 1}`, '', { note: true })
           break
         }
       }
@@ -482,7 +482,7 @@ export class Session {
           args = JSON.parse(call.function.arguments || '{}')
         } catch {}
         const out = (await extra?.run(call.function.name, args)) ?? (call.function.name === 'memory' ? await runTool('memory', args, this, signal) : `error: there is no tool named ${call.function.name}`)
-        if (call.function.name === 'memory' && (args.action === 'write' || args.action === 'delete') && !failed(out)) this.ui.step('memory', `${args.action === 'write' ? 'saved' : 'deleted'} ${out.match(/\[\[[^\]]+\]\]/)?.[0] ?? ''}${args.scope === 'global' ? ' (global)' : ''}`)
+        if (call.function.name === 'memory' && (args.action === 'write' || args.action === 'delete') && !failed(out)) this.ui.step('memory', `${args.action === 'write' ? 'saved' : 'deleted'} ${out.match(/\[\[[^\]]+\]\]/)?.[0] ?? ''}${args.scope === 'global' ? ' (global)' : ''}`, '', { note: true })
         messages.push({ role: 'tool', tool_call_id: call.id, content: out })
       }
     }
@@ -563,7 +563,7 @@ export class Session {
         } else fs.rmSync(path.join(this.root, rel), { force: true })
         scratch.delete(rel)
         removed.push(rel)
-        this.ui.step('cleanup', `removed ${rel}`)
+        this.ui.step('cleanup', `removed ${rel}`, '', { note: true })
         return `Deleted ${rel}.`
       }
     }
@@ -572,7 +572,7 @@ export class Session {
       const { client } = this.engineFor ? await this.engineFor(own) : { client: this.client }
       const said = await this.memoryTask(prompt('agent/wrapup'), request, signal, { defs, run, client, purpose: 'wrapup' })
       log('wrapup', `${said} | pages kept ${kept.length}, deleted ${dropped.length}; files removed ${removed.length}`)
-      if (kept.length || dropped.length) this.ui.step('research', `kept ${kept.length} page${kept.length === 1 ? '' : 's'}${dropped.length ? `, deleted ${dropped.length} as junk` : ''}`)
+      if (kept.length || dropped.length) this.ui.step('research', `kept ${kept.length} page${kept.length === 1 ? '' : 's'}${dropped.length ? `, deleted ${dropped.length} as junk` : ''}`, '', { note: true })
     } catch (e) {
       if (e.name === 'AbortError' || signal?.aborted) throw e
       log('wrapup', `failed: ${e.message}`)
@@ -1295,8 +1295,11 @@ async function runNative(s, task, images, signal) {
                   ? `${args.waiting ? 'waiting for you: ' : ''}${String(args.checked ?? '').split('\n').find((l) => l.trim()) ?? ''}`
                   : name === 'todo' || name === 'ask_user'
                   ? ''
-                  : (args.path ?? args.url ?? args.query ?? args.filter ?? args.name ?? '')
-      if (name !== 'run_command' && !together.has(call.id) && !askedWith.has(call.id)) ui.step(name, name === 'agent' && args ? helperLine(args) : clip(detail, 80), name === 'agent' ? '' : client.model) // asked together: shown once, with the first; named by the model that made the call (an agent line names the helper's)
+                  : name === 'search'
+                    ? `"${clip(String(args.query ?? ''), 50)}"${args.path ? ` in ${args.path}` : ''}`
+                    : (args.path ?? args.url ?? args.query ?? args.filter ?? args.name ?? '')
+      const shown = name !== 'run_command' && !together.has(call.id) && !askedWith.has(call.id) // its step is on screen (its result goes on that line)
+      if (shown) ui.step(name, name === 'agent' && args ? helperLine(args) : clip(detail, 80), name === 'agent' ? '' : client.model) // asked together: shown once, with the first; named by the model that made the call (an agent line names the helper's)
       const pre = early.get(call.id)
       // the first changes to the files with no plan yet (this message, or still open from an earlier one):
       // not made — the plan first, then the changes again. Every change in that reply (one made beside a
@@ -1349,10 +1352,12 @@ async function runNative(s, task, images, signal) {
       const no = refusal(out) // refused, held, declined: said so, not left looking done
       if (no) {
         if (name === 'run_command' && refused) ui.step('run', clip(String(args.command ?? ''), 80)) // a command shows itself where it runs, which this one never reached
-        if (name !== 'run_command' || refused) ui.result(no) // a command's own refusals are shown there too
-      } else if (name === 'read_file' || name === 'search' || name === 'list_files' || name === 'web_fetch' || name === 'web_search' || name === 'changes') ui.result(lineCount(out))
-      else if (name === 'agent' && !failed(out)) ui.result(s.ui.permission === 'plan' ? 'planned' : 'done') // its reply is shown above, under its name
-      else if (failed(out)) ui.result(clip(out, 120))
+        if (name !== 'run_command' || refused) ui.result(no, { refused: true }) // a command's own refusals are shown there too
+      } else if (shown) {
+        const r = outcomeOf(name, args ?? {}, out)
+        if (name === 'agent' && r.ok !== false) r.text = s.ui.permission === 'plan' ? 'planned' : 'done' // its reply is shown above, under its name
+        ui.result(r.text, r)
+      }
       client.refresh?.() // a setting changed while the tool ran (the window): its result is cut by the new one
       // every sizable result is saved as it comes (a web page already is, in research): later it can
       // become a pointer to its file in the conversation without anything being lost
@@ -1370,7 +1375,7 @@ async function runNative(s, task, images, signal) {
     trimOldResults(s)
     const ended = newlyEnded(s.root) // background commands that exited meanwhile: the model hears it now
     if (ended.length) {
-      for (const j of ended) ui.step('background', `#${j.id} ${clip(j.command, 60)} exited with ${j.code}`)
+      for (const j of ended) ui.step('background', `#${j.id} ${clip(j.command, 60)} exited with ${j.code}`, '', { note: true })
       s.messages.push({ role: 'user', content: prompt('agent/background-ended', { jobs: ended.map(jobLine).join('\n') }) })
     }
     if (stuck) {
@@ -1525,7 +1530,7 @@ async function learnFromFixes(s, fixed, signal, { unsolved = false, task = '' } 
     }
     if (!rule || rule.length < 10) rule = error.replace(/^[^:]*:\s*/, '') // the model couldn't phrase it: keep the error's own wording
     const name = s.memory.write({ description: rule, type: 'reference', tags: ['lesson', ...tags], content: `${rule}\n\nLearned on ${new Date().toISOString().slice(0, 10)} ${unsolved ? 'after this blocked a task that was not done' : 'after this was caught and fixed'}${task ? ` (the task: ${clip(task, 200)})` : ' while building'}: ${error}`, scope })
-    s.ui.step('learned', `${rule.slice(0, 90)}${scope === 'project' ? ' (this project)' : ''}`)
+    s.ui.step('learned', `${rule.slice(0, 90)}${scope === 'project' ? ' (this project)' : ''}`, '', { note: true })
     log('learn', `saved lesson [[${name}]] (${scope}, #${tags.join(' #')}): ${rule}`)
   }
 }
@@ -1621,7 +1626,7 @@ export async function notDone(s, signal, again, reply = '') {
       s.ui.stopSpin()
       if (!r) continue
       s.ran?.push({ command: `HeartCode opened ${page} in a browser`, result: clip(r.report.split('\n')[0], 300) }) // the review sees it
-      s.ui.step('check', `${page} in a browser: ${r.broken ? 'broken' : 'works'}`)
+      s.ui.step('check', `${page} in a browser: ${r.broken ? 'broken' : 'works'}`, '', { note: true, ok: !r.broken })
       if (!r.broken) {
         s.proofShots = (r.shots ?? []).filter((f) => /desktop/.test(f)) // the review looks at it (reviewers that can see)
         continue
@@ -1765,7 +1770,7 @@ export async function review(s, task, answer, signal) {
       if (/^\W*yes\b/i.test(said)) {
         s.lastReview = { verdict: 'yes' }
         s.ui.event?.({ subtype: 'review', model: `${t.provider}/${t.model}`, verdict: 'yes', issues: '' })
-        s.ui.step('review', `${t.model}: looks right`)
+        s.ui.step('review', `${t.model}: looks right`, '', { note: true })
         return null
       }
       if (/^\W*no\b/i.test(said)) {
@@ -1773,7 +1778,7 @@ export async function review(s, task, answer, signal) {
         s.lastReview = { verdict: 'no', issues }
         record(s.client, 'review-no') // the work's model: its track record (record.js)
         s.ui.event?.({ subtype: 'review', model: `${t.provider}/${t.model}`, verdict: 'no', issues })
-        s.ui.step('review', `${t.model}: ${clip(issues.split('\n').find((l) => l.trim()) ?? 'problems found', 90)}`)
+        s.ui.step('review', `${t.model}: ${clip(issues.split('\n').find((l) => l.trim()) ?? 'problems found', 90)}`, '', { note: true, ok: false })
         return prompt('agent/review-failed', { model: t.model, issues: issues || '(no details given)' })
       }
       log('review', `${t.model} didn't answer YES or NO; trying another`)
@@ -1787,6 +1792,54 @@ export async function review(s, task, answer, signal) {
 }
 
 // "3 lines" for a result; an empty last line isn't one (a file ends with a newline, and read_file numbers the empty line after it)
+// How a tool call went, for its step's line (ui.result): { text, ok, none, n, unit, files }.
+export function outcomeOf(name, args, out) {
+  const o = String(out)
+  if (failed(o)) {
+    const why = o.replace(/^error: /, '').split('\n')[0]
+    return { ok: false, text: /\b(does not exist|doesn't exist|no such file|ENOENT)\b/i.test(why) ? 'not found' : clip(why.replace(/\. .*$/, ''), 90) }
+  }
+  const count = (n, one, many) => `${n} ${n === 1 ? one : many}`
+  switch (name) {
+    case 'read_file': {
+      if (o.startsWith('data:')) return { text: 'an image' }
+      const nums = [...o.matchAll(/^(\d+)\| /gm)].map((m) => Number(m[1]))
+      if (!nums.length) return { text: clip(o.split('\n')[0], 60), none: !o.trim() }
+      const total = Number(/\((\d+) lines total;/.exec(o)?.[1]) || null
+      const [a, b] = [nums[0], nums.at(-1)]
+      return { text: a === 1 && !total ? count(b, 'line', 'lines') : `lines ${a}–${b}${total ? ` of ${total}` : ''}`, n: b - a + 1, unit: 'lines' }
+    }
+    case 'search': {
+      if (/^(no matches|nothing was searched)/.test(o)) return { none: true, text: 'no matches' }
+      const hits = o.split('\n').filter((l) => /^[^\n:]+:\d+: /.test(l))
+      const files = [...new Set(hits.map((l) => l.slice(0, l.search(/:\d+: /))))]
+      const more = /\(stopped at \d+ matches\)/.test(o) ? '+' : ''
+      return { text: `${count(hits.length, 'match', 'matches')}${more} in ${count(files.length, 'file', 'files')}`, n: hits.length, unit: 'matches', files }
+    }
+    case 'list_files': {
+      if (/^(\(empty folder\)|no files)$/.test(o.trim())) return { none: true, text: 'empty' }
+      const lines = o.split('\n').filter((l) => l.trim())
+      const n = lines.filter((l) => !/^… \d+ more$/.test(l)).length + Number(/^… (\d+) more$/m.exec(o)?.[1] ?? 0)
+      return { text: count(n, 'entry', 'entries'), n, unit: 'entries' }
+    }
+    case 'web_fetch': {
+      const kb = Math.max(1, Math.round(o.length / 1000))
+      return { text: `${kb} KB`, n: kb, unit: 'KB' }
+    }
+    case 'web_search': {
+      if (/^no results/.test(o)) return { none: true, text: 'no results' }
+      const n = new Set(o.match(/https?:\/\/\S+/g) ?? []).size
+      return n ? { text: count(n, 'result', 'results'), n, unit: 'results' } : { text: '' }
+    }
+    case 'changes':
+      return { text: lineCount(o) }
+    case 'agent':
+      return { text: '' }
+    default:
+      return { text: '' }
+  }
+}
+
 const lineCount = (out) => {
   const n = String(out).replace(/\n\s*(\d+\|)?\s*$/, '').split('\n').length
   return `${n} line${n === 1 ? '' : 's'}`
@@ -1838,13 +1891,11 @@ function helperUI(ui, label, model) {
   }
   const own = {
     // its steps one level in, under the agent line
-    step: (name, detail = '') => {
-      if (ui.afterBlock) ui.gap()
-      ui.afterBlock = false
-      ui.print(`  ${c.accent('●')} ${c.accent(c.bold(`${label} › ${STEP_NAMES[name] ?? name}`))} ${c.info(detail)}${model ? c.faint(` · ${model}`) : ''}`)
-      status(`${name} ${detail}`)
+    step: (name, detail = '', _who, opts) => {
+      ui.step(name, detail, model, { ...opts, sub: label })
+      status(`${(STEP_NAMES[name] ?? name).toLowerCase()} ${detail}`)
     },
-    result: (text) => ui.print(`    ${c.ghost('⎿')} ${c.faint(text)}`),
+    result: (text, opts) => ui.result(text, { ...opts, sub: label }),
     response,
     spinner: (text) => {
       status(typeof text === 'function' ? text() : text)
@@ -1949,7 +2000,8 @@ function attachNamed(s, task) {
     replaceCopy(s, f, msg)
     results.push(msg)
     s.ui.step('read_file', f)
-    s.ui.result(lineCount(body))
+    const r = outcomeOf('read_file', { path: f }, body)
+    s.ui.result(r.text, r)
   }
   if (calls.length) s.messages.push({ role: 'assistant', content: '', tool_calls: calls }, ...results)
 }
