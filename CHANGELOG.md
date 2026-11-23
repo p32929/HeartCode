@@ -2,6 +2,15 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.76 (2026-11-23)
+
+- **A question gets its answer, not a review loop**: looking around to answer (`git log`, `ls`,
+  `grep`) isn't work, so no "is every part done?" and no review. Asked "did you revert anything?",
+  a model answered in seconds, then spent six minutes being sent back to earlier messages' work.
+- **The review judges only your latest message**: earlier messages are background (it no longer asks
+  for their work to be done again), an earlier message's plan isn't sent, and an answer to a
+  question is judged as an answer (right, and as short as asked).
+
 ## 0.1.75 (2026-11-23)
 
 - **No "waiting for an answer" notification for your own commands**: Esc Esc (going back to a

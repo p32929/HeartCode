@@ -1220,14 +1220,14 @@ async function runNative(s, task, images, signal) {
       // worked on the task (changed or ran something) and stopped without saying it's finished: asked
       // whether every part is done and checked, with the request. No cap: it ends when it calls done,
       // or answers again without doing anything (sinceNudge), or Esc
-      const undeclared = sinceNudge && askDone() && !s.saidDone && (s.changed?.size || s.ran?.length) ? prompt('agent/not-done', { undeclared: true, request: clip(task, 3000) }) : null
+      const undeclared = sinceNudge && askDone() && !s.saidDone && worked(s) ? prompt('agent/not-done', { undeclared: true, request: clip(task, 3000) }) : null
       const afterAsk = s.undeclaredSent // the answer after "is every part done?": the final one, checked like any
       s.undeclaredSent = Boolean(undeclared) // answering that again with nothing done isn't a handover
       if (undeclared) log('task', 'stopped without calling done; asked whether it is finished')
       const more = (sinceNudge || afterAsk) && (undeclared ?? (s.saidDone?.waiting ? null : (await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal))))
       if (!((afterAsk || (!sinceNudge && nudged > 0)) && same(res.content, before))) showHeld(res.content) // after the review's line; the same answer again: not twice
       if (!more) {
-        if (!s.isSub && (s.changed?.size || s.ran?.length) && !s.saidDone?.waiting && (s.saidDone || !askDone() || afterAsk)) record(client, s.proofFails > 0 ? 'not-proven' : 'done') // work done (not a chat answer): its track record (record.js)
+        if (!s.isSub && worked(s) && !s.saidDone?.waiting && (s.saidDone || !askDone() || afterAsk)) record(client, s.proofFails > 0 ? 'not-proven' : 'done') // work done (not a chat answer): its track record (record.js)
         s.wrapUpLater?.(task, res.content) // after the answer, beside what comes next
         return res.content
       }
@@ -1342,7 +1342,7 @@ async function runNative(s, task, images, signal) {
       }
       // what was run or checked, for the review and the wrap-up: commands, MCP tools (a browser), helpers, the language server
       const checked = !args || refused ? null : name === 'run_command' ? String(args.command ?? '') : name === 'mcp' ? `${args.server} · ${args.tool}` : name === 'agent' ? `helper: ${args.description ?? clip(String(args.prompt ?? ''), 60)}` : name === 'lsp' ? `language server: ${args.action} ${args.file ?? ''}` : null
-      if (checked) s.ran?.push({ command: checked, result: clip(String(out).split('\n').filter((l) => l.trim()).slice(0, 2).join(' · '), 160) })
+      if (checked) s.ran?.push({ command: checked, result: clip(String(out).split('\n').filter((l) => l.trim()).slice(0, 2).join(' · '), 160), look: name === 'run_command' && readOnlyCommand(checked) }) // look: it only read (git log, ls, grep): a question being answered, not work
       if (!s.isSub && s.memory && !refused && args) await noteRun(s, name, args, out, signal).catch((e) => log('learn', `run note: ${e.message}`)) // learn from any run that failed then passed
       // a step it said it was stuck on, now done: what got it out is a lesson
       if (!s.isSub && s.memory && s.unstuck?.length) {
@@ -1722,10 +1722,15 @@ const isEmptyDir = (abs) => {
 // answer, the changes and what was run since. It answers YES (done right) or NO with what's wrong;
 // a NO goes back to the model to fix. Asked again only once files changed since its last look.
 // Returns what to tell the model, or null.
+// Work was done this message: files changed, or something run that does more than look (a build, a
+// server, a browser, a helper). Not a question answered by looking around (git log, ls, grep): that
+// gets no "is every part done?" and no review.
+const worked = (s) => Boolean(s.changed?.size || (s.ran ?? []).some((r) => !r.look))
+
 export async function review(s, task, answer, signal) {
   // no files changed, but it ran things to do the task (a browser, commands, helpers): its answer is
   // checked against the request too (once per new batch of them)
-  const acted = !s.changed?.size && (s.ran?.length ?? 0) > (s.reviewedRan ?? 0)
+  const acted = !s.changed?.size && (s.ran ?? []).slice(s.reviewedRan ?? 0).some((r) => !r.look) // only looked (a question answered with git log, ls…): nothing to review
   if (s.isSub || s.ui.permission === 'plan' || (!acted && (!s.changed?.size || s.lastChangeAt <= s.reviewedAt))) return null
   s.reviewedAt = s.lastChangeAt
   s.reviewedRan = s.ran?.length ?? 0
@@ -1751,9 +1756,10 @@ export async function review(s, task, answer, signal) {
   }
   if (!diffs.length && !acted) return null
   if (!diffs.length) diffs.push('(no files changed)')
-  const plan = (s.chat.todos ?? []).map((t) => `- [${t.status === 'completed' ? 'x' : ' '}] ${t.content}`).join('\n')
+  const plan = s.todoTouched ? (s.chat.todos ?? []).map((t) => `- [${t.status === 'completed' ? 'x' : ' '}] ${t.content}`).join('\n') : '' // a plan from an earlier message isn't this one's
   const ran = (s.ran ?? []).slice(-15).map((r) => `- ${clip(r.command.replace(/\s+/g, ' '), 160)} → ${r.result}`).join('\n')
-  const vars = { request: requestsOf(s.chat, 1200), emphasis: (s.chat?.choices ?? []).join('; '), plan: plan || '(none)', answer: clip(String(answer ?? ''), 3000), changes: diffs.join('\n\n'), ran: ran || '(nothing)', shrunk: shrunkNote(s, [...(s.changed ?? [])]) }
+  const earlier = requestsOf({ turns: s.chat.turns.slice(0, -1) }, 800)
+  const vars = { request: clip(String(task ?? ''), 3000), earlier, emphasis: (s.chat?.choices ?? []).join('; '), plan: plan || '(none)', answer: clip(String(answer ?? ''), 3000), changes: diffs.join('\n\n'), ran: ran || '(nothing)', shrunk: shrunkNote(s, [...(s.changed ?? [])]) }
   // the page's screenshot from HeartCode's browser check, for a reviewer that can see: what the user gets
   const shots = (s.proofShots ?? []).flatMap((f) => {
     try {
