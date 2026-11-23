@@ -576,6 +576,7 @@
   .mt-set { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .mt-setl { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--muted); white-space: nowrap; }
   .mt-setl .icon { width: 14px; height: 14px; color: var(--faint); }
+  .mt-sets.few .mt-setl .lt { display: inline !important; } /* only the time limits: room for their names */
   .mt-div { width: 1px; height: 22px; background: var(--line-strong); margin: 0 4px; } /* between the fail-over settings and the helpers' */
   .mt-mode-sets .h-order select { height: 34px; }
   .mt-mode-sets .seg { height: 34px; }
@@ -2646,9 +2647,10 @@ function drawMine(s) {
     saveTime(name, v, said(v))
   } })
   const secsCell = (icon, label, name, about, unit, said) => cell(icon, label, about, num(name, label, said), h('span', { className: 'unit', textContent: unit }))
-  const settings = h('div', { className: 'mt-sets', inert: busy },
+  const single = order.length < 2 // one model: only the time limits (nothing to switch to, no helpers)
+  const settings = h('div', { className: `mt-sets${single ? ' few' : ''}`, inert: busy },
     h('div', { className: 'mt-mode-sets' },
-      cell('swap', 'If one fails', 'What happens when a model errors, doesn\'t answer in time, or is rate-limited.\n\nSwitch model: another of your models takes over at once (the best-ranked one not tried yet).\nRetry it first: when the model is only busy or briefly down (a rate limit, an outage), the same one is tried again, up to the number of tries set here; any other error switches at once.',
+      !single && cell('swap', 'If one fails', 'What happens when a model errors, doesn\'t answer in time, or is rate-limited.\n\nSwitch model: another of your models takes over at once (the best-ranked one not tried yet).\nRetry it first: when the model is only busy or briefly down (a rate limit, an outage), the same one is tried again, up to the number of tries set here; any other error switches at once.',
         h('select', { onchange: (e) => saveOrder(S.order, 'saved', { on: e.target.value }) },
           [['failure', 'switch model'], ['retries', 'retry it first']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.on === v }))),
         ro.on === 'retries' ? h('input', { type: 'number', className: 'tries', 'aria-label': 'tries', title: 'Tries\nHow many times in all the same model is tried when it\'s busy or briefly down, before another model takes over.', min: 1, max: 20, value: ro.retries, onchange: (e) => saveOrder(S.order, 'saved', { retries: Number(e.target.value) }) }) : null),
@@ -2660,11 +2662,11 @@ function drawMine(s) {
           if (!(v >= 1 && v <= 600)) return (e.target.value = S.settings.testTimeout), toast('a whole number of seconds, 1 to 600', true)
           saveTime('testTimeout', v, `tests wait ${v} second${v === 1 ? '' : 's'} for an answer`)
         } }), h('span', { className: 'unit', textContent: 's' })),
-      cell('send', 'New message', 'Which model a new message goes to first.\n\n#1: always the top of the list.\nLast working: the one that answered last (useful while #1 keeps failing).',
+      !single && cell('send', 'New message', 'Which model a new message goes to first.\n\n#1: always the top of the list.\nLast working: the one that answered last (useful while #1 keeps failing).',
         h('select', { onchange: (e) => saveOrder(S.order, 'saved', { next: e.target.value }) },
           [['first', '#1'], ['stay', 'last working']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.next === v })))),
-      h('span', { className: 'mt-div', 'aria-hidden': 'true' }),
-      chooser))
+      !single && h('span', { className: 'mt-div', 'aria-hidden': 'true' }),
+      !single && chooser))
 
   // --- beside the filters: what's shown · what you do with it (the sorts show in the column heads) ---
   const line = h('div', { className: 'mt-line' },
@@ -2720,7 +2722,7 @@ function drawMine(s) {
     else (results.fails++, (results[o] = (results[o] ?? 0) + 1))
   }
   put($('mt'),
-    order.length > 1 ? settings : null,
+    order.length ? settings : null, // the time limits count with one model too (Give up: how long it gets to start)
     order.length
       ? h('div', { className: 'mt-tools' },
           h('div', { className: 'mt-row', inert: busy }, filterBarOf(order, results), line),

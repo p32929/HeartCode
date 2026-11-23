@@ -2,6 +2,12 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.74 (2026-11-23)
+
+- **Give up, Stalled and Tests wait show with one model too** (Models → List, above the search):
+  they were hidden unless the list had two or more models, so a short Give up couldn't be changed.
+  With one model they show with their names.
+
 ## 0.1.73 (2026-11-23)
 
 - **The settings page loads again**: a help text in 0.1.72 broke its script (nothing showed).
