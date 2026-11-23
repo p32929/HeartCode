@@ -2,6 +2,22 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.80 (2026-11-23)
+
+- **Coding CLIs as providers**: Claude Code, Codex, opencode, Junie, Kilo Code, Cline, Antigravity,
+  Kiro, GitHub Copilot, Cursor, CodeBuddy, Qwen Code, Qoder, Mistral Vibe and AlphaCode, from
+  `/settings` → Providers → + Add a provider. Each shows whether it's installed (its version); one
+  that isn't installs from there, its log shown as it goes. No key: it uses its own sign-in (the
+  dialog says the command, e.g. `codex login`). Its models come from the CLI, and are tested and put
+  in your list like any provider's. A message it answers is worked on by the CLI in your folder, with
+  its own tools: its thinking, steps and answer show in HeartCode, its session goes on with the next
+  message (and hears what another of your models said meanwhile), Esc stops it and everything it
+  started. Your permission mode carries over: CLIs that can ask (Kilo, Cline, Copilot, Cursor, Qwen…)
+  ask you through HeartCode's own dialog; the others can't ask, so their own modes hold them back
+  (read-only; with "ask before commands", Claude Code accepts edits only and Codex works in its
+  workspace sandbox; Junie works only on "do everything"). Anything else asked of
+  one (a summary, a test) is a plain question in a scratch folder, with nothing it may change.
+
 ## 0.1.79 (2026-11-23)
 
 - **Voice with Hex, whisper-cli or OpenAI only**: Automatic uses the Hex app when it's installed with

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { HOME, readJson } from './config.js'
 import { contextWindow, contextSource, ASSUMED_REMOTE, LIMIT_MS } from './context.js'
 import { c } from './ui.js'
+import { cliOf } from './clis.js'
 
 // One cached profile per server + model. The URL path counts: proxies serve several providers
 // from one host (https://proxy.dev/groq, https://proxy.dev/openrouter).
@@ -12,6 +13,7 @@ export const profilePath = (client) => {
   const where = u.host + u.pathname.replace(/\/v1$/, '')
   return path.join(HOME, 'models', `${where}_${client.model}`.replace(/[^\w.-]+/g, '_') + '.json')
 }
+export const CLI_CONTEXT = 10_000_000 // a CLI's: never compacted by HeartCode
 // Bump when a profile's shape changes, so older saved ones are made again once.
 const PROBE_VERSION = 2
 // Kept in memory by file and its time: a page listing thousands of models reads only the ones that
@@ -33,6 +35,8 @@ export const loadProfile = (client) => {
 // assumptions (source 'assumed': tool calls, streaming, a 128k window) until you say on the settings
 // page what it can do (set: { context, tools, thinking, images, stream }, source 'you').
 export function profileFrom(client, info) {
+  // a coding CLI's model (clis.js): it works with its own tools and keeps its own context; nothing to look up
+  if (cliOf(client.baseUrl)) return { version: PROBE_VERSION, model: client.model, baseUrl: client.baseUrl, source: 'cli', at: new Date().toISOString(), set: { tools: true, stream: true, images: false, thinking: false, context: CLI_CONTEXT } }
   return { version: PROBE_VERSION, model: client.model, baseUrl: client.baseUrl, source: info ? 'models.dev' : 'assumed', at: new Date().toISOString(), usage: true, context: ASSUMED_REMOTE, contextGuessed: true, ...(info && { known: info }) }
 }
 
@@ -59,7 +63,7 @@ export function strategy(p, cfg = {}) {
 export function describe(p, s) {
   const yn = (v) => (v ? c.green('yes') : c.red('no'))
   const context = ['context', `${s.context}${c.dim(`  (${p.set?.context ? 'set on /settings' : contextSource(p)}; change it on /settings)`)}`]
-  const from = { 'models.dev': 'models.dev', you: '/settings (set by hand)', assumed: "nothing: it isn't in models.dev. Set what it can do on /settings" }[p.source] ?? 'an earlier test'
+  const from = { cli: 'its CLI (it keeps its own context)', 'models.dev': 'models.dev', you: '/settings (set by hand)', assumed: "nothing: it isn't in models.dev. Set what it can do on /settings" }[p.source] ?? 'an earlier test'
   const mine = (k) => (p.set?.[k] !== undefined ? c.dim('  (set by hand)') : '')
   return [['from', from], context, ['tool calls', yn(s.actions === 'tools') + mine('tools')], ['thinking', yn(s.thinking) + mine('thinking')], ['images', yn(s.vision) + (Date.now() - (p.quirks?.noImages ?? -Infinity) < LIMIT_MS ? c.dim('  (its provider refused an image today)') : mine('images'))], ['streaming', yn(s.stream) + mine('stream')]]
     .map(([k, v]) => `  ${c.dim(k.padEnd(15))} ${v}`)

@@ -13,6 +13,7 @@ import { newer } from './update.js'
 import { DEFAULT_SERVERS, mcpAuth, serverName } from './mcp.js'
 import { sections, BUILTIN_PROMPTS, prompt, reloadPrompts } from './prompts.js'
 import { Client } from './client.js'
+import { clisInfo, installCli, cliOf } from './clis.js'
 import { clip, TOOL_DEFS } from './tools.js'
 import { loadProfile, strategy, profilePath, profileFrom } from './probe.js'
 import { loadPrices, priceOf, limitsOf } from './usage.js'
@@ -308,7 +309,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       const reply = (r.content || '').trim()
       if (!reply && !r.toolCalls.length) return { ok: false, kind: 'empty', ms: Date.now() - t0, error: `it answered with nothing${r.usage?.completion_tokens ? ` (${r.usage.completion_tokens} tokens it said it wrote)` : ''}` }
       const ms = Date.now() - t0
-      return { ok: true, ms, reply: reply.slice(0, 80), ...(testedOf({ provider, model })?.mode === 'tools' && (await toolTest(c, stop))) }
+      return { ok: true, ms, reply: reply.slice(0, 80), ...(testedOf({ provider, model })?.mode === 'tools' && !c.cli && (await toolTest(c, stop))) }
     } catch (e) {
       if (stop?.aborted) return { stopped: true }
       return { ok: false, ms: Date.now() - t0, status: e.status ?? null, ...(e.name === 'TimeoutError' && { kind: 'timeout' }), error: e.name === 'TimeoutError' ? noAnswer() : whyFailed(e), ...(e.retryAfter > 0 && { retryAfter: Number(e.retryAfter) }) }
@@ -535,9 +536,10 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       name = safeName(name)
       if (!name) throw new Error('a name is needed')
       baseUrl = String(baseUrl ?? '').trim()
+      if (/^cli:/i.test(baseUrl) && !cliOf(baseUrl)) throw new Error(`"${baseUrl}": no such CLI`)
       // an address without http(s)://: whichever of the two the server answers on (any answer, even
       // a 401, means it's there), https first
-      if (!/^https?:\/\//i.test(baseUrl)) baseUrl = await schemeFor(baseUrl)
+      if (!/^(https?|cli):\/\//i.test(baseUrl)) baseUrl = await schemeFor(baseUrl) // cli://claude: a coding CLI (clis.js)
       try {
         if (!new URL(baseUrl).hostname) throw new Error()
       } catch {
@@ -568,6 +570,9 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       autoPick()
       return state()
     },
+    // the coding CLIs (clis.js): which are installed, how to install the rest, an install going on
+    'GET /api/clis': () => clisInfo(),
+    'POST /api/cli/install': ({ id }) => (installCli(id, () => emit('clis', {})), clisInfo()),
     'POST /api/provider/delete': ({ name }) => {
       if (!cfg.providers[name]) throw new Error(`no provider "${name}"`)
       delete cfg.providers[name]

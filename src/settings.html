@@ -257,6 +257,10 @@
   .preset b { display: block; }
   .preset span { color: var(--muted); font-size: 12px; }
   .preset.on { border-color: var(--accent); background: var(--accent-soft); }
+  .preset.off span { color: var(--faint); }
+  .preset .bad { color: var(--danger, #c33); }
+  .cli-head { margin: 18px 0 8px; font-size: 13px; color: var(--muted); }
+  .cli-log { max-height: 120px; overflow: auto; font: 11px/1.4 ui-monospace, monospace; color: var(--faint); white-space: pre-wrap; margin-top: 8px; }
 
   /* Providers & models: every provider's models in one list, full width; it fills the screen's height and scrolls inside */
   .head-actions { display: flex; gap: 8px; align-items: center; }
@@ -1113,13 +1117,19 @@
   <h2 id="p-title">Add a provider</h2>
   <p class="sub">Pick one to fill in its address, or type any OpenAI-compatible API below.</p>
   <div class="presets" id="presets"></div>
+  <div class="cli-head" id="cli-head">Or a coding CLI on this machine: it works on your messages with its own tools and sign-in.</div>
+  <div class="presets" id="cli-tiles"></div>
+  <pre class="cli-log" id="cli-log" hidden></pre>
   <div class="row" style="margin-top:6px">
     <div class="grow"><label class="f" for="p-name">Name</label><input type="text" id="p-name" placeholder="openrouter, groq, work…"></div>
     <div class="grow" style="flex:2"><label class="f" for="p-url">Base URL</label><input type="text" id="p-url" placeholder="https://openrouter.ai/api/v1"></div>
   </div>
+  <div id="p-keys">
   <label class="f" for="p-key">API key <span class="muted" id="p-keynote" style="font-weight:normal"></span></label>
   <input type="password" id="p-key" autocomplete="off" placeholder="paste it here (none for a server on this machine, like Ollama)">
   <div class="hint">Kept in config.json on this machine. This page only shows its first and last characters.</div>
+  </div>
+  <div class="hint" id="p-clinote" hidden></div>
   <div id="p-more" hidden>
     <label class="opt" style="margin-top:16px"><div class="t"><b>Load its model list</b><span>On: its models are asked from the provider. Off: never asked; only the models added by name show (the box next to its name).</span></div><span class="sw"><input type="checkbox" id="p-list-on"><i></i></span></label>
     <div class="actions" id="p-added"></div>
@@ -1609,10 +1619,48 @@ function drawPresets() {
     if (!editing && (!$('p-name').value || PRESETS.some(([n]) => n === $('p-name').value))) $('p-name').value = name
     $('p-url').value = url
     drawPresets()
+    drawClis()
     $('p-key').focus()
   } }, h('b', { textContent: label }), h('span', { textContent: what }))))
 }
-$('p-url').oninput = drawPresets
+$('p-url').oninput = () => (drawPresets(), drawClis())
+
+// The coding CLIs (src/clis.js): one installed is added as a provider at cli://<its name>; one that
+// isn't can be installed from here (its log shown as it goes), then signed in to in a terminal
+let CLIS = null
+let cliPoll = null
+function loadClis() {
+  api('/api/clis').then((list) => {
+    CLIS = list
+    drawClis()
+    clearTimeout(cliPoll)
+    if (list.some((k) => k.installing) && $('p-form').open) cliPoll = setTimeout(loadClis, 1500)
+  }, (e) => toast(e.message, true))
+}
+function drawClis() {
+  const url = $('p-url').value.trim()
+  const cli = /^cli:\/\/([^/]+)/i.exec(url)?.[1]
+  const k = CLIS?.find((x) => x.id === cli)
+  $('p-keys').hidden = Boolean(cli)
+  $('p-clinote').hidden = !cli
+  $('p-clinote').textContent = k ? `No key: ${k.title} uses its own sign-in. Not signed in yet? Run "${k.login}" in a terminal first.` : ''
+  const busy = CLIS?.find((x) => x.installing || x.error)
+  $('cli-log').hidden = !busy?.log && !busy?.error
+  if (busy) $('cli-log').textContent = busy.error ? `${busy.title}: ${busy.error}` : `Installing ${busy.title}…\n${busy.log.slice(-1500)}`
+  if (busy) $('cli-log').scrollTop = 1e9
+  put($('cli-tiles'), (CLIS ?? []).map((k) => h('button', { type: 'button', className: 'preset' + (cli === k.id ? ' on' : '') + (k.installed ? '' : ' off'), title: k.installed ? `${k.title} ${k.version}` : k.install ? `click to install: ${k.install}` : `install it yourself: ${k.commands?.[0] ?? k.page}${k.needs ? ` (needs ${k.needs})` : ''}`, onclick: () => {
+    if (k.installed) {
+      if (!editing && (!$('p-name').value || CLIS.some((x) => x.id === $('p-name').value) || PRESETS.some(([n]) => n === $('p-name').value))) $('p-name').value = k.id
+      $('p-url').value = `cli://${k.id}`
+      drawPresets()
+      return drawClis()
+    }
+    if (k.installing) return
+    if (!k.install) return window.open(k.page, '_blank', 'noopener')
+    if (!confirm(`Install ${k.title}?\n\nThis runs: ${k.install}`)) return
+    api('/api/cli/install', { id: k.id }).then(loadClis, (e) => toast(e.message, true))
+  } }, h('b', { textContent: k.title }), h('span', { className: k.error ? 'bad' : '', textContent: k.installed ? (k.version ? `v${k.version}` : 'installed') : k.installing ? 'installing…' : k.error ? 'install failed' : k.install ? 'click to install' : 'not installed: see its page' }))))
+}
 
 const MODELS = {} // provider → { list } | { error } | { loading }
 const filters = {}
@@ -1647,13 +1695,15 @@ function openForm(p = null) {
   $('p-save').textContent = p ? 'Save changes' : 'Add provider'
   // editing: what used to crowd its header
   $('p-more').hidden = $('p-delete').hidden = !p
-  $('presets').hidden = Boolean(p)
+  $('presets').hidden = $('cli-tiles').hidden = $('cli-head').hidden = Boolean(p)
+  loadClis()
   $('p-form').querySelector('.sub').hidden = Boolean(p)
   if (p) {
     $('p-list-on').checked = p.list
     put($('p-added'), p.added.length ? [h('span', { className: 'muted', style: 'font-size:13px', textContent: `${p.added.length} model${p.added.length === 1 ? '' : 's'} added by name` }), h('button', { className: 'small danger', textContent: 'Forget them', onclick: () => ($('p-form').close(), clearAdded(p)) })] : [])
   }
   drawPresets()
+  drawClis()
   $('p-form').showModal()
   ;(p ? $('p-url') : $('p-name')).focus()
 }
@@ -3830,6 +3880,7 @@ if (token) {
     gotResult(key, result)
   })
   events.addEventListener('testrun', (e) => showRun(JSON.parse(e.data)))
+  events.addEventListener('clis', () => $('p-form').open && loadClis()) // an install finished
   events.addEventListener('helpers', (e) => ((S.helpers = JSON.parse(e.data).helpers), drawMine(S))) // picked for you again, after a test run
   // many at once (thousands of models added): taken in once a frame, the table drawn once
   const news = new Map()

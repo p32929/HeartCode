@@ -938,7 +938,7 @@ async function runNative(s, task, images, signal) {
   const said = ui.permission === 'plan' && !s.isSub ? `${text}\n\n${prompt('agent/plan-mode')}` : text
   const content = images.length ? [{ type: 'text', text: said }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))] : said
   s.messages.push({ role: 'user', content })
-  attachNamed(s, task) // files the message names: as if already read (saves a round trip each)
+  if (!s.client.cli) attachNamed(s, task) // files the message names: as if already read (saves a round trip each); a coding CLI reads them itself
   // the tools: built again each step (the model answering may change; client.js leaves them out for
   // one that can't call tools; plan mode may be left mid-message)
   const toolList = () => [...TOOL_DEFS, ...extraTools(s)].filter((f) => allowed(s, f.name) && !(ui.permission === 'plan' && PLAN_HIDDEN.has(f.name)) && !(f.name === 'ask_user' && (ui.noUser || s.isSub)) && !(f.name === 'done' && !askDone())).map((f) => ({ type: 'function', function: f })) // ask_user: not headless, nor a helper (it reports to the main agent, which asks)
@@ -1056,7 +1056,9 @@ async function runNative(s, task, images, signal) {
     }
     let res
     try {
-      res = await client.chat({ messages: s.messages, tools, stream }, { signal, onToken: out.text, onReasoning: out.think, onToolDelta, fit: s.autoCompact && !refitted })
+      // a coding CLI (clis.js) works on the message itself: its steps shown as they come, each after the words before it
+      const cliStep = (name, detail) => (live && (live.end(), (live = null)), ui.step(name, detail, '', {}))
+      res = await client.chat({ messages: s.messages, tools, stream }, { signal, onToken: out.text, onReasoning: out.think, onToolDelta, fit: s.autoCompact && !refitted, agent: true, cwd: s.root, permission: ui.permission, confirm: (q, kind) => ui.confirm(q, kind), onStep: cliStep, onStepFailed: () => ui.result('failed', { ok: false }) })
     } catch (e) {
       if (!e.tooBig) {
         ui.stopSpin()
@@ -1137,6 +1139,12 @@ async function runNative(s, task, images, signal) {
     }
     s.lastStop = res.finishReason // why the last reply ended (headless: its stop_reason)
     s.onEvent?.({ type: 'assistant', model: `${client.provider}/${client.model}`, content: res.content, reasoning: res.reasoning, toolCalls: res.toolCalls, stop: res.finishReason }) // headless output
+    // a coding CLI did the work itself, with its own tools and checks: its answer is the answer
+    if (res.cli) {
+      ui.finishSteps?.('') // headless and editors (ACP) have no steps on screen
+      showHeld(res.content)
+      return res.content
+    }
     // An answer cut off (its provider's output limit: no max_tokens is sent, so each has its own; or a
     // connection that ended early): the model goes on where it stopped (3 times in a row at most); the
     // answer is the pieces together. Still cut after that: it stays cut, and says so (stop_reason).

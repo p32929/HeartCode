@@ -5,6 +5,7 @@ import { log, logRequest, requestLog } from './log.js'
 import { loadRankings, scoreOf } from './rankings.js'
 import { byRecord, unreliable, record } from './record.js'
 import { fetch } from './http.js' // not the built-in one: see http.js
+import { cliOf, cliModels, cliChat } from './clis.js'
 
 // Tokens in a text, estimated the way tokenizers split it: a word or a number is about one, a long
 // word more, every symbol one. Prose comes out near characters ÷ 4; code, CSS, JSON and SVG paths,
@@ -225,6 +226,10 @@ export class Client {
     this.rotation = { list, on, retries, next, at: 0, good: list[0] }
     this.#use(list[0])
   }
+  // the coding CLI this model is one of (a provider at cli://claude…: clis.js), or null
+  get cli() {
+    return cliOf(this.baseUrl)
+  }
   get target() {
     return this.rotation?.list[this.rotation.at] ?? null
   }
@@ -393,6 +398,7 @@ export class Client {
   }
   // The server's own entries for its models ({ id, owned_by, context_length, pricing… }, as it sends them).
   async modelEntries(timeout = 60_000) {
+    if (this.cli) return (await cliModels(this.cli)).map((m) => ({ ...m, name: m.name ?? m.id })) // a coding CLI (clis.js): its own list
     const data = await this.#json(this.baseUrl + '/models', undefined, timeout)
     // { result: [...] } (Cloudflare's shape): there the id is an internal one and the name is the model's
     if (Array.isArray(data.result)) return data.result.filter((m) => m?.name).map((m) => ({ ...m, id: m.name }))
@@ -405,6 +411,7 @@ export class Client {
   // server that is one of these is treated as a model server on this machine or network; its
   // address (localhost, 192.168…) says nothing (a proxy there may serve Gemini).
   async contextSize() {
+    if (this.cli) return { size: undefined, server: null }
     const root = this.baseUrl.replace(/\/v1$/, '')
     const host = new URL(root).hostname
     const n = (x) => (Number(x) > 0 ? Number(x) : undefined)
@@ -453,6 +460,7 @@ export class Client {
   // 131072"). Refused requests aren't charged. If it's accepted (a window that big), it's stopped
   // at once. Returns { limit } | { over } (it took that many) | { error }. Not logged: it's 4 MB.
   async measureContext({ signal, tokens = 2_200_000 } = {}) {
+    if (this.cli) return { error: 'a coding CLI keeps its own context' }
     const headers = { 'content-type': 'application/json', ...(this.apiKey && { authorization: `Bearer ${this.apiKey}` }) }
     const body = JSON.stringify({ model: this.model, messages: [{ role: 'user', content: 'a '.repeat(tokens) }], stream: true })
     const stop = new AbortController()
@@ -555,6 +563,7 @@ export class Client {
   async #timed(body, opts) {
     this.inFlight = Date.now()
     try {
+      if (this.cli) return await cliChat(this, body, opts) // a coding CLI (clis.js) answers it
       return await this.#chat(body, opts)
     } catch (e) {
       if (!e.recorded && this.last) this.#record(this.last.req, this.last.sent, { error: e }) // failed while the reply streamed in

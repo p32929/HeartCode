@@ -744,7 +744,7 @@ class App {
       const pct = Math.round((used / strat.context) * 100)
       const paint = pct >= 80 ? c.red : pct >= 50 ? c.yellow : c.green
       const guess = strat.contextSure ? '' : '~' // not said by the server: assumed, and growing as bigger requests work
-      parts.ctx = `${c.faint('ctx')} ${paint(`${kTokens(used)}/${guess}${kTokens(strat.context)}`)} ${c.faint(`${pct}%`)}`
+      if (!this.s?.client.cli) parts.ctx = `${c.faint('ctx')} ${paint(`${kTokens(used)}/${guess}${kTokens(strat.context)}`)} ${c.faint(`${pct}%`)}` // a coding CLI keeps its own
       const tps = this.s?.client.tps
       if (tps) parts.tps = `${c.muted(String(tps))} ${c.faint('tok/s')}`
       if (this.chat.usage?.priced) parts.cost = c.muted(money(this.chat.usage.cost))
