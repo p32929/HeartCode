@@ -2,6 +2,13 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.79 (2026-11-23)
+
+- **Voice with Hex, whisper-cli or OpenAI only**: Automatic uses the Hex app when it's installed with
+  its Labs › Transcribe files on (`hex labs on transcribe-files`; about 0.2 s a clip, your Hex
+  dictation model), else whisper-cli and a model; OpenAI's API when you choose it (your OpenAI
+  provider's key). Other providers' transcription APIs are gone. `/settings` → General → Voice input.
+
 ## 0.1.78 (2026-11-23)
 
 - **Going back to a message queued while working** keeps the conversation before it on screen (it

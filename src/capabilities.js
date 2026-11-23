@@ -29,9 +29,8 @@ export function capabilities(cfg = {}) {
   const vp = voiceProblem(cfg.voice ?? {}, cfg.providers ?? {})
   let need = ''
   if (vp) {
-    if (/ffmpeg/.test(vp)) need = 'ffmpeg, and a whisper model (or a transcription provider)'
-    else if (/whisper-cli/.test(vp)) need = 'whisper (whisper-cli) and a model — or a transcription provider'
-    else need = 'a whisper model — or a transcription provider'
+    if (/ffmpeg/.test(vp)) need = 'ffmpeg, and Hex or whisper-cli (or OpenAI)'
+    else need = vp.replace(/^voice (input )?/, '') // what it says is missing: Hex's Labs switch, a whisper model, an OpenAI provider
   }
   caps.push({ id: 'voice', name: 'Voice input', what: 'Dictate a message — Space in an empty box, or /voice.', ok: !vp, need })
   const chrome = chromeHere()

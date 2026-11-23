@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { log } from './log.js'
 import { HOME } from './config.js'
-import { listen, transcribePcm, voiceProblem } from './voice.js'
+import { listen, transcribePcm, voiceProblem, engineOf } from './voice.js'
 
 export const color = (process.stdout.isTTY || Boolean(process.env.FORCE_COLOR)) && !process.env.NO_COLOR
 // 24-bit where the terminal says so, else the nearest of 256 (Terminal.app, xterm-256color), else 16.
@@ -1880,7 +1880,7 @@ export class UI {
     const rl = this.rl
     const base = { line: rl?.line ?? '', cursor: rl?.cursor ?? 0 }
     const keep = !this.asking // working: the spinner line stays the task's
-    const every = voice.provider ? 3000 : 900 // a provider's API is asked less often than whisper here
+    const every = engineOf(voice, providers) === 'openai' ? 3000 : 900 // OpenAI's API (paid) is asked less often than this computer
     let said = '' // the stretches finished (paused), as the best model heard them
     let live = '' // the stretch going on, as heard so far
     let mic = null

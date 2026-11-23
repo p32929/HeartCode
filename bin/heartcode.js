@@ -114,7 +114,7 @@ const SECTIONS = [
   ['settings', [
     ['/notifications', 'a sound and/or a desktop notification when a task finishes, fails or waits for you: on or off'],
     ['/todos', 'the whole plan of the task at work, every step and its state (Alt+L)'],
-    ['/voice', 'dictate a message (or Space in an empty box, once voice is set up): it shows in the box while speaking, Enter sends it, Esc cancels'],
+    ['/voice', 'dictate a message (or Space in an empty box, once voice is set up): it shows in the box while speaking, Enter sends it, Esc cancels · with Hex, whisper-cli or OpenAI (/settings → General)'],
   ]],
   ['session', [
     ['/resume', 'continue an earlier session in this folder'],

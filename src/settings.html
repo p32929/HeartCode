@@ -2975,8 +2975,14 @@ function drawGeneral(s) {
 }
 $('g-effort').onchange = (e) => act('/api/setting', { name: 'effort', value: e.target.value }, 'effort saved')
 $('g-context').onchange = (e) => act('/api/setting', { name: 'context', value: e.target.value.trim() ? Number(e.target.value) : null }, 'context window saved')
-// Voice: this machine (whisper-cli and a ggml model) or a provider's transcription API, a model and a
-// language: kept as config's "voice" ({ provider, model, language }; nothing set: this machine).
+// Voice: Hex, whisper-cli or OpenAI's API (nothing set: Hex when it's ready, else whisper-cli), a model
+// and a language: kept as config's "voice" ({ engine, model, language }).
+const VOICE = {
+  '': ['Automatic', 'On this computer: Hex when it\'s installed with its Labs › Transcribe files on, else whisper-cli and a model.', 'Empty: the engine\'s own (Hex: your dictation model; whisper: the best in ~/.whisper-models).', 'auto'],
+  hex: ['Hex', 'The Hex app on this computer, with your Hex dictation model: private, free, fast. Needs Hex\'s Labs › Transcribe files (hex labs on transcribe-files).', 'A model id from hex model list. Empty: the one Hex uses.', 'Hex\'s'],
+  whisper: ['whisper-cli', 'whisper.cpp on this computer: private, free, slower. Needs whisper-cli and a model file.', 'A whisper model file (ggml-….bin). Empty: the best one in ~/.whisper-models.', 'auto'],
+  openai: ['OpenAI API', 'Sent to OpenAI to turn into text, with your OpenAI provider\'s key: paid, fast.', 'Its speech-to-text model, like whisper-1 or gpt-4o-transcribe.', 'whisper-1'],
+}
 function voiceNow() {
   try {
     return S?.voice ? JSON.parse(S.voice) : {}
@@ -2986,25 +2992,24 @@ function voiceNow() {
 }
 function drawVoice(s) {
   const v = voiceNow()
-  const names = (s.providers ?? []).map((p) => p.name)
-  put($('v-src'), h('option', { value: '', textContent: 'This machine (whisper-cli)' }), names.map((n) => h('option', { value: n, textContent: `${n} (its transcription API)` })))
-  $('v-src').value = v.provider && names.includes(v.provider) ? v.provider : ''
-  const remote = Boolean($('v-src').value)
-  $('v-src-about').textContent = remote ? 'Sent to that provider to turn into text: fast, needs its key.' : 'Runs on this computer: private, free, slower. Needs whisper-cli and a model.'
-  $('v-model-about').textContent = remote ? 'Its speech-to-text model, like whisper-large-v3 (Groq) or whisper-1 (OpenAI).' : 'A whisper model file (ggml-….bin). Empty: the best one in ~/.whisper-models.'
-  $('v-lang-about').textContent = remote ? 'The language spoken, like en or bn. Empty: worked out from the speech.' : 'The language spoken, like en or bn; auto works it out. Empty: English.'
-  $('v-model').placeholder = remote ? 'whisper-large-v3' : 'auto'
-  $('v-lang').placeholder = remote ? 'auto' : 'en'
+  put($('v-src'), Object.entries(VOICE).map(([v, [label]]) => h('option', { value: v, textContent: label })))
+  $('v-src').value = VOICE[v.engine] ? v.engine : ''
+  const [, about, model, ph] = VOICE[$('v-src').value]
+  $('v-src-about').textContent = about
+  $('v-model-about').textContent = model
+  $('v-lang-about').textContent = 'The language spoken, like en or bn; auto works it out. Empty: English (OpenAI: worked out).'
+  $('v-model').placeholder = ph
+  $('v-lang').placeholder = 'en'
   for (const [id, k] of [['v-model', 'model'], ['v-lang', 'language']]) if (document.activeElement !== $(id)) $(id).value = v[k] ?? ''
 }
 function saveVoice(what) {
-  const v = { provider: $('v-src').value || undefined, model: $('v-model').value.trim() || undefined, language: $('v-lang').value.trim() || undefined }
+  const v = { engine: $('v-src').value || undefined, model: $('v-model').value.trim() || undefined, language: $('v-lang').value.trim() || undefined }
   const set = Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined))
   act('/api/voice', { text: Object.keys(set).length ? JSON.stringify(set) : '' }, what)
 }
 $('v-src').onchange = (e) => {
   $('v-model').value = '' // a local model's path means nothing to a provider, and the other way round
-  saveVoice(`voice: ${e.target.value || 'this machine'}`)
+  saveVoice(`voice: ${VOICE[e.target.value][0]}`)
 }
 $('v-model').onchange = () => saveVoice('voice model saved')
 $('v-lang').onchange = () => saveVoice('voice language saved')
