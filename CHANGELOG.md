@@ -2,6 +2,10 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.81 (2026-11-23)
+
+- A coding CLI's model shows "–" for its context on the Models page (it keeps its own; it showed 10M).
+
 ## 0.1.80 (2026-11-23)
 
 - **Coding CLIs as providers**: Claude Code, Codex, opencode, Junie, Kilo Code, Cline, Antigravity,

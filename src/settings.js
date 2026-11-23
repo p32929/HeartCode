@@ -223,7 +223,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     if (!p) return null
     const known = limitsOf(t.provider, c.baseUrl, t.model) ?? p.known
     const st = strategy({ ...p, known, source: p.source === 'assumed' && known ? 'models.dev' : p.source })
-    return { source: p.source === 'assumed' && known ? 'models.dev' : (p.source ?? 'tested'), mode: st.actions, context: st.context, sure: st.contextSure, thinking: st.thinking, vision: st.vision, stream: st.stream, set: p.set ?? {} }
+    return { source: p.source === 'assumed' && known ? 'models.dev' : (p.source ?? 'tested'), mode: st.actions, context: p.source === 'cli' ? 0 : st.context, sure: st.contextSure, thinking: st.thinking, vision: st.vision, stream: st.stream, set: p.set ?? {} }
   }
   const knownOf = (t) => {
     const p = cfg.providers[t.provider]
