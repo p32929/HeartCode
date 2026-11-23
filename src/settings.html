@@ -1845,7 +1845,6 @@ $('m-kind').onchange = (e) => {
   savePref('catKind', catKind)
   if (S) drawProviders(S)
 }
-const isOn = (name) => !S?.providers.find((p) => p.name === name)?.off
 $('m-sort').onchange = (e) => {
   catSort = e.target.value
   savePref('catSort', catSort)
@@ -1885,9 +1884,9 @@ $('on-all').onclick = () => {
   act('/api/provider/on', { on }, on ? 'every provider is on' : 'every provider is off: HeartCode skips their models until you turn one on')
 }
 $('fold-all').onclick = () => (settle(), allFolded() ? FOLDED.clear() : S?.providers.forEach((p) => FOLDED.add(p.name)), folds())
-// every model shown from the providers that are on (one that's off: its own box picks its models)
+// every model shown (the filters decide what's shown: On only leaves out the providers that are off)
 $('pick-shown').onchange = (e) => {
-  for (const [provider, ids] of SHOWN) if (isOn(provider) || !e.target.checked) for (const id of ids) e.target.checked ? pickedOf(provider).add(id) : PICKED_CAT.get(provider)?.delete(id)
+  for (const [provider, ids] of SHOWN) for (const id of ids) e.target.checked ? pickedOf(provider).add(id) : PICKED_CAT.get(provider)?.delete(id)
   drawPicks()
 }
 $('p-mine').onclick = () => (location.hash = 'models')
@@ -2433,7 +2432,7 @@ const pickedOf = (name) => PICKED_CAT.get(name) ?? PICKED_CAT.set(name, new Set(
 function drawPicks() {
   if (!S) return
   const all = [...PICKED_CAT].flatMap(([provider, ids]) => [...ids].map((model) => ({ provider, model })))
-  const shown = [...SHOWN].filter(([provider]) => isOn(provider)).flatMap(([provider, ids]) => ids.map((model) => ({ provider, model }))) // the top box: providers that are on
+  const shown = [...SHOWN].flatMap(([provider, ids]) => ids.map((model) => ({ provider, model })))
   const isPicked = (t) => Boolean(PICKED_CAT.get(t.provider)?.has(t.model))
   const toAdd = all.filter((t) => placeOf(t.provider, t.model) === undefined)
   const toTake = all.filter((t) => placeOf(t.provider, t.model) !== undefined)
@@ -2449,8 +2448,7 @@ function drawPicks() {
   top.checked = n > 0 && n === shown.length
   top.indeterminate = n > 0 && n < shown.length
   top.disabled = !shown.length
-  const offs = [...SHOWN.keys()].filter((p) => !isOn(p)).length
-  top.title = top.checked ? 'unselect every model shown' : `select every model shown from the providers that are on (${shown.length}${modelQuery.trim() ? ': the matches' : ''})${offs ? `; ${offs} off left out` : ''}`
+  top.title = top.checked ? 'unselect every model shown' : `select every model shown (${shown.length}${modelQuery.trim() ? ': the matches' : ''})`
   const take = () => {
     const off = new Set(toTake.map(keyOf))
     const rest = S.order.filter((t) => !off.has(keyOf(t)))

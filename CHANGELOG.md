@@ -2,6 +2,11 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.88 (2026-11-23)
+
+- **Select all on Providers selects every model shown again**, on or off (0.1.86 left out the
+  providers switched off). To leave those out, tick **On only**: they're hidden, so not selected.
+
 ## 0.1.87 (2026-11-23)
 
 - **All / Providers only / CLIs only** on Providers (beside Sort): show every provider, only the API
