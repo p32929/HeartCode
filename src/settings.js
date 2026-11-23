@@ -19,6 +19,7 @@ import { loadPrices, priceOf, limitsOf } from './usage.js'
 import { THEMES, PERMISSIONS } from './ui.js'
 import { loadSkills, frontMatter, skillFiles } from './skills.js'
 import { loadRankings, rankings, rankIn } from './rankings.js'
+import { renameRecords } from './record.js'
 // a model's places in LMArena's public rankings, shown on Your models: { coding, web, vision } as { rank, of, score }
 const RANKED_ON = { coding: 'text:coding', web: 'webdev:webdev', vision: 'vision:overall' }
 const ranksOf = (model, data) => (data ? Object.fromEntries(Object.entries(RANKED_ON).map(([k, list]) => [k, rankIn(model, list, data)])) : null)
@@ -264,13 +265,23 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   const TESTS_FILE = path.join(HOME, 'model-tests.json')
   const tests = readJson(TESTS_FILE, {})
   let saving = null
-  const saveTests = () => (saving ??= setTimeout(() => ((saving = null), writeJson(TESTS_FILE, tests)), 1000)) // at most once a second
+  const gone = new Set() // tests forgotten here since the last write
+  // merged with the file as it is now: another HeartCode's results written meanwhile stay
+  const writeTests = () => {
+    saving = null
+    const disk = readJson(TESTS_FILE, {})
+    for (const k of gone) delete disk[k]
+    gone.clear()
+    for (const [k, v] of Object.entries(disk)) if (!(k in tests)) tests[k] = v
+    writeJson(TESTS_FILE, Object.assign(disk, tests))
+  }
+  const saveTests = () => (saving ??= setTimeout(writeTests, 1000)) // at most once a second
   // a model taken off your list: its test result goes too (added again, it's not tested)
   const forgetTests = () => {
-    const mine = new Set(state().order.map((t) => `${t.provider}/${t.model}`))
-    let gone = 0
-    for (const key of Object.keys(tests)) if (!mine.has(key)) (delete tests[key]), gone++
-    if (gone) saveTests()
+    const mine = new Set(orderOf().map((t) => `${t.provider}/${t.model}`))
+    let n = 0
+    for (const key of Object.keys(tests)) if (!mine.has(key)) (delete tests[key]), gone.add(key), n++
+    if (n) saveTests()
   }
   // How long a model test waits for its answer (cfg.testTimeout, seconds; the settings page sets it).
   const testWait = () => testWaitOf(cfg) * 1000
@@ -295,12 +306,12 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       const signal = stop ? AbortSignal.any([AbortSignal.timeout(testWait()), stop]) : AbortSignal.timeout(testWait())
       const r = await c.chat({ messages: [{ role: 'user', content: prompt('tests/hello') }], stream: true }, { signal })
       const reply = (r.content || '').trim()
-      if (!reply && !r.toolCalls.length) return { ok: false, ms: Date.now() - t0, error: `it answered with nothing${r.usage?.completion_tokens ? ` (${r.usage.completion_tokens} tokens it said it wrote)` : ''}` }
+      if (!reply && !r.toolCalls.length) return { ok: false, kind: 'empty', ms: Date.now() - t0, error: `it answered with nothing${r.usage?.completion_tokens ? ` (${r.usage.completion_tokens} tokens it said it wrote)` : ''}` }
       const ms = Date.now() - t0
       return { ok: true, ms, reply: reply.slice(0, 80), ...(testedOf({ provider, model })?.mode === 'tools' && (await toolTest(c, stop))) }
     } catch (e) {
       if (stop?.aborted) return { stopped: true }
-      return { ok: false, ms: Date.now() - t0, status: e.status ?? null, error: e.name === 'TimeoutError' ? noAnswer() : whyFailed(e), ...(e.retryAfter > 0 && { retryAfter: Number(e.retryAfter) }) }
+      return { ok: false, ms: Date.now() - t0, status: e.status ?? null, ...(e.name === 'TimeoutError' && { kind: 'timeout' }), error: e.name === 'TimeoutError' ? noAnswer() : whyFailed(e), ...(e.retryAfter > 0 && { retryAfter: Number(e.retryAfter) }) }
     }
   }
   // A model that says it calls tools: can it do work with one? One of HeartCode's own tools and a
@@ -320,7 +331,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       }
       return /notes\.txt$/.test(String(a.path ?? '')) && /hello/i.test(String(a.content ?? '')) ? { toolsOk: true } : { toolsOk: false, toolsWhy: `wrong arguments: ${clip(call.function.arguments, 100)}` }
     } catch (e) {
-      if (stop?.aborted || e.name === 'TimeoutError') return {}
+      if (stop?.aborted) return {}
+      if (e.name === 'TimeoutError') return { toolsOk: false, toolsWhy: `no answer to a request with tools within ${testWait() / 1000} seconds` } // hung: not a pass
       return { toolsOk: false, toolsWhy: `a request with tools failed: ${whyFailed(e)}` }
     }
   }
@@ -349,25 +361,24 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   let mineOf = { then: undefined, model: undefined, keys: null }
   const inMine = (key) => {
     if (mineOf.then !== cfg.rotation?.then || mineOf.model !== cfg.model || mineOf.provider !== cfg.provider)
-      mineOf = { then: cfg.rotation?.then, model: cfg.model, provider: cfg.provider, keys: new Set(state().order.map((t) => `${t.provider}/${t.model}`)) }
+      mineOf = { then: cfg.rotation?.then, model: cfg.model, provider: cfg.provider, keys: new Set(orderOf().map((t) => `${t.provider}/${t.model}`)) }
     return mineOf.keys.has(key)
   }
   const wait = (ms) => new Promise((r) => setTimeout(r, ms))
   async function startRun(list, some) {
-    const each = 1 // one model at a time from each provider; the providers side by side
-    run = { total: list.length, done: 0, good: 0, each, busy: new Map(), now: new Set(), pending: new Set(list.map((t) => `${t.provider}/${t.model}`)), stopping: false, some, started: Date.now(), providers: new Map(), cancel: new AbortController() }
+    // one model at a time from each provider; the providers side by side
+    run = { total: list.length, done: 0, good: 0, each: 1, busy: new Map(), now: new Set(), pending: new Set(list.map((t) => `${t.provider}/${t.model}`)), stopping: false, some, started: Date.now(), providers: new Map(), cancel: new AbortController() }
     emit('testrun', runState())
     for (const t of list) {
-      if (!run.providers.has(t.provider)) run.providers.set(t.provider, { queue: [], cap: each, until: 0, pausedAt: 0, backoff: 15_000, refused: new Map() })
+      if (!run.providers.has(t.provider)) run.providers.set(t.provider, { queue: [], until: 0, pausedAt: 0, backoff: 15_000, refused: new Map() })
       run.providers.get(t.provider).queue.push(t)
     }
     for (const p of run.providers.values()) p.queue.sort(testOrder)
     const ticker = setInterval(() => run && Object.keys(runState().paused).length && emit('testrun', runState()), 1000) // the pauses counting down
-    // a provider's worker n: its next model, while there's one and n is under its cap (a busy
-    // provider's cap goes down to one: the others stop; the last one left never does)
-    const worker = async (provider, n) => {
+    // a provider's worker: its next model, while there's one
+    const worker = async (provider) => {
       const p = run.providers.get(provider)
-      while (!run.stopping && p.queue.length && (n < p.cap || p.live === 1)) {
+      while (!run.stopping && p.queue.length) {
         if (p.until > Date.now()) {
           await wait(Math.min(200, p.until - Date.now()))
           continue
@@ -380,26 +391,24 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
           emit('testrun', runState())
           continue
         }
-        run.busy.set(provider, (run.busy.get(provider) ?? 0) + 1)
+        run.busy.set(provider, 1)
         const sent = Date.now()
         run.now.add(`${t.provider} ${t.model}`) // the models being tested this moment, for the page
         emit('testrun', runState())
         const r = await tryOne(t, run.cancel.signal)
         run.now.delete(`${t.provider} ${t.model}`)
         if (r.stopped) break // Stop: not a result (its last one stays)
-        run.busy.get(provider) > 1 ? run.busy.set(provider, run.busy.get(provider) - 1) : run.busy.delete(provider)
+        run.busy.delete(provider)
         if (r.status === 429) {
           const times = (p.refused.get(key) ?? 0) + 1
           p.refused.set(key, times)
-          p.cap = 1
-          // a pause, longer each time; not for refusals of requests sent before the last pause began
-          // (several at once are one burst)
+          // a pause, longer each time; not for a refusal of a request sent before the last pause began
           if (!(sent < p.pausedAt)) {
             p.pausedAt = Date.now()
             p.until = Date.now() + Math.min(120_000, r.retryAfter > 0 ? r.retryAfter * 1000 : p.backoff)
             p.backoff = Math.min(120_000, p.backoff * 2)
           }
-          log('test', `${provider} is busy (429): one at a time, pausing ${Math.round((p.until - Date.now()) / 1000)}s${times < RATE_TRIES ? `; ${t.model} again later` : ''}`)
+          log('test', `${provider} is busy (429): pausing ${Math.round((p.until - Date.now()) / 1000)}s${times < RATE_TRIES ? `; ${t.model} again later` : ''}`)
           if (times < RATE_TRIES) {
             p.queue.push(t)
             emit('testrun', runState())
@@ -413,11 +422,9 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
         if (r.ok) run.good++
         emit('testrun', runState())
       }
-      p.live--
     }
-    for (const p of run.providers.values()) p.live = Math.min(each, p.queue.length)
     try {
-      await Promise.all([...run.providers].flatMap(([provider, p]) => Array.from({ length: p.live }, (_, n) => worker(provider, n))))
+      await Promise.all([...run.providers.keys()].map((provider) => worker(provider)))
     } finally {
       clearInterval(ticker)
       const over = { ...runState(), over: true }
@@ -445,7 +452,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     const times = pool.filter(ran).map((t) => t.test.ms).sort((x, y) => x - y)
     const fast = times[Math.floor((times.length - 1) / 2)] // the middle time: faster than that is quick
     const picks = Object.fromEntries(pool.flatMap((t) => {
-      const jobs = [top(t, 'webdev:webdev') && 'ui', top(t, 'text:coding') && 'code', ((t.can?.thinking && t.can.context >= 128_000) || top(t, 'agent:overall') || top(t, 'text:hard_prompts')) && 'hard', ran(t) && t.test.ms <= fast && 'quick'].filter(Boolean)
+      const tools = t.test?.toolsOk !== false // its tool test failed: the bigger jobs aren't for it
+      const jobs = [tools && top(t, 'webdev:webdev') && 'ui', tools && top(t, 'text:coding') && 'code', tools && ((t.can?.thinking && t.can.context >= 128_000) || top(t, 'agent:overall') || top(t, 'text:hard_prompts')) && 'hard', ran(t) && t.test.ms <= fast && 'quick'].filter(Boolean)
       return jobs.length ? [[keyOf(t), jobs]] : ran(t) ? [[keyOf(t), ['quick']]] : []
     }))
     const out = {}
@@ -471,6 +479,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     const r = recordOf(t)
     return r && { done: Math.round(r.good), failed: Math.round(r.bad), poor: unreliable(t) }
   }
+  // your models in order (#1, then the list): what most routes need, without building the whole state
+  const orderOf = () => [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then]
   const state = (ranked = loadRankings()) => ({
     providers: Object.entries(byName(cfg.providers))
       .filter(([n]) => n !== cfg.adhoc)
@@ -479,7 +489,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     model: cfg.model ?? null,
     version: VERSION,
     update: (({ latest } = {}) => (cfg.updateCheck !== false && latest && newer(latest, VERSION) ? latest : null))(readJson(path.join(HOME, 'update-check.json'), {})), // the day's answer from npm: no request here
-    order: [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then].map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t), ranks: ranksOf(t.model, ranked), record: records.on ? recordView(t) : null })),
+    limits: SPEED_LIMITS, // the seconds settings' bounds, for the page's boxes
+    order: orderOf().map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t), ranks: ranksOf(t.model, ranked), record: records.on ? recordView(t) : null })),
     rankings: ranked && { fetched: ranked.fetched, source: ranked.source },
     rotation: (({ then, ...opts }) => opts)(rotationOf(cfg)),
     helpers: helpersOf(cfg.helpers), // { 'provider/model': [jobs] }
@@ -536,15 +547,25 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       const old = cfg.providers[was ?? name]
       const key = keepKey ? old?.apiKey : String(apiKey ?? '').trim() || undefined
       if (was && was !== name) {
+        if (cfg.providers[name]) throw new Error(`there's a provider named "${name}" already`)
         delete cfg.providers[was]
         if (cfg.provider === was) cfg.provider = name
         for (const t of cfg.rotation?.then ?? []) if (t.provider === was) t.provider = name
+        // what's kept per model goes with it: the helpers, the tests, the track record
+        const rekey = (o) => {
+          for (const k of Object.keys(o ?? {})) if (k.startsWith(`${was}/`)) (o[`${name}/${k.slice(was.length + 1)}`] = o[k]), delete o[k]
+        }
+        rekey(cfg.helpers)
+        rekey(tests)
+        saveTests()
+        renameRecords(was, name)
       }
       cfg.providers[name] = { ...old, baseUrl, apiKey: key } // its list switch and added models stay
       if (!key) delete cfg.providers[name].apiKey
       forgetList(name, ...(was ? [was] : [])) // a new URL or key: its models asked for again
       save('model')
       forgetTests()
+      autoPick()
       return state()
     },
     'POST /api/provider/delete': ({ name }) => {
@@ -559,6 +580,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       }
       save('model')
       forgetTests()
+      autoPick()
       return state()
     },
     // a provider's models, and what's known about each (for the page's tooltip): what the provider
@@ -582,7 +604,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       if (!cfg.providers[name]) throw new Error(`no provider "${name}"`)
       if (on) delete cfg.providers[name].off
       else cfg.providers[name].off = true
-      save('provider')
+      save('model') // the running sessions' model lists follow at once
+      autoPick()
       return state()
     },
     // A model added by its name (one the provider doesn't list, or its list is off): remembered under
@@ -678,9 +701,6 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       save('setting:helpers')
       return { helpers: helpersOf(cfg.helpers), helpersAuto: false } // only these: the page saves a click at once, and the whole state of a long list takes seconds
     },
-    // the order helpers are picked in: 'score' (the default: best placed in LMArena's rankings first),
-    // 'own' (your list's) or 'provider' (your provider ranking's, each provider's in your list's order;
-    // rank: the ranking as the page has it, kept for HeartCode to use)
     // the model list, in order (#1 is the model), and when to go on to the next
     'POST /api/order': ({ list, on, retries, next }) => {
       if (!Array.isArray(list)) throw new Error('a list of models is needed')
@@ -752,11 +772,11 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     // a run: all your models, or the ones given (only); one at a time if one is going already
     'POST /api/tests/start': ({ only } = {}) => {
       if (run) throw new Error('a test is running: wait for it, or stop it')
-      const order = state().order
+      const order = orderOf()
       const mine = new Set(order.map((t) => `${t.provider}/${t.model}`))
       const list = Array.isArray(only) ? only.map((t) => ({ provider: String(t?.provider ?? ''), model: String(t?.model ?? '') })).filter((t) => mine.has(`${t.provider}/${t.model}`)) : order.map(({ provider, model }) => ({ provider, model }))
       if (!list.length) throw new Error('no model to test')
-      startRun(list, Array.isArray(only))
+      startRun(list, Array.isArray(only)).catch((e) => log('settings', `test run: ${e.message}`)) // a write that failed: logged, not an unhandled rejection in HeartCode
       return { run: { ...runState(), pending: [...run.pending] } }
     },
     'POST /api/tests/stop': () => {
@@ -765,7 +785,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     },
     'POST /api/models-dev': async ({ provider, model } = {}) => {
       await loadPrices({ force: true })
-      const list = provider && model ? [{ provider, model: String(model) }] : state().order.map(({ provider, model }) => ({ provider, model }))
+      const list = provider && model ? [{ provider, model: String(model) }] : orderOf()
       let found = 0
       for (const t of list) {
         const c = clientFor(t)
@@ -778,6 +798,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
         testNews(`${t.provider}/${t.model}`, t)
       }
       changed('profile')
+      autoPick() // picked for you: what models.dev says each can do counts
       return { ...state(), found, of: list.length }
     },
     // What a model can do, set by you (a model models.dev doesn't know, or to correct it): its
@@ -792,7 +813,12 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       for (const [k, v] of Object.entries({ tools, thinking, images, stream })) if (typeof v !== 'boolean') throw new Error(`${k}: yes or no`)
       await loadPrices()
       const p = loadProfile(c) ?? profileFrom(c, limitsOf(t.provider, c.baseUrl, t.model))
-      p.set = { ...(context ? { context } : {}), tools, thinking, images, stream }
+      // only what differs from models.dev is yours: the rest follows models.dev when it corrects itself
+      const said = p.known ?? {}
+      const as = { tools: said.tools !== false, thinking: Boolean(said.thinking), images: Boolean(said.images), stream: true }
+      p.set = Object.fromEntries(Object.entries({ tools, thinking, images, stream }).filter(([k, v]) => v !== as[k]))
+      if (context) p.set.context = context
+      if (!Object.keys(p.set).length) delete p.set
       if (p.source === 'assumed') p.source = 'you'
       writeJson(profilePath(c), p)
       changed('profile')
@@ -1125,7 +1151,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
 
   // Settings changed by anyone else (another HeartCode or page on this folder, a hand): taken in, and
   // every open page shown them at once (an event: the whole state, when it's different)
-  const SETTINGS_FILES = ['config.json', 'settings-page.json', 'mcp.json', 'hooks.json', 'keybindings.json', 'theme.json', 'format.json', 'HEARTCODE.md', 'prompts', 'skills']
+  const SETTINGS_FILES = ['config.json', 'settings-page.json', 'mcp.json', 'hooks.json', 'keybindings.json', 'theme.json', 'format.json', 'HEARTCODE.md', 'prompts', 'skills', 'records.json', 'rankings.json', 'models', 'model-tests.json'] // and what other runs learn (track records, rankings, models' profiles, tests)
   let shown = ''
   const pushState = () => {
     for (const what of new Set(takeIn(cfg).map(whatOf))) changed(what)
@@ -1139,6 +1165,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     const w = fs.watch(HOME, { recursive: true }, (_, f) => {
       if (!SETTINGS_FILES.includes(String(f ?? '').split(path.sep)[0])) return
       if (Date.now() - ownWrite < 1000 && ['config.json', 'settings-page.json'].includes(String(f))) return // written here a moment ago: the page has it
+      if (String(f) === 'model-tests.json') for (const [k, v] of Object.entries(readJson(TESTS_FILE, {}))) if (!(k in tests) && !gone.has(k)) tests[k] = v // another HeartCode's tests
       clearTimeout(pending)
       pending = setTimeout(pushState, 150) // a file written in parts, several at once: one look
     })
@@ -1188,20 +1215,22 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   return new Promise((resolve, reject) => {
     server.on('error', reject)
     forgetTests() // results of models no longer yours, left from before
-    server.listen(port, '0.0.0.0', () => {
+    // this machine only; over SSH, the address you reached it at too (the page holds your keys' settings,
+    // over plain HTTP: not offered to everyone on the network)
+    const ssh = process.env.SSH_CONNECTION?.split(' ')[2]
+    server.listen(port, ssh ? '0.0.0.0' : '127.0.0.1', () => {
       const at = (host) => `http://${host}:${server.address().port}/?t=${token}`
       const local = at('127.0.0.1') // for a browser on this machine
-      const ssh = process.env.SSH_CONNECTION?.split(' ')[2] // over SSH: the address you reached this machine at
-      const url = at((ssh?.includes(':') ? `[${ssh}]` : ssh) ?? addresses()[0] ?? '127.0.0.1') // else its network address when it has one: works from another device too
+      const url = ssh ? at(ssh.includes(':') ? `[${ssh}]` : ssh) : local
       log('web', `settings page at ${new URL(url).host}`)
       // models.dev's list (its sizes for your models, whether their providers' lists are on or not):
       // loaded now, and your models' lines brought up to date when it's in
       loadPrices().then(() => {
-        for (const t of state().order) testNews(`${t.provider}/${t.model}`, t)
-      test(state().order) // any without a profile yet
+        for (const t of orderOf()) testNews(`${t.provider}/${t.model}`, t)
+      test(orderOf()) // any without a profile yet
       warm()
       })
-      resolve({ url, local, server, close: () => (watcher?.close(), server.closeAllConnections?.(), server.close()) })
+      resolve({ url, local, server, close: () => (saving && (clearTimeout(saving), writeTests()), watcher?.close(), server.closeAllConnections?.(), server.close()) }) // a test result not written yet: written now
     })
   })
 }

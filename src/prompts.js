@@ -7,6 +7,7 @@
 //   {{name}}                              filled in from `vars`; a missing one is an error
 //   {{#if name}} … {{else}} … {{/if}}     optional parts (else is optional)
 //   <!-- … -->                             a note right under the heading; never sent
+import { trusted } from './trust.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -46,7 +47,7 @@ export function sections(text) {
 function load(file) {
   if (!cache.has(file)) {
     const merged = new Map()
-    for (const dir of [BUILTIN, path.join(HOME, 'prompts'), project && path.join(project, '.heartcode', 'prompts')]) {
+    for (const dir of [BUILTIN, path.join(HOME, 'prompts'), project && trusted(project) && path.join(project, '.heartcode', 'prompts')]) { // the folder's own: once you said yes to it (trust.js)
       if (!dir) continue
       try {
         for (const [k, v] of sections(fs.readFileSync(path.join(dir, `${file}.md`), 'utf8'))) merged.set(k, v)

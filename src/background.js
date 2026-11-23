@@ -3,6 +3,7 @@
 // background tool (and /background) reads what it printed since, waits on it, lists them, stops
 // one. Each runs in its own process group, its output going to a file; all of them are stopped when
 // HeartCode exits.
+import { guarded } from './guard.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -14,7 +15,7 @@ const DIR = path.join(HOME, 'outputs', 'background')
 const jobs = new Map() // id → { id, command, root, pid, file, started, code, read, exited }
 let made = 0
 
-const plain = (t) => t.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r(?!\n)/g, '\n')
+const plain = (t) => t.replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r(?!\n)/g, '\n').replace(/\x1b|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x9b]/g, '')
 const group = process.platform !== 'win32'
 const kill = (job, sig) => killTree(job.pid, sig, group)
 
@@ -24,7 +25,8 @@ export function startJob(root, command) {
   const id = ++made
   const file = path.join(DIR, `${process.pid}-${id}.log`)
   const fd = fs.openSync(file, 'w')
-  const child = spawn(command, { cwd: root, shell: true, detached: group, stdio: ['ignore', fd, fd], env: { ...process.env, CI: '1', FORCE_COLOR: '0', NO_COLOR: '1' } })
+  const safe = guarded(command, { ...process.env, CI: '1', FORCE_COLOR: '0', NO_COLOR: '1' }) // it can't stop HeartCode (guard.js)
+  const child = spawn(safe.command, { cwd: root, shell: true, detached: group, stdio: ['ignore', fd, fd], env: safe.env })
   fs.closeSync(fd)
   const job = { id, command, root, pid: child.pid, file, started: Date.now(), code: null, read: 0, exited: false, told: false }
   jobs.set(id, job)

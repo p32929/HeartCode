@@ -247,6 +247,17 @@ export function findImports(root, home = os.homedir()) {
 // one-file skill). Clones (git) or downloads a tarball, finds every SKILL.md, and copies each skill
 // folder into the skills dir (global by default). Returns a short summary; nothing existing is
 // overwritten. scope: "global" (~/.heart/skills) or "project" (.heartcode/skills).
+// a path whose real place (links followed) is inside dir
+const insideOf = (dir, p) => {
+  try {
+    const r = fs.realpathSync.native(p)
+    const d = fs.realpathSync.native(dir)
+    return r === d || r.startsWith(d + path.sep)
+  } catch {
+    return false
+  }
+}
+
 export async function installSkill(root, source, scope = 'global', { signal } = {}) {
   source = String(source ?? '').trim()
   if (!source) throw new Error('give a GitHub repo (user/repo or its URL) or a link to a SKILL.md')
@@ -279,7 +290,7 @@ export async function installSkill(root, source, scope = 'global', { signal } = 
         done.push(`${name} (already installed)`)
         continue
       }
-      fs.cpSync(dir, path.join(dest, name), { recursive: true, filter: (s) => !/[/\\]\.git([/\\]|$)/.test(s) })
+      fs.cpSync(dir, path.join(dest, name), { recursive: true, dereference: true, filter: (s) => !/[/\\]\.git([/\\]|$)/.test(s) && !(fs.lstatSync(s).isSymbolicLink() && !insideOf(dir, s)) }) // a link out of the skill: not copied (nor what it points to)
       done.push(name)
     }
     return `installed ${done.filter((d) => !d.includes('already')).length} of ${found.length} skill${found.length === 1 ? '' : 's'}: ${done.join(', ')}`

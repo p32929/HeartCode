@@ -9,6 +9,7 @@
 // list it gave the last time it ran (kept in ~/.heart/mcp-tools.json, with its instructions): so a
 // server starts the first time the model uses it, or once to say its tools; it stops when
 // HeartCode exits.
+import { trusted } from './trust.js'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -56,7 +57,7 @@ export function serverName(given, taken = []) {
 // (no built-in or configured servers), like Claude Code's --strict-mcp-config.
 export function loadServers(root, { extra = [], strict = false, includeDisabled = false } = {}) {
   const merged = strict ? {} : structuredClone(DEFAULT_SERVERS) // yours (below) win on a name
-  const own = strict ? [] : [path.join(HOME, 'mcp.json'), root && path.join(root, '.heartcode', 'mcp.json')].filter(Boolean).map((f) => readConfig(f, {}))
+  const own = strict ? [] : [path.join(HOME, 'mcp.json'), root && trusted(root) && path.join(root, '.heartcode', 'mcp.json')].filter(Boolean).map((f) => readConfig(f, {})) // the folder's own: once you said yes to it (trust.js)
   const given = extra.map((c) => {
     const data = /^\s*\{/.test(c) ? JSON.parse(c) : readJson(path.resolve(c), null)
     if (!data) throw new Error(`can't read the MCP config ${c}`)

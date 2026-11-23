@@ -10,6 +10,7 @@
 // tool_input, tool_response, prompt, stop_hook_active), runs in the project folder, and can also
 // answer with JSON on stdout: {"decision": "block", "reason": "…"} (or "continue": false).
 // Matchers are regexes, tested against HeartCode's tool names and Claude Code's (Edit, Bash, …).
+import { trusted } from './trust.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { HOME, readConfig } from './config.js'
@@ -21,7 +22,7 @@ export const EVENTS = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']
 // HeartCode's tool names → Claude Code's, for matchers and tool_input written for Claude Code.
 export const CLAUDE_NAMES = { read_file: 'Read', edit_file: 'Edit', write_file: 'Write', run_command: 'Bash', search: 'Grep', list_files: 'Glob', web_fetch: 'WebFetch', web_search: 'WebSearch', todo: 'TodoWrite', agent: 'Task' }
 
-export const hookFiles = (root) => [path.join(HOME, 'hooks.json'), path.join(root, '.heartcode', 'hooks.json')]
+export const hookFiles = (root) => [path.join(HOME, 'hooks.json'), ...(trusted(root) ? [path.join(root, '.heartcode', 'hooks.json')] : [])] // the folder's own: once you said yes to it (trust.js)
 
 // { event: [{ matcher, command, timeout, file }] }
 export function loadHooks(root) {

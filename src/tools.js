@@ -16,7 +16,9 @@ import { killTree } from './spawn.js'
 import { scoreOf } from './rankings.js'
 import { byRecord } from './record.js'
 import { family } from './client.js'
-import { webFetch, webSearch, fetchPage, pageView } from './web.js'
+import { guarded } from './guard.js'
+import { trusted, trust } from './trust.js'
+import { webFetch, webSearch, fetchPage, pageView, hostsIn } from './web.js'
 import { savePage, saveSearch, findResearch } from './research.js'
 import { runHooks } from './hooks.js'
 import { parsePatch, applyChunks } from './patch.js'
@@ -75,7 +77,23 @@ export function resolveIn(root, p, read = false) {
   if (trimmed !== abs && !fs.existsSync(abs) && fs.existsSync(trimmed)) abs = trimmed
   if (abs !== root && !abs.startsWith(root + path.sep)) abs = intoProject(root, clean) ?? abs
   if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error(`${clean} is outside the project; use a path relative to the project folder (${root}), like "index.html" or "src/app.js"`)
+  // where it really is: a link in the project (a repo can hold one to ~) doesn't take reads or writes out of it
+  const real = realOf(abs)
+  const top = realOf(root)
+  if (real !== top && !real.startsWith(top + path.sep) && !(read && readableOutside(real)) && !isSavedOutput(real)) throw new Error(`${clean} is a link to ${real}, outside the project: not read or written through it`)
   return abs
+}
+// a path whose real place is in the project
+const insideReal = (root, p) => ((r, top) => r === top || r.startsWith(top + path.sep))(realOf(p), realOf(root))
+// The real place a path points to, its links followed; the part that doesn't exist yet, as it is
+function realOf(p) {
+  for (let q = p; ; q = path.dirname(q)) {
+    try {
+      return path.join(fs.realpathSync.native(q), path.relative(q, p))
+    } catch {
+      if (q === path.dirname(q)) return p
+    }
+  }
 }
 
 // A small model's mangled copy of the project's long path, meant inside it: any path with the
@@ -257,6 +275,7 @@ export function searchFiles(root, query, sub = '', limit = 50) {
     searched++
     let buf
     try {
+      if (fs.lstatSync(path.resolve(root, f)).isSymbolicLink() && !insideReal(root, path.resolve(root, f))) continue // a link out of the project: not searched through
       buf = fs.readFileSync(path.resolve(root, f))
     } catch {
       continue
@@ -284,12 +303,13 @@ export function runCommand(root, cmd, { signal, timeout = 120_000, stdin, env, s
     let err = ''
     let done = false
     const group = process.platform !== 'win32'
-    const child = spawn(cmd, {
+    const safe = guarded(cmd, { ...process.env, CI: '1', FORCE_COLOR: '0', NO_COLOR: '1', ...env }) // it can't stop HeartCode (guard.js)
+    const child = spawn(safe.command, {
       cwd: root,
       shell: true,
       detached: group,
       stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-      env: { ...process.env, CI: '1', FORCE_COLOR: '0', NO_COLOR: '1', ...env },
+      env: safe.env,
     })
     if (stdin !== undefined) {
       child.stdin.on('error', () => {}) // a command that doesn't read its input
@@ -308,7 +328,7 @@ export function runCommand(root, cmd, { signal, timeout = 120_000, stdin, env, s
       setTimeout(() => kill('SIGKILL'), 2000).unref()
       child.stdout.destroy()
       child.stderr.destroy()
-      const plain = (t) => t.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+      const plain = (t) => t.replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x9b]/g, '') // no escape sequences (OSC 52, titles) for the model or the screen
       resolve({ code, output: (dropped ? '(the start of a very long output was left out: only its last 100,000 characters are here; the command itself was not affected)\n…' : '') + plain(out) + note, ...(split && { stderr: plain(err) }) })
     }
     let dropped = false // a very long output's start, left out (said, so it isn't read as the command failing)
@@ -443,17 +463,25 @@ const PLACEHOLDER = /(\.\.\.|…)\s*(rest|existing|remaining|unchanged|other)|re
 // model choice. A model never writes them (a small one once wrote its notes over this conversation).
 const OWN_DATA = /^\.heartcode\/(?:sessions|outputs|worktrees)(?:\/|$)|^\.heartcode\/models\.json$/
 
+// HeartCode's settings for this folder (hooks and MCP servers run commands, prompts steer it) and
+// git's (its hooks run commands): never written without asking, whatever the mode (a file or page
+// telling the model to write one would run its commands next time)
+const SETUP_FILES = /^(?:\.heartcode|\.git)(?:\/|$)/
+
 export async function proposeWrite(s, rel, old, next) {
   if (old === next) return { status: 'unchanged' }
-  if (OWN_DATA.test(path.relative(s.root, resolveIn(s.root, rel)).split(path.sep).join('/'))) return { status: 'rejected', feedback: `${rel} is HeartCode's own record (this conversation and its state), not a project file: it can't be written. Put what you write in the project's own files.` }
+  const where = path.relative(s.root, resolveIn(s.root, rel)).split(path.sep).join('/')
+  if (OWN_DATA.test(where)) return { status: 'rejected', feedback: `${rel} is HeartCode's own record (this conversation and its state), not a project file: it can't be written. Put what you write in the project's own files.` }
   if (s.ui.permission === 'plan') return { status: 'rejected', feedback: prompt('agent/plan-refused', { command: false }) } // both modes write through here
   if (s.ownFiles && !s.ownFiles.includes(path.resolve(s.root, rel))) return { status: 'rejected', feedback: prompt('agent/part-files', { file: rel, files: s.ownFiles.map((f) => path.relative(s.root, f)).join(', ') }) } // a part's helper: every way of writing (a patch in run_command, guided mode)
   const ops = diffLines(old, next ?? '')
   s.ui.print(renderDiff(ops, rel))
   if (next !== null && PLACEHOLDER.test(next) && !PLACEHOLDER.test(old)) s.ui.warn('the new content seems to contain a placeholder like "rest of code unchanged"')
-  const ok = await s.ui.confirm(next === null ? `Delete ${rel}?` : old ? `Apply this change to ${rel}?` : `Create ${rel}?`)
+  const setup = SETUP_FILES.test(where)
+  const ok = await s.ui.confirm(`${next === null ? `Delete ${rel}?` : old ? `Apply this change to ${rel}?` : `Create ${rel}?`}${setup ? ' (it sets up HeartCode or git here: it can run commands)' : ''}`, setup ? 'setup' : 'edit')
   log('write', rel, ok === true ? 'approved' : `rejected ${typeof ok === 'string' ? ok : ''}`)
   if (ok !== true) return { status: 'rejected', said: declined(s, ok, '') }
+  const wasTrusted = setup && trusted(s.root) // the folder's setup was yours: with this change you approved, still yours
   const abs = resolveIn(s.root, rel)
   s.track?.(rel, fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null) // for /rewind
   if (next === null) fs.rmSync(abs, { force: true })
@@ -461,6 +489,7 @@ export async function proposeWrite(s, rel, old, next) {
     fs.mkdirSync(path.dirname(abs), { recursive: true })
     fs.writeFileSync(abs, next)
   }
+  if (wasTrusted) trust(s.root)
   const add = ops.filter(([t]) => t === '+').length
   const del = ops.filter(([t]) => t === '-').length
   const res = { status: 'applied', summary: `+${add} -${del}`, diff: renderDiff(ops, rel, false, 2, 60), ops, text: next }
@@ -692,7 +721,7 @@ export const TOOL_DEFS = [
 // Plan mode (permission "plan"): looking around is fine, changing things isn't. Edits are refused,
 // and a command runs only when it only reads (else it's refused, not asked about).
 export const PLAN_HIDDEN = new Set(['edit_file', 'write_file', 'apply_patch'])
-const READ_ONLY = /^(cd|ls|cat|head|tail|wc|grep|egrep|rg|find|fd|tree|pwd|file|stat|du|df|which|type|echo|date|printenv|diff|cmp|sort|uniq|cut|jq|nl|basename|dirname|realpath|readlink|uname|whoami|(node|npm|python3?|go|cargo) --version|npm (ls|list|view|outdated)|git (status|log|diff|show|ls-files|blame|grep|describe|shortlog|rev-parse|config --get)|git (branch|tag|remote)( -[avlr]+| --list| -v)*$)\b/
+const READ_ONLY = /^(cd|ls|cat|head|tail|wc|grep|egrep|rg|find|fd|tree|pwd|file|stat|du|df|which|type|echo|date|diff|cmp|sort|uniq|cut|jq|nl|basename|dirname|realpath|readlink|uname|whoami|(node|npm|python3?|go|cargo) --version|npm (ls|list|view|outdated)|git (status|log|diff|show|ls-files|blame|grep|describe|shortlog|rev-parse|config --get)|git (branch|tag|remote)( -[avlr]+| --list| -v)*$)\b/
 // A command that went into a folder outside the project (a small model copying the project's long
 // path wrong, then lost in what it finds there): told where the project is.
 function outsideNote(root, cmd) {
@@ -703,7 +732,7 @@ function outsideNote(root, cmd) {
 
 export function readOnlyCommand(cmd) {
   const c = String(cmd).trim()
-  if (/[>`]|\$\(|<\(|\b(sudo|rm|mv|cp|tee|chmod|chown|dd|truncate|mkdir|touch|ln)\b|-delete\b|-exec|-ok\b|-fprint|-fls\b|--output\b|--pre\b|sed\s+-i|\bsort\b.*\s-o/.test(c)) return false // writes, or runs something else (git's --output, find's -fprint/-fls, rg's --pre)
+  if (/[>`]|\$\(|<\(|\b(sudo|rm|mv|cp|tee|chmod|chown|dd|truncate|mkdir|touch|ln)\b|-delete\b|-exec|-ok\b|-fprint|-fls\b|--output\b|--pre\b|sed\s+-i|\bsort\b.*\s-o|\s-O\S*|--open-files-in-pager|--ext-diff|--textconv|\s-c\s|\bprintenv\b|\benv\b/.test(c)) return false // writes, or runs something else (git's --output, find's -fprint/-fls, rg's --pre, git grep's -O<program>, git -c), or shows the environment (keys)
   return c.split(/\s*(?:&&|\|\||[;|&\n])\s*/).every((part) => READ_ONLY.test(part)) // `a & b`, a new line: each its own command
 }
 
@@ -1177,8 +1206,9 @@ async function webTool(s, name, args, signal) {
     return out
   }
   s.ui.spinner(`fetching ${clip(what, 60)}`)
-  if (!s.root || s.noResearch) return await webFetch(what, { start: args.start, signal }) // nothing kept (--no-memory)
-  const page = await fetchPage(what, { signal })
+  const allowed = hostsIn(s.task) // a local or private host you named: may be fetched
+  if (!s.root || s.noResearch) return await webFetch(what, { start: args.start, signal, allowed }) // nothing kept (--no-memory)
+  const page = await fetchPage(what, { signal, allowed })
   if (page.error) return `error: ${page.error}`
   const head = `${page.ok ? '' : `error: HTTP ${page.status}\n`}${page.url !== page.asked ? `(redirected to ${page.url})\n` : ''}`
   if (!page.ok || !page.text.trim()) return `${head}${page.text.slice(0, MAX_PAGE) || '(empty page)'}` // an error page isn't worth keeping
@@ -1188,7 +1218,7 @@ async function webTool(s, name, args, signal) {
   if (id && s.chat) (s.chat.outputs ??= {})[id] = file // its result, cut from the conversation later, points here
   log('research', `saved ${page.url} → ${file}`)
   // "start": the part from there on, as before (an older conversation's way of reading on)
-  if (Number(args.start) > 0) return `${head}${await webFetch(page.url, { start: args.start, signal })}\n\n(All of this page is saved in ${file}.)`
+  if (Number(args.start) > 0) return `${head}${await webFetch(page.url, { start: args.start, signal, allowed })}\n\n(All of this page is saved in ${file}.)`
   return `${head}${page.title ? `# ${page.title}\n` : ''}${page.url}\n\n${pageView(page.text, { lookFor: args.look_for, file, bodyLine })}`
 }
 const MAX_PAGE = 10_000
@@ -1371,6 +1401,11 @@ async function callMcp(s, server, tool, a, signal) {
     if (s.ui.permission === 'plan') return prompt('agent/plan-refused', { command: false }) // might change something
     const ok = await s.ui.confirm(`Use ${server.name} → ${tool}?`, 'command')
     if (ok !== true) return declined(s, ok, 'The user declined this call.')
+  } else if (s.ui.permission !== 'plan' && !(s.mcpRead ??= new Set()).has(`${server.name}\n${tool}`)) {
+    // it says it only reads: the server's word, so asked once a session (plan mode: taken, it's for looking)
+    const ok = await s.ui.confirm(`Use ${server.name} → ${tool}? (it says it only reads; not asked again this session)`, 'command')
+    if (ok !== true) return declined(s, ok, 'The user declined this call.')
+    s.mcpRead.add(`${server.name}\n${tool}`)
   }
   const done = await s.mcpGate?.() // a helper may be using the MCP servers (a browser): its turn first
   s.ui.spinner(`${server.name} · ${tool}`)

@@ -22,6 +22,7 @@ import { loadPrices, priceOf, addUsage, money, limitsOf } from '../src/usage.js'
 import { Mcp, mcpAuth, loadServers } from '../src/mcp.js'
 import { forget } from '../src/oauth.js'
 import { loadSkills, fillArgs, extraSkillDirs } from '../src/skills.js'
+import { trusted, trust, setupFiles, trustAll } from '../src/trust.js'
 import { HeadlessUI, runHeadless, toolNames, PERMISSION_MODES } from '../src/headless.js'
 import { findImports, installSkill } from '../src/importer.js'
 import { capabilities } from '../src/capabilities.js'
@@ -370,6 +371,7 @@ class App {
     // that line): the agent says it then (announceSwitch), else right after
     let switched = null
     client.announceSwitch = () => switched && (ui.print(switched), (switched = null))
+    client.onNotice = (text) => ui.print(c.faint(text))
     client.onSwitch = (t) => {
       const i = client.rotation.list.indexOf(t)
       const f = failed?.e
@@ -863,11 +865,17 @@ class App {
     // helpers use this session's models (the set you chose, else your list), minus the one in use —
     // so a pinned single model gives no team, and a chosen set keeps helpers within it
     const now = this.s?.client.rotation?.list[this.s.client.rotation.at] ?? this.sessionModels()[0]
+    // asked for several times a step (the system prompt, the tool list, helpers, reviews): built once
+    // in a moment for the same model (each build reads files and ranks every model)
+    const key = `${now?.provider}/${now?.model}`
+    if (this.teamMemo?.key === key && this.teamMemo.cfg === this.cfg && Date.now() - this.teamMemo.at < 2000) return this.teamMemo.list.slice()
     const tested = readJson(path.join(HOME, 'model-tests.json'), {}) // the settings page's tests
-    return this.sessionModels()
+    const list = this.sessionModels()
       .filter((t) => !(t.provider === now?.provider && t.model === now?.model))
       .map((t) => ({ ...t, ...this.abilities(t), jobs: jobsOf(this.cfg.helpers?.[`${t.provider}/${t.model}`]), ms: tested[`${t.provider}/${t.model}`]?.ms, price: priceOf(t.provider, this.cfg.providers[t.provider]?.baseUrl, t.model), auto: this.cfg.helpersAuto === true })) // price: models.dev's, $ per million tokens // jobs: ticked as a helper on Your models (what for); ms: how fast it answered its test; auto: helpers picked for you (a job goes to the fastest that's good at it)
       .sort(this.byScore()) // best-ranked first
+    this.teamMemo = { key, cfg: this.cfg, at: Date.now(), list }
+    return list.slice()
   }
 
   // Helpers in order: the best placed in LMArena's rankings first (its best share of a list: #5 of 200
@@ -1504,7 +1512,7 @@ async function slash(app, line, working = false) {
         close()
         settingsPage = null
       }
-      return ui.print(c.dim('settings page turned off'))
+      return ui.notice('Settings page turned off', 3000) // not a message: above the input, for a moment
     }
     case 'tab': {
       const { tabs } = app
@@ -1953,13 +1961,13 @@ async function repl(app, f = {}) {
   if (f.continue) {
     const last = listChats(app.root)[0]
     if (last) await app.resume(last)
-    else ui.print(c.dim('No earlier session in this folder to continue.'))
+    else ui.notice('No earlier session in this folder to continue', 6000)
   }
   if (f['resume-id']) await app.resume(loadChat(f['resume-id'], app.root))
   else if (f.resume) await app.resume()
   if (f.model) useModel(app, f.model) // a continued tab's own model
   // models this folder picked earlier (/select_model): said, with the way back to your whole list
-  if (app.folderModels && cfg.session?.length) ui.print(`${c.muted('this folder uses')} ${c.cyan(cfg.session.map((t) => t.model).join(', '))} ${c.faint(`(picked earlier) · ${c.cyan('/select_model auto')} for the whole list again`)}`)
+  if (app.folderModels && cfg.session?.length) ui.notice(`This folder uses ${cfg.session.map((t) => t.model).join(', ')} (picked earlier) · /select_model auto for the whole list again`, 10000) // not a message
   app.tabs?.onChange?.() // the conversation it opened with
   // a newer HeartCode: asked of npm in the background at every start, said once and kept in the status bar
   if (cfg.updateCheck !== false)
@@ -1967,10 +1975,20 @@ async function repl(app, f = {}) {
       .then((u) => {
         if (!u?.newer) return
         app.update = u
-        ui.print(`${c.green('⬆')} ${c.muted('HeartCode')} ${c.green(u.latest)} ${c.muted(`is out (this is ${u.current})`)} ${c.faint('·')} ${c.cyan('/update')}`)
+        ui.notice(`HeartCode ${u.latest} is out (this is ${u.current}) · /update`, 10000) // and in the status bar
         ui.render?.()
       })
       .catch(() => {})
+  // this folder's own setup (a cloned repo's hooks and MCP servers run commands): used once you say so
+  if (!trusted(app.root)) {
+    const files = setupFiles(app.root)
+    const yes = await ui.pick(`This folder has its own HeartCode setup (${files.join(', ')}). Its hooks and MCP servers run commands on this computer. Use it?`, [
+      { label: 'Yes, use it', desc: 'for these files as they are now; asked again if they change', use: true },
+      { label: 'No', desc: 'HeartCode works here without them' },
+    ])
+    if (yes?.use) trust(app.root), reloadPrompts()
+    else ui.notice(`This folder's own setup isn't used (${files.join(', ')}); you're asked again next time`, 8000)
+  }
   for (;;) {
     // the first start: whether to be told when a task finishes (once, in one tab); once there's a model
     // to work with (not over the "set up a model" screen)
@@ -2160,9 +2178,11 @@ async function main() {
       return apps[apps.push(app) - 1]
     }
     watchSettings(() => apps, cfg) // the settings page's changes, into every editor session
+    trustAll.on = true // an editor: its own workspace trust decides
     process.exit(await runAcp({ makeApp, version: VERSION, permission: f['permission-mode'] ? PERMISSION_MODES[f['permission-mode']] : (cfg.permissions ?? 'ask') }))
   }
   const headless = f.print || f['output-format'] || f['input-format'] === 'stream-json'
+  if (headless) trustAll.on = true // -p: the folder's own setup is used, as it is (whoever runs it chose the folder)
   if (f['max-retries'] !== undefined || headless) cfg.maxRetries = Number(f['max-retries'] ?? 10) // nobody is there to press Esc
   if (f['max-turns']) cfg.maxTurns = Number(f['max-turns'])
   // A UI and an App on it (one per tab; io: the tab's input and output).
@@ -2271,8 +2291,15 @@ async function main() {
 }
 
 let activeUI = null
+// A bug in HeartCode itself: logged and said, and HeartCode goes on (the conversation, the work, the
+// screen stay); only before the screen is up does it stop.
 process.on('uncaughtException', (e) => {
   log('crash', e.stack)
+  if (activeUI?.full) {
+    try {
+      return activeUI.warn(`HeartCode hit an error of its own and carried on: ${e.message} (the whole of it is in the errors log)`)
+    } catch {}
+  }
   activeUI?.close()
   console.error(`${c.red('crash:')} ${e.stack}`)
   process.exit(1)

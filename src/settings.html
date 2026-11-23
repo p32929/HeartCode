@@ -1736,7 +1736,7 @@ $('pick-shown').onchange = (e) => {
 $('p-mine').onclick = () => (location.hash = 'models')
 // models.dev fetched again (your models' profiles too), then every listed provider's models with it
 $('dev-all').onclick = async () => {
-  if (!(await lookUp())) return
+  if (!(await lookUp(null, { models: true }))) return // models.dev only: no rankings, no helpers marked
   S?.providers.filter((p) => p.list).forEach((p) => loadModels(p.name, true))
 }
 $('m-search').oninput = (e) => ((modelQuery = e.target.value), (searchOpen = true), S && drawProviders(S), applyFolds())
@@ -1774,7 +1774,7 @@ const MEANS = {
 }
 // What a test came to, in a word: works, its status code (402, 429…), empty, no answer or failed;
 // null while it runs or before it's tested
-const outcome = (r) => (!r || r.going ? null : r.ok ? 'works' : r.status ? String(r.status) : /nothing/.test(r.error) ? 'empty' : /within/.test(r.error) ? 'no answer' : 'failed')
+const outcome = (r) => (!r || r.going ? null : r.ok ? 'works' : r.status ? String(r.status) : r.kind === 'empty' || (!r.kind && /nothing/.test(r.error)) ? 'empty' : r.kind === 'timeout' || (!r.kind && /within/.test(r.error)) ? 'no answer' : 'failed') // kind: said by the server (older results: their words)
 // The Works? cell: the last result (cut short, all of it on hover) and Test.
 function triedCell(t) {
   const r = TRIES[keyOf(t)]
@@ -1805,11 +1805,6 @@ for (const ev of ['pointerup', 'pointercancel']) addEventListener(ev, () => {
   if (drawAfterPress) (drawAfterPress = false), setTimeout(mineSoon, 0) // after the click it finishes
 }, true)
 let drawAfterPress = false
-addEventListener('pointerdown', () => (pressed = true), true)
-for (const ev of ['pointerup', 'pointercancel']) addEventListener(ev, () => {
-  pressed = false
-  if (drawAfterPress) (drawAfterPress = false), setTimeout(mineSoon, 0) // after the click it finishes
-}, true)
 const mineSoon = () => {
   if (mineFrame) return
   const later = testingAll ? Math.max(0, mineLast + 400 - Date.now()) : 0
@@ -1861,7 +1856,8 @@ function showRun(run) {
     job('test-all')
     if (run?.over && afterTests) {
       afterTests = null
-      setAuto(true, $('h-auto'))
+      if (working()) setAuto(true, $('h-auto'))
+      else toast('none of them answered: no helpers picked (Works? says why, on hover)', true) // not the dialog again
     } else if (!run?.over) afterTests = null // never started
     if (run?.over) toast(`${run.stopping ? `stopped after ${run.done} of ${run.total}: ` : ''}${run.good} of ${run.done} work${run.good === run.done ? '' : `; ${run.done - run.good} don't (Works? says why, on hover)`}`, run.good < run.done)
   } else
@@ -1877,15 +1873,17 @@ function showRun(run) {
 
 // models.dev looked up again: one model (its Retry), or all of yours with their rankings (Update model info)
 const retry = (t) => h('button', { className: 'small', textContent: 'Retry', title: 'look it up in models.dev again', onclick: (e) => (e.stopPropagation(), lookUp(t)) })
-async function lookUp(t) {
-  job('models.dev', { where: ['catalog', 'table'], what: t ? `Looking up ${t.model} in models.dev` : 'Updating the models: models.dev and LMArena', detail: t ? 'context, tool calls, thinking, images' : 'context, tool calls, thinking, images, price; scores' })
+// models: all of them, from models.dev only (the Providers page's button)
+async function lookUp(t, { models = false } = {}) {
+  const full = !t && !models // Update model info: rankings too, and helpers marked
+  job('models.dev', { where: ['catalog', 'table'], what: t ? `Looking up ${t.model} in models.dev` : full ? 'Updating the models: models.dev and LMArena' : 'Getting the models from models.dev', detail: full ? 'context, tool calls, thinking, images, price; scores' : 'context, tool calls, thinking, images' })
   if (!t) (lookingUp = true), mineSoon()
-  const [r, scored] = await Promise.all([act('/api/models-dev', t ? { provider: t.provider, model: t.model } : {}), t ? null : act('/api/rankings', {})])
+  const [r, scored] = await Promise.all([act('/api/models-dev', t ? { provider: t.provider, model: t.model } : {}), full ? act('/api/rankings', {}) : null])
   if (!t) (lookingUp = false), mineSoon()
   job('models.dev')
   // all of them: the helpers marked from what's known now (Automatic: picked again by the server;
   // My picks: added to yours, what you picked stays)
-  const marked = !t && r && !S.helpersAuto ? await api('/api/helpers/mark', {}).catch((e) => (toast(e.message, true), null)) : null
+  const marked = full && r && !S.helpersAuto ? await api('/api/helpers/mark', {}).catch((e) => (toast(e.message, true), null)) : null
   if (marked) Object.assign(S, { helpers: marked.helpers, helpersAuto: marked.helpersAuto }), drawMine(S)
   if (r) toast(t ? (r.found ? `${t.model}: found in models.dev` : `${t.model}: still not in models.dev`) : `models.dev: ${r.found} of ${r.of} found${scored ? ' · rankings updated' : ''}${marked?.marked ? ` · ${marked.marked} model${marked.marked === 1 ? '' : 's'} marked as helpers` : ''}`)
   return r
@@ -2631,8 +2629,8 @@ function drawMine(s) {
   // about: its tooltip, in plain words (the label is its first line)
   const cell = (icon, label, about, ...control) => h('label', { className: 'mt-set', title: `${label}\n${about}` }, h('span', { className: 'mt-setl' }, ic(icon), h('span', { className: 'lt', textContent: label })), h('span', { className: 'mt-setc' }, ...control))
   // a whole number setting (seconds), with its limits from the server (SPEED_LIMITS)
-  const LIMITS = { replyStart: [5, 600], replyIdle: [10, 1800] }
-  // a time limit saved; the ones that depend on it (Give up, Stalled, Tests wait) may move to fit: said
+  const LIMITS = s.limits
+  // a time limit saved; the one that depends on it (Give up, Stalled) may move to fit: said
   // for longer, and the boxes that moved flash
   const saveTime = async (name, v, said) => {
     const r = await act('/api/setting', { name, value: v })
@@ -2654,9 +2652,9 @@ function drawMine(s) {
         h('select', { onchange: (e) => saveOrder(S.order, 'saved', { on: e.target.value }) },
           [['failure', 'switch model'], ['retries', 'retry it first']].map(([v, t]) => h('option', { value: v, textContent: t, selected: ro.on === v }))),
         ro.on === 'retries' ? h('input', { type: 'number', className: 'tries', 'aria-label': 'tries', title: 'Tries\nHow many times in all the same model is tried when it\'s busy or briefly down, before another model takes over.', min: 1, max: 20, value: ro.retries, onchange: (e) => saveOrder(S.order, 'saved', { retries: Number(e.target.value) }) }) : null),
-      secsCell('clock', 'Give up', 'replyStart', "How long a model gets to start answering.\n\nAfter HeartCode asks, the first word, thought or tool call must come within this many seconds. If nothing comes, the model counts as failed and another one takes over.\n\nRaise it if your providers are slow but do answer (fewer switches). Lower it to move on faster from models that hang.\nStalled and Tests wait are never shorter than this: they move up with it.", 's', (v) => `a model that hasn't started answering in ${v}s counts as failed`),
+      secsCell('clock', 'Give up', 'replyStart', "How long a model gets to start answering.\n\nAfter HeartCode asks, the first word, thought or tool call must come within this many seconds. If nothing comes, the model counts as failed and another one takes over.\n\nRaise it if your providers are slow but do answer (fewer switches). Lower it to move on faster from models that hang.\nStalled is never shorter than this: it moves up with it.", 's', (v) => `a model that hasn't started answering in ${v}s counts as failed`),
       secsCell('pause', 'Stalled', 'replyIdle', "How long a reply may go quiet once it has started.\n\nA model that keeps sending (text or thinking) is never cut off, however long it takes. One that sends nothing at all for this many seconds counts as stalled: it's asked again, or another model takes over.\n\nAt least as long as Give up (a pause mid-reply has the same causes as a slow start).", 's', (v) => `a reply silent for ${v}s counts as stalled`),
-      cell('hourglass', 'Tests wait', "Only for the Test buttons on this page, not for real work.\n\nHow long each model gets to answer a short test message. No answer by then shows as \"no answer\" in Works?.\n\nAt least as long as Give up, so a test doesn't call a model broken that real work would still wait for.",
+      cell('hourglass', 'Tests wait', "Only for the Test buttons on this page, not for real work.\n\nHow long each model gets to answer a short test message. No answer by then shows as \"no answer\" in Works?.\n\nShorter than Give up: a slow model may show "no answer" here and still work in real use.",
         h('input', { type: 'number', className: 'tries', 'data-name': 'testTimeout', min: 1, max: 600, step: 1, value: S.settings.testTimeout, 'aria-label': 'Test timeout in seconds', onchange: (e) => {
           const v = Math.round(Number(e.target.value))
           if (!(v >= 1 && v <= 600)) return (e.target.value = S.settings.testTimeout), toast('a whole number of seconds, 1 to 600', true)
@@ -2848,13 +2846,14 @@ const working = () => S.order.filter((t) => TRIES[keyOf(t)]?.ok && !TRIES[keyOf(
 let afterTests = null
 function testFirst() {
   const n = (x) => x.toLocaleString()
-  const paid = S.order.filter((t) => t.price && (t.price.input > 0 || t.price.output > 0)).length
-  const unknown = S.order.filter((t) => !t.price).length
-  $('h-test-cost').textContent = `Test all sends each of the ${n(S.order.length)} models a short message. ${paid ? `${n(paid)} of them aren't free: each charges for its few tokens. ` : ''}${unknown ? `${n(unknown)} have no price we know of, and may charge too. ` : ''}When it's done, helpers are picked from the ones that worked.`
+  const order = shownOrder() // as Test all: a provider switched off isn't tested
+  const paid = order.filter((t) => t.price && (t.price.input > 0 || t.price.output > 0)).length
+  const unknown = order.filter((t) => !t.price).length
+  $('h-test-cost').textContent = `Test all sends each of the ${n(order.length)} models a short message. ${paid ? `${n(paid)} of them aren't free: each charges for its few tokens. ` : ''}${unknown ? `${n(unknown)} have no price we know of, and may charge too. ` : ''}When it's done, helpers are picked from the ones that worked.`
   $('h-test-go').onclick = () => {
     $('h-test').close()
     afterTests = 'auto'
-    tryAll(S.order)
+    tryAll(order)
   }
   $('h-test-no').onclick = () => $('h-test').close()
   $('h-test').showModal()
@@ -3747,7 +3746,7 @@ function sbSave() {
 function render(s) {
   $('version').textContent = s.version ? `v${s.version}` : ''
   $('update-note').hidden = !s.update
-  if (s.update) $('update-note').innerHTML = `⬆ <b>${s.update}</b> is out · type <code>/update</code> in HeartCode`
+  if (s.update) $('update-note').replaceChildren('⬆ ', h('b', { textContent: s.update }), ' is out · type ', h('code', { textContent: '/update' }), ' in HeartCode') // the registry's text: never as HTML
   if (s.prefs) {
     // the page's choices, as kept (also changed on another page: shown here too)
     const p = s.prefs

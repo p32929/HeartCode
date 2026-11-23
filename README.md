@@ -135,9 +135,9 @@ heart
 
 ### 3. Open the settings page
 
-Type `/settings`. The page opens in your browser. Its link also works from another device on your
-network (handy when HeartCode runs on a server over SSH). Only that link works: it has a secret
-key. A running HeartCode picks up your changes right away.
+Type `/settings`. The page opens in your browser. It's served to this machine only; when HeartCode
+runs over SSH, its link uses the address you reached the server at, so it opens on your own
+computer. Only that link works: it has a secret key. A running HeartCode picks up your changes right away.
 
 <img width="1920" height="1083" alt="Image" src="https://github.com/user-attachments/assets/b51c5884-1da3-4fc9-9a0c-de119d8bb15e" />
 

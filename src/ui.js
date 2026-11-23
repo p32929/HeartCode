@@ -428,6 +428,10 @@ export function wrapParts(line, cols, sep = ' · ') {
 // steps of these kinds in a row are one entry: [verb, one, many, while running]
 const ONE = { lines: 'line', matches: 'match', entries: 'entry', results: 'result', files: 'file' }
 const GROUPS = { read_file: ['Read', 'file', 'files', 'reading'], search: ['Searched', 'time', 'times', 'searching'], list_files: ['Listed', 'folder', 'folders', 'listing'], web_fetch: ['Fetched', 'page', 'pages', 'fetching'], web_search: ['Searched the web', 'time', 'times', 'searching'] }
+// Text for the screen: colors (SGR) only. Every other escape sequence and control character goes: an
+// OSC 52 in a file the model printed would set your clipboard, a title or a link could hide a URL,
+// cursor moves could draw over the screen.
+export const safeText = (t) => String(t).replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '').replace(/\x1b(?!\[[0-9;]*m)|[\x00-\x08\x0b\x0c\x0e-\x1a\x1c-\x1f\x7f\x9b]/g, '')
 export const STEP_NAMES = { read_file: 'Read', write_file: 'Write', edit_file: 'Edit', run: 'Run', run_command: 'Run', 'run in background': 'Run in background', search: 'Search', list_files: 'List', web_fetch: 'Fetch', web_search: 'Web search', todo: 'Plan', agent: 'Helper', ask_user: 'Ask', changes: 'Changes', find_command: 'Find command', lsp: 'Code check', mcp: 'Tool', memory: 'Memory', skill: 'Skill', background: 'Background', done: 'Done' }
 
 const short = (ms) => {
@@ -2023,6 +2027,7 @@ export class UI {
   // A one-line message just above the input until `ms` pass or a key is pressed ('' hides it).
   // mark: what goes before it ('!' a warning; '' none, for a state like voice listening)
   notice(text, ms = 2000, mark = '') {
+    if (!this.full) return text && this.out.isTTY && this.print(c.dim(text)) // no screen of its own (a plain terminal): a line, as before
     this.noticeText = text
     this.noticeMark = mark
     clearTimeout(this.noticeTimer)
@@ -2281,7 +2286,7 @@ export class UI {
   async confirm(question, kind = 'edit') {
     if (kind === 'read' && this.permission === 'plan') return true
     const mode = this.permission === 'plan' ? (this.beforePlan ?? 'ask') : this.permission
-    if (mode === 'all' || (mode === 'commands' && kind === 'edit')) return true
+    if (kind !== 'setup' && (mode === 'all' || (mode === 'commands' && kind === 'edit'))) return true // setup: always asked (tools.js SETUP_FILES)
     if (this.full) {
       this.askAbout = true // the dialog shows what it's about (the diff, the command) above the choices
       try {
@@ -2315,6 +2320,7 @@ export class UI {
   write(s) {
     if (!this.full) this.stopSpin() // inline, the spinner shares the line; full screen it has its own row
     if (!s) return
+    s = safeText(s) // what a file, a page, a command or the model wrote can't drive the terminal
     this.tail = (this.tail + s.replace(/\x1b\[[0-9;]*m/g, '')).slice(-2)
     if (!this.full) return this.out.write(s)
     // The screen draws each line on its own, so a style still open at a line break is reopened
@@ -2342,12 +2348,11 @@ export class UI {
   unmark(m, title) {
     if (this.log !== m.log || this.log.length <= m.at || !this.log[m.at].startsWith(m.base)) return this.render()
     const text = [this.log[m.at].slice(m.base.length), ...this.log.slice(m.at + 1)].join('\n').replace(/^(\s*\n)+|\s+$/g, '')
-    if (!text.includes('\n') && !this.dialog) return this.render() // one line: it stays where it was printed
     this.log.length = m.at + 1
     this.log[m.at] = m.base
     Object.assign(this, { tail: m.tail, sgr: m.sgr })
     const lines = text ? text.split('\n') : []
-    if (lines.length === 1 || (lines.length && this.dialog)) this.notice(lines[0], 4000, '›')
+    if (lines.length === 1 || (lines.length && this.dialog)) this.notice(lines[0], 8000, '›') // a command's answer isn't the conversation's: above the input until a key
     else if (lines.length) this.showText(title, text, title)
     else this.render()
   }

@@ -113,6 +113,8 @@ export function readSkillFile(k, file) {
   const abs = path.resolve(dir, file)
   if (path.basename(k.file) !== 'SKILL.md' || !abs.startsWith(dir + path.sep)) return `error: the ${k.name} skill has no file "${file}"`
   try {
+    const real = fs.realpathSync.native(abs)
+    if (!real.startsWith(fs.realpathSync.native(dir) + path.sep)) return `error: ${file} in the ${k.name} skill is a link out of it: not read` // a link to ~/.ssh
     return fs.readFileSync(abs, 'utf8')
   } catch {
     return `error: the ${k.name} skill has no file "${file}". Its files: ${skillFiles(k).join(', ') || 'none'}`

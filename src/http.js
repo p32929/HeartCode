@@ -21,7 +21,7 @@ const ACCEPT = Object.keys(DECODE).filter((k) => k !== 'x-gzip').join(', ')
 const NO_BODY = new Set([101, 103, 204, 205, 304])
 
 export async function fetch(input, init = {}) {
-  const { signal, redirect = 'follow' } = init
+  const { signal, redirect = 'follow', guard } = init // guard(url): checks each place it goes (a redirect too); throws to refuse
   // the body and headers as fetch would send them (a string, JSON, form data, URLSearchParams, a Blob…)
   const asked = new Request(input, { method: init.method, headers: init.headers, body: init.body, duplex: 'half' })
   let url = new URL(asked.url)
@@ -31,6 +31,7 @@ export async function fetch(input, init = {}) {
   let body = asked.body ? Buffer.from(await asked.arrayBuffer()) : null
   for (let hops = 0; ; hops++) {
     signal?.throwIfAborted()
+    if (guard) await guard(url)
     const res = await send(url, method, body ? { ...headers, 'content-length': String(body.length) } : headers, body, signal)
     const to = res.headers.location
     if (redirect === 'manual' || ![301, 302, 303, 307, 308].includes(res.statusCode) || !to) return respond(res, url, hops > 0, signal)
@@ -44,7 +45,8 @@ export async function fetch(input, init = {}) {
       body = null
       for (const h of ['content-type', 'content-length']) delete headers[h]
     }
-    if (next.origin !== url.origin) delete headers.authorization // a key isn't handed to another site
+    // another site: only the plain headers go with it (no key, no token, no custom header)
+    if (next.origin !== url.origin) for (const h of Object.keys(headers)) if (!['accept', 'accept-encoding', 'accept-language', 'user-agent', 'content-type'].includes(h.toLowerCase())) delete headers[h]
     url = next
   }
 }

@@ -67,7 +67,7 @@ export async function rankings({ signal, onWait, now = false } = {}) {
 // A name as words: "models/gemini-3.6-flash" and "Gemini 3.6 Flash (High)" are both "gemini 3 6 flash"
 const DROP = new Set(['latest', 'preview', 'free', 'it', 'instruct', 'exp', 'chat'])
 const WORDS = new Map() // name → its words: thousands of models are matched against hundreds of entries, each parsed once
-export const words = (name) => {
+const words = (name) => {
   const k = String(name)
   if (!WORDS.has(k)) WORDS.set(k, toWords(k))
   return WORDS.get(k)
@@ -85,20 +85,30 @@ const toWords = (name) =>
 // Where a model stands in a list, 0 (best) to 1 (last); null when it isn't in it. Its entry: the
 // same words, or those followed only by its size ("nemotron 3 super" = "Nemotron 3 Super 120B A12B"),
 // maybe after the maker's name; of several (High, Low…), the best.
-export function place(model, list) {
+function place(model, list) {
   const mine = words(model)
   if (!mine.length || !list?.length) return null
-  const size = /^(\d+|[abmkt])$/
+  // only a size after it ("120 b", "a 12 b"): a number with its unit, never a bare one ("gpt 5" isn't "GPT-5.1")
+  const sizes = (rest) => rest.every((w, i) => /^[abmkt]$/.test(w) || (/^\d+$/.test(w) && /^[bmkt]$/.test(rest[i + 1] ?? '')))
   const at = list.filter((e) => {
     const theirs = words(e.name)
     // from their first word, or their second (a maker's name first: "NVIDIA-Nemotron-3-Super-120B-A12B")
-    return [0, 1].some((from) => theirs.length >= from + mine.length && mine.every((w, i) => theirs[from + i] === w) && theirs.slice(from + mine.length).every((w) => size.test(w)))
+    return [0, 1].some((from) => theirs.length >= from + mine.length && mine.every((w, i) => theirs[from + i] === w) && sizes(theirs.slice(from + mine.length)))
   })
   return at.length ? Math.min(...at.map((e) => e.rank)) / list.length : null
 }
 
 // A model's place in one list ('text:coding'…), for showing: { rank, of, as, score, votes } (as: its name there); null when not in it
+// looked up once per rankings loaded (the settings page asks for every model, in every list, often)
+const seen = new WeakMap()
 export function rankIn(model, key, data) {
+  if (!data) return null
+  const memo = seen.get(data) ?? seen.set(data, new Map()).get(data)
+  const k = `${key}\n${model}`
+  if (!memo.has(k)) memo.set(k, lookUpRank(model, key, data))
+  return memo.get(k)
+}
+function lookUpRank(model, key, data) {
   const list = data?.lists[key]
   const at = list?.filter((e) => place(model, [e]) != null)
   if (!at?.length) return null

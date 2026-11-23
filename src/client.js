@@ -297,7 +297,10 @@ export class Client {
     if (!r || r.next !== 'first') return
     const i = Math.max(0, r.list.findIndex((t) => !unreliable(t)))
     if (r.at !== i) {
-      if (i) log('rotate', `${r.list[0].model} failed most of its recent work (its track record): this message starts with ${r.list[i].model}`)
+      if (i) {
+        log('rotate', `${r.list[0].model} failed most of its recent work (its track record): this message starts with ${r.list[i].model}`)
+        this.onNotice?.(`↻ ${r.list[i].model} starts this message · ${r.list[0].model} failed most of its recent work here`) // your order skipped: said, not hidden in a log
+      }
       this.#use(r.list[(r.at = i)])
     }
   }
@@ -495,6 +498,7 @@ export class Client {
     let rounds = 0 // whole rounds of the list that failed
     const tried = new Set() // places in the model list tried for this request
     const down = new Set() // providers that answered it with an error (400 or above): their other models are skipped
+    const blamed = new Set() // models already given a "no-answer" for this request
     for (let attempt = 0; ; attempt++) {
       // The list moved on to a model whose window can't hold this request (a smaller one): not sent
       // to it as it is; the caller compacts the conversation for that model, then sends it (fit: the
@@ -511,7 +515,10 @@ export class Client {
       } catch (e) {
         if (e.name === 'AbortError' || opts.signal?.aborted) throw e
         this.onFail?.(e, { provider: this.provider, model: this.model }) // what it says is learned (a stated limit)
-        if (e.status !== 429) record({ provider: this.provider, model: this.model }, 'no-answer') // its track record: didn't answer, refused the key, needs a paid plan… (a rate limit passes)
+        // its track record: refused the key, no such model, a bad request… once per request; an outage
+        // (no connection, a timeout, a server error, a rate limit) isn't the model's doing
+        const who = `${this.provider}/${this.model}`
+        if (!outage(e) && !blamed.has(who)) blamed.add(who), record({ provider: this.provider, model: this.model }, 'no-answer')
         // With a list of models, any failure makes way for the next one (another provider's first).
         // Without one, only what waiting can fix is tried again.
         if (!(this.rotation?.list.length > 1) && !outage(e)) throw e
@@ -748,9 +755,11 @@ export class Client {
         if (chunk.usage) usage = chunk.usage
         const ch = chunk.choices?.[0]
         if (!ch) continue
-        started() // it answers (a keep-alive or an empty frame doesn't get here)
         if (ch.finish_reason) finishReason = ch.finish_reason
         const d = ch.delta ?? ch.message ?? {} // some proxies send the whole message in a chunk
+        // it answers: words, thinking, a tool call or the end (a first chunk with only its role, sent
+        // before it queues the request, isn't an answer yet; nor a keep-alive)
+        if (ch.finish_reason || d.content?.length || d.reasoning_content || d.reasoning || d.thinking || d.tool_calls?.length) started()
         this.#reasoningField(d)
         if (Array.isArray(d.content)) d.content = textOf(d.content)
         const r = d.reasoning_content || d.reasoning || d.thinking

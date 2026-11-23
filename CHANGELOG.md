@@ -2,6 +2,67 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.72 (2026-11-23)
+
+- **A command can't stop HeartCode** (macOS, Linux): `kill`, `pkill` and `killall` in the commands it
+  runs (in nested sh, bash and zsh too) leave out HeartCode and the programs it runs in, and refuse
+  "every process" (`kill -1`); everything else is stopped as asked. Freeing a port with
+  `lsof -ti :9880 | xargs kill -9` killed HeartCode itself, as it had a connection to that port.
+  The model is told to stop a server by its own PID, never by broad matches.
+- **An error in HeartCode's own code no longer quits it**: it's said and logged, and it goes on.
+- **Security**:
+  - A folder's own HeartCode setup (`.heartcode/hooks.json`, `mcp.json`, `prompts/`) is used only
+    once you say yes to it for that folder (asked again when those files change); a cloned repo's
+    hooks no longer run at your first message. `-p` and editors (ACP) use it as before.
+  - The model can't write `.heartcode/` or `.git/` files without asking, in any mode (their hooks
+    run commands).
+  - Files are never read or written through a link that points outside the project; search skips
+    such links; installed skills don't keep links out of their folder.
+  - Command output, files, pages and model text can't send escape sequences to your terminal
+    (setting the clipboard, the title, links, cursor moves): colors only.
+  - `web_fetch` doesn't reach the local network or a cloud machine's metadata address unless your
+    message names that host (this computer's own servers still work), checked on every redirect.
+  - Plan mode's "read-only" commands can't run a program (`git grep -O`, `git -c`, `--ext-diff`)
+    or print the environment.
+  - An MCP tool that says it only reads is asked about once a session.
+  - The settings page is served to this machine only (over SSH: at the address you reached it
+    at); a newer version's number can't inject HTML into it; custom headers aren't sent to
+    another site on a redirect.
+- **Tests wait no longer shortens Give up**: lowering how long the Test buttons wait (say to 7 s)
+  pulled down how long real work waits for a model to start answering too. They're separate now.
+- **Only messages in the conversation**: a command's one-line answer (`/cost`…), "settings page
+  turned off", "a newer HeartCode is out", "this folder uses…" show above the input for a moment
+  (any key clears them), not in the conversation.
+- **Outages don't ruin track records**: no connection, a timeout, a server error or a rate limit isn't
+  counted against a model, and a real failure counts once per request (it was every retry, so a
+  minute offline marked every model unreliable for days).
+- **Normal answers aren't taken for problems**: "Let me know if you want me to add tests", "I can't
+  see any errors", "I couldn't find tests, so I added some" no longer send the task back or hand it to
+  another model.
+- **The answer after "is every part done?" is checked like any** (open plan steps, unchecked
+  changes, the review), and the same answer again isn't printed twice.
+- **The system prompt is built once a message** (and again when another model answers), not every
+  step: a provider's cache of the conversation keeps working.
+- **The system prompt says to call done** before the final answer (one round trip less per task);
+  once said, done stands after a send-back.
+- **Rankings match the right version**: `gpt-5` is no longer ranked as GPT-5.1, `qwen3` as Qwen3.5.
+- **Lessons only from real failures** (a non-zero exit), on a client of their own, and none when
+  there's nothing to learn.
+- A skipped #1 model is said on screen; a failed review counts against the model that made the
+  changes; a helper with no known job isn't one.
+- **Settings page**: switching a provider off reaches the running session at once; renaming one
+  keeps its helpers, tests and track record (and can't overwrite another); Automatic helpers are
+  picked again after models.dev, provider changes and deletes; a hung tool test is a fail, and a
+  model whose tool test failed gets no code or hard jobs; the setup dialog keeps only what you
+  changed; Providers' models.dev button doesn't fetch rankings or mark helpers; the Automatic
+  dialog tests what Test all tests, and doesn't reopen when none work; two HeartCodes keep each
+  other's test results; the page follows track records, rankings and tests written elsewhere.
+- **Prices** only from the provider itself or the model's maker (never just any provider's).
+- **Guided mode** offers the missing step first after "finish" is held.
+- Windows (CRLF) files keep their line endings on a fuzzy edit; a provider that sends an empty first
+  chunk and then stalls is given up on in time; fewer file reads per step; the chat is saved every
+  few seconds mid-task instead of every step.
+
 ## 0.1.71 (2026-11-23)
 
 - **Each step is one line that says how it went**: `✓ Read src/app.js · 90 lines`, `✗ Read old.js ·

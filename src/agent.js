@@ -628,7 +628,7 @@ const SYSTEM = (s) => {
   if (s.ownSystem) return [s.ownSystem, s.appendSystem].filter(Boolean).join('\n\n') // --system-prompt: only the program's
   const instructions = userInstructions(s.root)
   return [
-    prompt('agent/system', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), rootList: rootList(s.root), servers: serversNote(s.root), files: '', more: '', caller: Boolean(s.appendSystem), see: Boolean(s.strat.vision), noUser: Boolean(s.ui.noUser || s.isSub), memory: Boolean(s.memory) && !s.isSub }), // models that can see often say they can't: told they can
+    prompt('agent/system', { root: s.root, env: envLine(), today: new Date().toISOString().slice(0, 10), rootList: rootList(s.root), servers: serversNote(s.root), files: '', more: '', caller: Boolean(s.appendSystem), see: Boolean(s.strat.vision), noUser: Boolean(s.ui.noUser || s.isSub), memory: Boolean(s.memory) && !s.isSub, doneFirst: !s.isSub && !s.ui.noUser && s.ui.permission !== 'plan' ? 'call done, then ' : '' }), // the done tool's there (askDone) // models that can see often say they can't: told they can
     instructions && prompt('agent/instructions', { instructions }),
     ...[...(s.skills?.values() ?? [])].filter((k) => k.use === 'always').map(alwaysSkill), // skills that say how to work (use: always), with the files they bring
     !s.isSub && teamPrompt(s),
@@ -968,7 +968,7 @@ async function runNative(s, task, images, signal) {
   s.split = undefined // the user's answer this message: 'several' agents at once, or 'one' (tools.js)
   s.lookedUp = s.researchAsked = false // searched or read the web this message / asked whether the plan needs it
   // what changed and when it was last checked, this message: a change not run/tested since isn't done
-  Object.assign(s, { changed: new Set(), seq: 0, lastChangeAt: -1, lastCheckAt: -1, reviewedAt: -1, checksSince: 0, spots: new Map(), stuckReports: 0, stuckSelf: null, stuckHandovers: 0, troubles: [], unstuck: [], reviewedRan: 0, lastReview: null, gaveUp: new Set(), toldLast: false, unstuckLearned: false, provedAt: -1, proofFails: 0, shrunkTold: false, proofShots: [] })
+  Object.assign(s, { systemKey: null, changed: new Set(), seq: 0, lastChangeAt: -1, lastCheckAt: -1, reviewedAt: -1, checksSince: 0, spots: new Map(), stuckReports: 0, stuckSelf: null, stuckHandovers: 0, troubles: [], unstuck: [], reviewedRan: 0, lastReview: null, gaveUp: new Set(), toldLast: false, unstuckLearned: false, provedAt: -1, proofFails: 0, shrunkTold: false, proofShots: [] })
 
   let empty = 0 // replies in a row with neither text nor tool calls
   let lastFinal = '' // the last answer it gave (a next one the same, after being told it isn't done: it's stuck)
@@ -1000,7 +1000,7 @@ async function runNative(s, task, images, signal) {
   let refitted = false // this step's conversation was just compacted for a smaller model the list moved on to
   // No step limit (helpers too): a long fix takes many steps, and Esc stops it. A caller can set one (--max-turns).
   for (let step = 0; ; step++) {
-    if (step && !s.isSub) s.onTurn?.() // saved after every step: a quit, crash or kill mid-task loses nothing done so far
+    if (step && !s.isSub && Date.now() - (s.savedAt ?? 0) > 5000) (s.savedAt = Date.now()), s.onTurn?.() // saved as it goes (every few seconds: a long chat is a big file): a quit, crash or kill mid-task loses little
     const tools = toolList()
     s.lastTools = tools // what the requests carry: the findings note before compacting sends the same (compact)
     if (s.maxTurns && step >= s.maxTurns) {
@@ -1020,9 +1020,16 @@ async function runNative(s, task, images, signal) {
         },
       )
     }
-    // the model answering can change mid-message (your model list): the system prompt follows it
-    const now = SYSTEM(s)
-    if (s.messages[0]?.content !== now && s.messages[0]?.role === 'system') s.messages[0] = { ...s.messages[0], content: now }
+    // the system prompt: built once a message, and again when another model answers (your model list)
+    // or the prompts changed. Not every step: a change mid-task (a new file at the root, a model's
+    // track record) makes the provider read the whole conversation again (its cache is of the start)
+    const sysKey = `${client.provider}/${client.model}`
+    if (s.systemKey !== sysKey || s.refreshSystem) {
+      s.systemKey = sysKey
+      s.refreshSystem = false
+      const now = SYSTEM(s)
+      if (s.messages[0]?.content !== now && s.messages[0]?.role === 'system') s.messages[0] = { ...s.messages[0], content: now }
+    }
     pairTools(s.messages)
     ui.spinner('thinking')
     // named by the model that answers: opened at its first word (a failed one moves the list on
@@ -1031,7 +1038,8 @@ async function runNative(s, task, images, signal) {
     const reply = () => (live ??= ui.response(client.model))
     // a reply that may be the answer, with a review to come (files changed since the last one): its
     // text is held and shown after the review's line, so the answer is what's last on screen
-    const hold = sinceNudge && !s.isSub && s.changed?.size > 0 && s.lastChangeAt > (s.reviewedAt ?? 0) && ui.permission !== 'plan'
+    // (after being sent back: held too, so the same answer again isn't printed twice)
+    const hold = !s.isSub && ((sinceNudge && s.changed?.size > 0 && s.lastChangeAt > (s.reviewedAt ?? 0) && ui.permission !== 'plan') || s.undeclaredSent || (!sinceNudge && nudged > 0))
     const out = { think: (t) => reply().think(t), text: hold ? (t) => t?.trim() && ui.spinner('writing the answer') : (t) => reply().text(t), end: () => reply().end() }
     const showHeld = (text) => {
       if (!hold || !text?.trim()) return
@@ -1046,9 +1054,6 @@ async function runNative(s, task, images, signal) {
       const what = name === 'run_command' ? 'writing a command' : EDITS.has(name) && file ? `writing ${file}` : `${{ read_file: 'reading', search: 'searching', list_files: 'listing', web_fetch: 'fetching', web_search: 'searching the web', todo: 'planning', agent: 'briefing a helper' }[name] ?? 'preparing'}${file ? ` ${file}` : ''}` // only an edit is "writing" a file
       ui.spinner(`${what}${args.length >= 2000 ? ` · ${(args.length / 1000).toFixed(1)}k characters` : '…'}`)
     }
-    // the prompts or HEARTCODE.md changed meanwhile (applySettings): the system prompt again, now
-    if (s.refreshSystem && s.messages[0]?.role === 'system') s.messages[0] = { ...s.messages[0], content: SYSTEM(s) }
-    s.refreshSystem = false
     let res
     try {
       res = await client.chat({ messages: s.messages, tools, stream }, { signal, onToken: out.text, onReasoning: out.think, onToolDelta, fit: s.autoCompact && !refitted })
@@ -1146,7 +1151,7 @@ async function runNative(s, task, images, signal) {
     if (!res.toolCalls.length || res.finishReason !== 'length') [cut, cuts] = ['', 0]
     if (!res.toolCalls.length && !res.content?.trim()) {
       // Nothing at all (seen after a failed tool call): not an answer. The same request again
-      // first (often fine the second time), then asked to go on; three in a row ends the task.
+      // first (often fine the second time), then asked to go on; after four in a row the next model goes on.
       s.messages.pop() // some APIs reject an empty assistant message
       if (empty++ < 3) {
         log('task', `empty reply ${empty}; ${empty === 1 ? 'asking again' : 'asking the model to continue'}`)
@@ -1207,6 +1212,7 @@ async function runNative(s, task, images, signal) {
       sinceNudge = true
       continue
     }
+    const before = lastFinal
     if (!res.toolCalls.length) lastFinal = res.content
     // its page is still broken in HeartCode's check and nobody's left to take over: said, not hidden behind "done"
     if (!res.toolCalls.length && !sinceNudge && s.proofFails > 0 && !s.isSub) ui.warn(`HeartCode's own check: the page still doesn't work (errors, or nothing shown or drawn); this answer isn't proven`)
@@ -1215,19 +1221,20 @@ async function runNative(s, task, images, signal) {
       // whether every part is done and checked, with the request. No cap: it ends when it calls done,
       // or answers again without doing anything (sinceNudge), or Esc
       const undeclared = sinceNudge && askDone() && !s.saidDone && (s.changed?.size || s.ran?.length) ? prompt('agent/not-done', { undeclared: true, request: clip(task, 3000) }) : null
+      const afterAsk = s.undeclaredSent // the answer after "is every part done?": the final one, checked like any
       s.undeclaredSent = Boolean(undeclared) // answering that again with nothing done isn't a handover
       if (undeclared) log('task', 'stopped without calling done; asked whether it is finished')
-      const more = sinceNudge && (undeclared ?? (s.saidDone?.waiting ? null : (await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal))))
-      showHeld(res.content) // after the review's line
+      const more = (sinceNudge || afterAsk) && (undeclared ?? (s.saidDone?.waiting ? null : (await notDone(s, signal, nudged > 0, res.content)) ?? (await review(s, task, res.content, signal))))
+      if (!((afterAsk || (!sinceNudge && nudged > 0)) && same(res.content, before))) showHeld(res.content) // after the review's line; the same answer again: not twice
       if (!more) {
-        if (!s.isSub && (s.changed?.size || s.ran?.length) && !s.saidDone?.waiting && (s.saidDone || !askDone())) record(client, s.proofFails > 0 ? 'not-proven' : 'done') // work done (not a chat answer): its track record (record.js)
+        if (!s.isSub && (s.changed?.size || s.ran?.length) && !s.saidDone?.waiting && (s.saidDone || !askDone() || afterAsk)) record(client, s.proofFails > 0 ? 'not-proven' : 'done') // work done (not a chat answer): its track record (record.js)
         s.wrapUpLater?.(task, res.content) // after the answer, beside what comes next
         return res.content
       }
       if (!s.isSub) ui.print(c.faint(c.italic(`✻ ${undeclared ? 'HeartCode asked whether every part is done and checked' : 'not finished yet: HeartCode asked it to go on'}`))) // the next answer isn't a mystery
       nudged++
       sinceNudge = false
-      s.saidDone = null // sent back: said again once it's finished
+      // sent back: what it said with done stands (it isn't asked to call done again, only to finish)
       s.messages.push({ role: 'user', content: more })
       // said done twice and its page is still broken in HeartCode's own check: the best-ranked model takes over
       if (s.proofFails >= 2 && !s.isSub && client.rotation) {
@@ -1315,6 +1322,7 @@ async function runNative(s, task, images, signal) {
         s.seq++
         if (EDITS.has(name) && !failed(out)) {
           s.lastChangeAt = s.seq
+          s.workBy = { provider: client.provider, model: client.model } // whose changes a review judges
           s.checksSince = 0
           // the same spot changed again and again (and what it checks still comes out the same): told
           // at the third time that the cause is likely elsewhere
@@ -1488,7 +1496,7 @@ async function noteRun(s, name, args, out, signal) {
   const tool = runTool_(args.command)
   if (!tool) return
   const code = Number(/^exit code (-?\d+)/.exec(out)?.[1] ?? (failed(out) ? 1 : 0))
-  const bad = code !== 0 || /\b(error|traceback|exception|failed|cannot|not found|undefined)\b/i.test(out.split('\n').slice(0, 6).join(' '))
+  const bad = code !== 0 // what it printed ("0 failed", "undefined") says nothing; its exit code does
   if (bad) {
     const line = out.split('\n').find((l) => /\b(error|traceback|exception|failed|cannot|not found)\b/i.test(l)) ?? out.split('\n').find((l) => l.trim()) ?? ''
     s.runFails.set(tool, { error: `${args.command.split(/\s+/)[0]}: ${line.trim().slice(0, 160)}`, atEdits: s.edits, cmd: args.command })
@@ -1514,21 +1522,23 @@ async function learnFromFixes(s, fixed, signal, { unsolved = false, task = '' } 
     let rule = ''
     let scope = 'global'
     try {
-      const was = s.client.purpose
-      s.client.purpose = 'lesson'
+      // a client of its own (the same model): not the one the task is using, its state stays the task's
+      const { client } = s.engineFor ? await s.engineFor({ provider: s.client.provider, model: s.client.model }) : { client: s.client }
+      const was = client.purpose
+      client.purpose = 'lesson'
       let reply
       try {
-        reply = await s.client.chat({ messages: [{ role: 'user', content: prompt('agent/lesson', { error, unsolved, task: clip(task, 300) }) }] }, { signal })
+        reply = await client.chat({ messages: [{ role: 'user', content: prompt('agent/lesson', { error, unsolved, task: clip(task, 300) }) }] }, { signal })
       } finally {
-        s.client.purpose = was
+        client.purpose = was
       }
-      const said = reply.content.trim().split('\n').filter((l) => l.trim())
+      if (/^\W*none\b/i.test(reply.content.trim())) continue // not a lesson worth keeping
       rule = (said.find((l) => !/^\s*\W*scope\s*:/i.test(l)) ?? '').replace(/^\s*(?:\d+[.)]|[-*])\s*/, '').replace(/^["'\s-]+|["']+$/g, '').slice(0, 200)
       if (/scope\s*:\W*project/i.test(said.join('\n'))) scope = 'project'
     } catch (e) {
       if (e.name === 'AbortError') throw e
     }
-    if (!rule || rule.length < 10) rule = error.replace(/^[^:]*:\s*/, '') // the model couldn't phrase it: keep the error's own wording
+    if (!rule || rule.length < 10) continue // the model couldn't phrase it: an error's own wording isn't a rule
     const name = s.memory.write({ description: rule, type: 'reference', tags: ['lesson', ...tags], content: `${rule}\n\nLearned on ${new Date().toISOString().slice(0, 10)} ${unsolved ? 'after this blocked a task that was not done' : 'after this was caught and fixed'}${task ? ` (the task: ${clip(task, 200)})` : ' while building'}: ${error}`, scope })
     s.ui.step('learned', `${rule.slice(0, 90)}${scope === 'project' ? ' (this project)' : ''}`, '', { note: true })
     log('learn', `saved lesson [[${name}]] (${scope}, #${tags.join(' #')}): ${rule}`)
@@ -1540,19 +1550,24 @@ async function learnFromFixes(s, fixed, signal, { unsolved = false, task = '' } 
 // most (the caller counts), so a model that can't finish still ends.
 // The model said it would do something but stopped without doing it ("let me rewrite…", "I'll fix…"):
 // a next action named, then no tool call. Not matched by explanations ("let me explain", "you can run").
-const PROMISED_MORE =
-  /\b(?:let me|let['’]?s|let us|i['’]?ll|i will|i['’]?m going to|i am going to|i need to|i['’]?m about to|next,? i['’]?ll|now,? i['’]?ll)\b[^.!?\n]{0,70}\b(?:do|make|create|add|fix|write|update|change|implement|build|run|rewrite|replace|edit|install|set ?up|finish|continue|proceed|start|redo|retry|try|hand|pass|send|give|use|open|navigate|click|solve)\b/i
+const PROMISED_RE =
+  /\b(?:let me(?! know)|let['’]?s|let us|i['’]?ll|i will|i['’]?m going to|i am going to|i need to|i['’]?m about to|next,? i['’]?ll|now,? i['’]?ll)\b[^.!?\n]{0,70}\b(?:do|make|create|add|fix|write|update|change|implement|build|run|rewrite|replace|edit|install|set ?up|finish|continue|proceed|start|redo|retry|try|hand|pass|send|give|use|open|navigate|click|solve)\b/i
+// …in a sentence of its own: not an offer ("Let me know if you want me to add tests", "Would you like me to…")
+const OFFER = /\b(?:if you(?:['’]d)? (?:want|like|need|prefer)|would you like|want me to|like me to|let me know|shall i|should i|do you want)\b/i
+const PROMISED_MORE = { test: (text) => String(text).split(/(?<=[.!?])\s+|\n+/).some((x) => PROMISED_RE.test(x) && !OFFER.test(x)) }
 
 // The start of a final answer saying it didn't manage: "I couldn't…", "unable to…", "still showing…".
 const FAILED_WORDS = /\b(?:could ?n['’]?t|could not|was(?: not|n['’]?t) able to|(?:am|was|i['’]m) unable to|failed to|did(?: not|n['’]?t) (?:manage|succeed|work|load|pass)|not (?:yet )?(?:complete[d]?|finished|solved|possible|loaded)|still (?:in progress|pending|blocked|loading|stuck|showing|failing|not)|has not (?:yet )?(?:complet|finish|load|pass))/gi
 // An answer that says it didn't manage: those words, not in a condition or a "what if" ("without which
 // the test could not pass", "otherwise it would fail", "if it couldn't connect")
 const CONDITIONAL = /\b(?:without (?:which|it|this|that)|otherwise|or else|would(?:n['’]?t)?|if|unless|so (?:that )?it)\b(?:[^.;!?\n]|\.(?!\s))*$/i // within the same sentence (a dot in a file name isn't its end)
-const SAYS_FAILED = { test: (text) => [...String(text).matchAll(FAILED_WORDS)].some((m) => !CONDITIONAL.test(text.slice(Math.max(0, m.index - 40), m.index))) }
+// …and not one it got past in the same sentence ("I couldn't find existing tests, so I added some")
+const GOT_PAST = /^[^.;!?\n]*\b(?:so|instead|but|then)\b[^.;!?\n]*\b(?:i|we)\b/i
+const SAYS_FAILED = { test: (text) => [...String(text).matchAll(FAILED_WORDS)].some((m) => !CONDITIONAL.test(text.slice(Math.max(0, m.index - 40), m.index)) && !GOT_PAST.test(text.slice(m.index + m[0].length))) }
 
 // "I can't browse the web", "I'm unable to run commands", "I don't have access to…": a model
 // saying it lacks an ability (it has tools for it).
-const CANT = /\b(?:i\s*(?:['’]m|am)\s*(?:unable|not able)\s*to|i\s*(?:can(?:['’]?t| ?not)|do(?:n['’]?t| not))\s*(?:directly\s*)?(?:have\s*(?:the\s*)?(?:ability|access|capabilit|tools?)|browse|access|open|visit|view|see|interact|click|navigate|run|execute|take|solve|use|control))|\bas an ai\b/i
+const CANT = /\b(?:i\s*(?:['’]m|am)\s*(?:unable|not able)\s*to|i\s*(?:can(?:['’]?t| ?not)|do(?:n['’]?t| not))\s*(?:directly\s*)?(?:have\s*(?:the\s*)?(?:ability|access|capabilit|tools?)|browse(?: the web)?|access (?:the (?:web|internet)|files|your)|visit|interact|click|navigate|run (?:commands|code|scripts|programs)|execute|control))|\bas an ai\b/i // an ability, not what it looked at ("I can't see any errors")
 
 // Is the task really done, or did the model stop early? Open todo items, or (after it did real work)
 // a reply that only promises more, get one nudge to keep going. Then any Stop hook. null = truly done.
@@ -1776,7 +1791,7 @@ export async function review(s, task, answer, signal) {
       if (/^\W*no\b/i.test(said)) {
         const issues = said.replace(/^\W*no\b[\s.:—-]*/i, '').trim()
         s.lastReview = { verdict: 'no', issues }
-        record(s.client, 'review-no') // the work's model: its track record (record.js)
+        record(s.workBy ?? s.client, 'review-no') // the model that made the changes (another may answer now): its track record (record.js)
         s.ui.event?.({ subtype: 'review', model: `${t.provider}/${t.model}`, verdict: 'no', issues })
         s.ui.step('review', `${t.model}: ${clip(issues.split('\n').find((l) => l.trim()) ?? 'problems found', 90)}`, '', { note: true, ok: false })
         return prompt('agent/review-failed', { model: t.model, issues: issues || '(no details given)' })

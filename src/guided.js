@@ -40,6 +40,8 @@ export function nextActions(st) {
   let first
   if (!st.reads && st.hasFiles) first = ['read', 'search']
   else if (st.wantsChange && !st.edits) first = st.hasFiles ? ['edit', 'create', 'read'] : ['create']
+  else if (st.missing === 'unchecked') first = ['run', 'edit', 'finish'] // "finish" was just held: what's missing goes first
+  else if (st.missing === 'nothing') first = st.hasFiles ? ['edit', 'create', 'read'] : ['create']
   else first = ['finish', 'edit', 'run']
   return [...new Set([...first, ...actions().map(([n]) => n)])].filter((n) => (n !== 'delegate' || st.canDelegate) && (n !== 'ask' || !st.noAsk) && n !== st.avoid) // a step that just repeated with nothing new isn't offered again (a small model picks it over and over)
 }
@@ -173,7 +175,7 @@ class Guided {
     this.notes = []
     this.changed = new Set()
     this.files = listFiles(s.root)
-    this.st = { reads: 0, edits: 0, editsSinceRun: 0, runs: 0, fixes: 0, lastRun: null, hasFiles: this.files.length > 0, canRun: suggestCommands(s.root).length > 0, editTries: 0, noAsk: Boolean(s.ui.noUser || s.isSub) } // ask: not headless, nor a helper (it reports to the main agent, which asks)
+    this.st = { reads: 0, edits: 0, editsSinceRun: 0, runs: 0, fixes: 0, lastRun: null, hasFiles: this.files.length > 0, editTries: 0, noAsk: Boolean(s.ui.noUser || s.isSub) } // ask: not headless, nor a helper (it reports to the main agent, which asks)
     this.calls = 0
     this.stops = 0
   }
@@ -303,6 +305,7 @@ class Guided {
           log('guided', `finish held: ${missing}`)
           this.note('not-done', 'not done yet', prompt(`guided/not-done-${missing}`))
           this.st.held = true
+          this.st.missing = missing
           continue
         }
         this.unproven = missing
@@ -572,6 +575,7 @@ class Guided {
     this.note(null, `${old ? 'edit' : 'create'} ${f}`, out + (r?.diff ? '\n' + r.diff : ''))
     if (r?.status === 'applied') {
       this.st.edits++
+      if (this.st.missing === 'nothing') this.st.missing = null // what finish was held for is done (a change still to be run: still missing)
       this.changed.add(f)
       this.st.editsSinceRun++
       this.st.hasFiles = true
@@ -613,6 +617,7 @@ class Guided {
     this.s.ran?.push({ command: cmd, result: clip(out.split('\n').filter((l) => l.trim()).slice(0, 2).join(' · '), 160) }) // for the wrap-up, as native mode's
     const code = /^exit code (\S+)/.exec(out)?.[1]
     this.st.runs++
+    this.st.missing = null // what finish was held for is done
     this.st.editsSinceRun = 0
     this.st.lastRun = code === undefined ? null : code === '0' ? 0 : code
     this.note(null, `ran: ${cmd}`, out)
