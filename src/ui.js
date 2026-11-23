@@ -431,6 +431,10 @@ const GROUPS = { read_file: ['Read', 'file', 'files', 'reading'], search: ['Sear
 // Text for the screen: colors (SGR) only. Every other escape sequence and control character goes: an
 // OSC 52 in a file the model printed would set your clipboard, a title or a link could hide a URL,
 // cursor moves could draw over the screen.
+// A command you ran while a task works (/select_model, Alt+W…): what it asks and says is yours, not the
+// task's: no "waiting for you" notification, nothing left in the conversation (bin/heartcode.js onNow)
+export const ownAsk = new AsyncLocalStorage()
+
 export const safeText = (t) => String(t).replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '').replace(/\x1b(?!\[[0-9;]*m)|[\x00-\x08\x0b\x0c\x0e-\x1a\x1c-\x1f\x7f\x9b]/g, '')
 export const STEP_NAMES = { read_file: 'Read', write_file: 'Write', edit_file: 'Edit', run: 'Run', run_command: 'Run', 'run in background': 'Run in background', search: 'Search', list_files: 'List', web_fetch: 'Fetch', web_search: 'Web search', todo: 'Plan', agent: 'Helper', ask_user: 'Ask', changes: 'Changes', find_command: 'Find command', lsp: 'Code check', mcp: 'Tool', memory: 'Memory', skill: 'Skill', background: 'Background', done: 'Done' }
 
@@ -1707,6 +1711,8 @@ export class UI {
     const rl = this.rl
     const m = this.menu
     const it = m.on && m.items[m.sel] // a suggestion is highlighted (commands/@files show while working too)
+    // Ctrl+D: readline would close on it (the keyboard dead, the screen left as it is); quitting is /exit
+    if (key.ctrl && key.name === 'd') return rl.line ? write(s, key) : this.notice('Esc twice stops the task · /exit quits HeartCode', 2500)
     // Esc while it works: stop it (twice, so a stray tap doesn't); the suggestions open: closes them first.
     // What's typed and what's queued stay (↑ brings a queued one back into the box)
     if (key.name === 'escape') {
@@ -1818,7 +1824,7 @@ export class UI {
         return this.scrollBy(what === 'scroll_top' ? Infinity : -Infinity)
     }
     if (!this.asking) {
-      this.ahead.push(what)
+      if (!this.onNow?.(what)) this.ahead.push(what) // a command that can run beside the task runs now, as typed would
       return this.render()
     }
     if (!this.histOn || m.pick) return // only at the main prompt, not in a question or picker
@@ -2106,6 +2112,7 @@ export class UI {
   }
 
   ask(prompt, { initial = '', suggest = false, history = false } = {}) {
+    const own = ownAsk.getStore() // asked by a command you ran beside the task (its answer comes from a key, outside it)
     if (this.dialog && !history) this.setDialog(null) // a question (a permission, a picker) needs you: the dialog makes way
     if (this.full && (this.asking || (this.recording && !history))) return this.#free().then(() => this.ask(prompt, { initial, suggest, history }))
     if (history && this.kept) [initial, this.kept] = [initial || this.kept, ''] // typed before a submit()
@@ -2135,7 +2142,7 @@ export class UI {
       return Promise.resolve(l)
     }
     if (this.closed) return Promise.resolve(null)
-    if (this.busySince && this.busyTask && !history) this.onWaiting?.(prompt) // asked mid-task: you may be away (a notification, Telegram); a command you just ran (rewind's list…): you're right here
+    if (this.busySince && this.busyTask && !history && !ownAsk.getStore()) this.onWaiting?.(prompt) // asked mid-task: you may be away (a notification, Telegram); a command you just ran (rewind's list…): you're right here
     this.menu.on = Boolean(suggest && (this.suggest || this.menu.pick) && this.full)
     this.histOn = history
     this.histAt = -1
@@ -2170,7 +2177,7 @@ export class UI {
           this.inputMark = this.log.length - 1 // where this message starts, for /rewind
           const said = (x) => (x.own && x.text?.trim() ? x.text.trim() : x.label) // their own answer: what they typed
           const picked = Array.isArray(pick?.chosen) ? pick.chosen.map(said).join(', ') : pick?.chosen && said(pick.chosen)
-          if (pick?.quiet) this.render()
+          if (pick?.quiet || own) this.render()
           else if (pick) this.write(echo + (picked ?? c.dim(pick.closedAs ?? 'cancelled')) + (pick.auto?.fired ? c.dim(` · no answer in ${pick.auto.secs}s: ${pick.auto.fired === 'theirs' ? 'the typed one' : 'the recommended one'}`) : '') + '\n')
           else if (l !== null && history && this.isCommand(l.trim()) && !/^\s*\/skill:/.test(l)) this.notice(/^\S+/.exec(l.trim())[0], 3000, '›') // a command isn't part of the conversation: its name for a moment (not its arguments: maybe a key)
           else if (l?.trim()) this.write(echo + c.bright(l.replace(/\n/g, '\n' + ' '.repeat(width(echo.replace(/\x1b\[[0-9;]*m/g, ''))))) + '\n')
@@ -2361,6 +2368,8 @@ export class UI {
     if (this.tail && this.tail !== '\n\n') this.write(this.tail.endsWith('\n') ? '\n' : '\n\n')
   }
   print(s = '') {
+    // a command run beside a task: its line above the input for a moment, not in the conversation
+    if (ownAsk.getStore() && this.full) return this.notice(String(s).split('\n').filter((l) => l.trim()).at(-1)?.replace(/\x1b\[[0-9;]*m/g, '').trim() ?? '', 8000, '›')
     this.write(s + '\n')
   }
   // A step: one line that says what it does, at what, and (once its result is in) how it went:

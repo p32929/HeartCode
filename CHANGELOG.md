@@ -2,6 +2,16 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.77 (2026-11-23)
+
+- **A command run while a task works is yours**: its lists and questions (`/select_model`, Alt+W,
+  `/settings`…) send no "waiting for you" notification, and what it says shows above the input
+  for a moment, not in the conversation.
+- **Ctrl+D while a task works** no longer closes the keyboard (it left HeartCode unusable, and a
+  Ctrl+C after it left the terminal on HeartCode's screen); it says how to stop or quit.
+- A key bound to a command (keybindings.json) runs it at once while a task works, as typing it does.
+- `/help` says what Esc does while working, as it does now.
+
 ## 0.1.76 (2026-11-23)
 
 - **A question gets its answer, not a review loop**: looking around to answer (`git log`, `ls`,

@@ -11,7 +11,7 @@ import { Session, transcript, contextReport } from '../src/agent.js'
 import { listJobs, getJob, stopJob, removeJob, runningJobs, tailLines, ago as ranFor } from '../src/background.js'
 import { checkUpdate, installKind, UPDATE_COMMANDS, packageDir, whatsNew } from '../src/update.js'
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
-import { UI, c, PERMISSIONS, duration, copyText, overSsh, prettyKey, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width, shortError, wrapWords } from '../src/ui.js'
+import { UI, c, PERMISSIONS, duration, copyText, overSsh, prettyKey, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width, shortError, wrapWords, ownAsk } from '../src/ui.js'
 import { listFiles, runCommand, clip } from '../src/tools.js'
 import { notify as telegram } from '../src/telegram.js'
 import { alert, playSound } from '../src/alert.js'
@@ -166,7 +166,7 @@ function keysHelp(keys = {}, mouse = false, voice = false) {
     [voice ? 'Space' : '', 'voice: listens at once, Enter sends what was said (in an empty box)'],
     ['Enter', 'send · while it works, queue the message (commands like /help, /cost, /select_model run at once)'],
     ['Option+Enter or Shift+Enter', 'new line in the box (also while it works)'],
-    ['Esc', 'while it works: queued messages back into the box, then clears the box, then stops the task (twice)'],
+    ['Esc', 'while it works: twice stops the task (the first closes the suggestions, if open) · ↑ in an empty box: the last queued message back into it'],
     ['Esc Esc', 'rewind to an earlier message (at the prompt)'],
     ['Shift+Tab', 'change what runs without asking (permissions)'],
     [forAct('show_plan'), 'the whole plan in a box (only three of its steps show while it works)'],
@@ -1865,7 +1865,8 @@ async function repl(app, f = {}) {
   ui.onPanel = () => app.toggleJobs() // Alt+B: the background commands' logs, side by side, live
   ui.onNow = (line) => {
     if (!RIGHT_AWAY.has(/^\/([\w-]+)/.exec(line)?.[1]) || !app.isCommand(line)) return false
-    slash(app, line, true)
+    ownAsk
+      .run(true, () => slash(app, line, true)) // its questions and lines are yours, not the task's (ui.js ownAsk)
       .then((r) => r === 'exit' && (ctl?.abort(), app.save(), quit()))
       .catch((e) => (log('error', e.stack), ui.print(c.red(`error: ${e.message}`))))
     return true
