@@ -619,10 +619,13 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     },
     // A provider switched off: kept (its key, its models in your list), but HeartCode skips its models
     // until it's on again.
+    // no name: every provider at once (Turn all on / off)
     'POST /api/provider/on': ({ name, on }) => {
-      if (!cfg.providers[name]) throw new Error(`no provider "${name}"`)
-      if (on) delete cfg.providers[name].off
-      else cfg.providers[name].off = true
+      if (name !== undefined && !cfg.providers[name]) throw new Error(`no provider "${name}"`)
+      for (const p of name === undefined ? Object.values(cfg.providers) : [cfg.providers[name]]) {
+        if (on) delete p.off
+        else p.off = true
+      }
       save('model') // the running sessions' model lists follow at once
       autoPick()
       return state()

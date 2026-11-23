@@ -912,6 +912,7 @@
             <label class="free-only" title="only the models their provider lists at $0 (a provider whose list has no prices can't say)"><input type="checkbox" id="free-only">Free only</label>
             <select id="m-sort" aria-label="sort the models"><option value="name">Sort by name</option><option value="price">Sort by price (free first)</option></select>
             <button class="small ghost" id="fold-all" type="button">Collapse all</button>
+            <button class="small ghost" id="on-all" type="button" title="switch every provider on or off (off: kept, but HeartCode skips its models)"></button>
             <button class="small" id="dev-all" type="button" title="ask models.dev what each listed model can do: tool calls, context, thinking, images">Get from models.dev</button>
           </div>
           <div class="job-slot" data-where="catalog"></div>
@@ -1837,8 +1838,14 @@ const costOf = (d) => (d?.price ? (d.price.input ?? 0) + (d.price.output ?? 0) :
 // unfold one (or all) again.
 let searchOpen = false
 const FOLDED = new Set()
+// Turn all off while any is on, else Turn all on
+function onAllLabel() {
+  $('on-all').textContent = S?.providers.some((p) => !p.off) ? 'Turn all off' : 'Turn all on'
+  $('on-all').hidden = !S?.providers.length
+}
 function applyFolds() {
   $('fold-all').textContent = allFolded() ? 'Expand all' : 'Collapse all'
+  onAllLabel()
   for (const sec of $('p-list').querySelectorAll('section[data-provider]')) {
     const folded = FOLDED.has(sec.dataset.provider) && !(searchOpen && modelQuery.trim())
     sec.classList.toggle('collapsed', folded)
@@ -1855,6 +1862,10 @@ const folds = () => (applyFolds(), savePref('folded', [...FOLDED])) // a fold ch
 const fold = (name) => (settle(), FOLDED.has(name) ? FOLDED.delete(name) : FOLDED.add(name), folds())
 // one button: collapse them all, or (all collapsed) expand them all
 const allFolded = () => Boolean(S?.providers.length) && S.providers.every((p) => FOLDED.has(p.name))
+$('on-all').onclick = () => {
+  const on = !S?.providers.some((p) => !p.off)
+  act('/api/provider/on', { on }, on ? 'every provider is on' : 'every provider is off: HeartCode skips their models until you turn one on')
+}
 $('fold-all').onclick = () => (settle(), allFolded() ? FOLDED.clear() : S?.providers.forEach((p) => FOLDED.add(p.name)), folds())
 $('pick-shown').onchange = (e) => {
   for (const [provider, ids] of SHOWN) for (const id of ids) e.target.checked ? pickedOf(provider).add(id) : PICKED_CAT.get(provider)?.delete(id)
@@ -2158,6 +2169,7 @@ function drawProviders(s) {
   const unlisted = order.filter((t) => !(MODELS[t.provider]?.list ?? []).includes(t.model)).map(keyOf).sort()
   const shape = JSON.stringify([s.providers, s.providers.map((p) => (MODELS[p.name]?.list ?? []).length + (MODELS[p.name]?.error ?? '') + ((MODELS[p.name] ?? { loading: true }).loading ? 'loading' : '')), modelQuery.trim(), catSort, freeOnly, unlisted])
   if (shape !== catalogShape) (buildCatalog(s), applyFolds())
+  onAllLabel()
   catalogShape = shape
   markCatalog()
   $('m-search').placeholder = `Search ${Object.values(MODELS).reduce((n, m) => n + (m.list?.length ?? 0), 0) || 'all'} models…`

@@ -2,6 +2,11 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.85 (2026-11-23)
+
+- **Turn all off / Turn all on** on Providers (beside Collapse all): every provider's switch in one
+  click. Off keeps each provider and its models in your list; HeartCode skips them until it's on.
+
 ## 0.1.84 (2026-11-23)
 
 - **+ Add CLIs** (Providers, beside + Add a provider): every coding CLI on one dialog with a checkbox.
