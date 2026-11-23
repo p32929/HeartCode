@@ -346,13 +346,14 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     emit('tested', { key, result })
     return result
   }
-  // The run going now: every provider at once, and from each one model at a time (testOrder: "auto",
+  // The run going now: every provider at once (at most TEST_AT_ONCE tests running), and from each one model at a time (testOrder: "auto",
   // then "free", then the rest). A provider that says it's busy (429)
   // isn't a result about the model: that provider pauses (as long
   // as it asks, else 15s, 30s… up to 2 minutes), and the model is tried again later; it's kept as
   // a 429 only after the provider refused it RATE_TRIES times. A model taken off your list while
   // it runs isn't tested. Stop: each provider finishes the one it's on.
   const RATE_TRIES = 4
+  const TEST_AT_ONCE = 10 // tests at the same time in a run: one per provider, at most this many
   let run = null
   const runState = () => ({
     total: run.total, done: run.done, good: run.good, each: run.each, busy: [...run.busy.keys()], now: [...run.now], stopping: run.stopping, some: run.some, started: run.started,
@@ -376,6 +377,11 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     }
     for (const p of run.providers.values()) p.queue.sort(testOrder)
     const ticker = setInterval(() => run && Object.keys(runState().paused).length && emit('testrun', runState()), 1000) // the pauses counting down
+    // the slots: a test takes one before it starts (a provider paused for a rate limit holds none)
+    let using = 0
+    const queue = []
+    const slot = () => (using < TEST_AT_ONCE ? (using++, Promise.resolve()) : new Promise((r) => queue.push(r)))
+    const free = () => (queue.length ? queue.shift()() : using--)
     // a provider's worker: its next model, while there's one
     const worker = async (provider) => {
       const p = run.providers.get(provider)
@@ -392,11 +398,16 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
           emit('testrun', runState())
           continue
         }
+        await slot() // at most TEST_AT_ONCE tests at a time, whatever the number of providers
+        if (run.stopping) {
+          free()
+          break
+        }
         run.busy.set(provider, 1)
         const sent = Date.now()
         run.now.add(`${t.provider} ${t.model}`) // the models being tested this moment, for the page
         emit('testrun', runState())
-        const r = await tryOne(t, run.cancel.signal)
+        const r = await tryOne(t, run.cancel.signal).finally(free)
         run.now.delete(`${t.provider} ${t.model}`)
         if (r.stopped) break // Stop: not a result (its last one stays)
         run.busy.delete(provider)

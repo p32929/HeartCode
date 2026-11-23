@@ -2,6 +2,12 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.92 (2026-11-23)
+
+- **Test all runs at most 10 tests at a time**: still one model at a time from each provider, but with
+  more than 10 providers the rest wait for a free place (a provider paused for a rate limit doesn't
+  hold one). Stop still ends it at once.
+
 ## 0.1.91 (2026-11-23)
 
 - **Save list works with thousands of models**: it said "too big" (each model went with everything
