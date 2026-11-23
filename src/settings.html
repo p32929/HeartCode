@@ -257,8 +257,21 @@
   .preset b { display: block; }
   .preset span { color: var(--muted); font-size: 12px; }
   .preset.on { border-color: var(--accent); background: var(--accent-soft); }
-  .preset.off span { color: var(--faint); }
+  .preset.cli { position: relative; }
+  .preset.cli .mark { position: absolute; top: 10px; right: 10px; width: 15px; height: 15px; color: var(--accent); }
+  .preset.cli .mark svg { width: 100%; height: 100%; }
+  .preset.off { border-style: dashed; background: none; }
+  .preset.off b { color: var(--muted); }
+  .preset .get { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; padding: 2px 9px 2px 7px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); }
+  .preset .get svg { width: 13px; height: 13px; }
+  .preset.off:hover .get { filter: brightness(1.15); }
+  .preset .get.busy svg { animation: spin 1s linear infinite; }
+  .preset .get.ext { color: var(--muted); background: none; padding-left: 0; }
   .preset .bad { color: var(--danger, #c33); }
+  .shim { display: block; height: 10px; border-radius: 5px; margin-top: 6px; background: linear-gradient(90deg, var(--line, #8883) 25%, color-mix(in srgb, var(--line, #8883) 40%, transparent) 50%, var(--line, #8883) 75%); background-size: 200% 100%; animation: shim 1.2s linear infinite; }
+  .preset.skel { pointer-events: none; }
+  .preset.skel .shim:first-child { width: 70%; height: 13px; margin-top: 0; }
+  @keyframes shim { from { background-position: 200% 0; } to { background-position: -200% 0; } }
   .cli-head { margin: 18px 0 8px; font-size: 13px; color: var(--muted); }
   .cli-log { max-height: 120px; overflow: auto; font: 11px/1.4 ui-monospace, monospace; color: var(--faint); white-space: pre-wrap; margin-top: 8px; }
 
@@ -1634,7 +1647,7 @@ function loadClis() {
     CLIS = list
     drawClis()
     clearTimeout(cliPoll)
-    if (list.some((k) => k.installing) && $('p-form').open) cliPoll = setTimeout(loadClis, 1500)
+    if (list.some((k) => k.installing || k.pending) && $('p-form').open) cliPoll = setTimeout(loadClis, list.some((k) => k.installing) ? 1500 : 700) // an install's log; versions still being asked
   }, (e) => toast(e.message, true))
 }
 function drawClis() {
@@ -1648,7 +1661,9 @@ function drawClis() {
   $('cli-log').hidden = !busy?.log && !busy?.error
   if (busy) $('cli-log').textContent = busy.error ? `${busy.title}: ${busy.error}` : `Installing ${busy.title}…\n${busy.log.slice(-1500)}`
   if (busy) $('cli-log').scrollTop = 1e9
-  put($('cli-tiles'), (CLIS ?? []).map((k) => h('button', { type: 'button', className: 'preset' + (cli === k.id ? ' on' : '') + (k.installed ? '' : ' off'), title: k.installed ? `${k.title} ${k.version}` : k.install ? `click to install: ${k.install}` : `install it yourself: ${k.commands?.[0] ?? k.page}${k.needs ? ` (needs ${k.needs})` : ''}`, onclick: () => {
+  if (!CLIS) return put($('cli-tiles'), Array.from({ length: 15 }, () => h('div', { className: 'preset skel' }, h('i', { className: 'shim' }), h('i', { className: 'shim', style: 'width:45%' })))) // loading
+  const order = [...CLIS].sort((a, b) => b.installed - a.installed) // installed first; the rest to install
+  put($('cli-tiles'), order.map((k) => h('button', { type: 'button', className: 'preset cli' + (cli === k.id ? ' on' : '') + (k.installed ? '' : ' off'), title: k.installed ? `${k.title} ${k.version}` : k.install ? `click to install: ${k.install}` : `install it yourself: ${k.commands?.[0] ?? k.page}${k.needs ? ` (needs ${k.needs})` : ''}`, onclick: () => {
     if (k.installed) {
       if (!editing && (!$('p-name').value || CLIS.some((x) => x.id === $('p-name').value) || PRESETS.some(([n]) => n === $('p-name').value))) $('p-name').value = k.id
       $('p-url').value = `cli://${k.id}`
@@ -1659,7 +1674,12 @@ function drawClis() {
     if (!k.install) return window.open(k.page, '_blank', 'noopener')
     if (!confirm(`Install ${k.title}?\n\nThis runs: ${k.install}`)) return
     api('/api/cli/install', { id: k.id }).then(loadClis, (e) => toast(e.message, true))
-  } }, h('b', { textContent: k.title }), h('span', { className: k.error ? 'bad' : '', textContent: k.installed ? (k.version ? `v${k.version}` : 'installed') : k.installing ? 'installing…' : k.error ? 'install failed' : k.install ? 'click to install' : 'not installed: see its page' }))))
+  } }, ...(k.installed
+    ? [h('b', { textContent: k.title }), k.pending ? h('i', { className: 'shim', style: 'width:40%' }) : h('span', { textContent: k.version ? `v${k.version}` : 'installed' }), ic('check', 'mark')]
+    : [h('b', { textContent: k.title }), k.installing ? h('span', { className: 'get busy' }, ic('refresh'), 'Installing…')
+      : k.error ? h('span', { className: 'get bad' }, ic('refresh'), 'Failed · try again')
+      : k.install ? h('span', { className: 'get' }, ic('download'), 'Install')
+      : h('span', { className: 'get ext' }, ic('link'), 'Get it')])))) // nothing here can install it: its page
 }
 
 const MODELS = {} // provider → { list } | { error } | { loading }

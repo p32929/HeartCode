@@ -73,24 +73,29 @@ const run = (bin, args, { cwd = os.tmpdir(), timeout = 60_000, input } = {}) =>
     p.on('close', (code) => (clearTimeout(t), resolve({ code, out, err })))
   })
 
-async function versionOf(id) {
-  if (!versions.has(id)) versions.set(id, run(CLIS[id].bin, ['--version'], { timeout: 15_000 }).then(({ out, err }) => (/\d+\.\d+[\w.+-]*/.exec(out || err)?.[0] ?? '').replace(/\.$/, '')))
-  return versions.get(id)
+// its --version, asked once in the background: { v } once it answered (a slow one doesn't hold the list up)
+function versionOf(id) {
+  if (!versions.has(id)) {
+    const got = {}
+    versions.set(id, got)
+    run(CLIS[id].bin, ['--version'], { timeout: 15_000 }).then(({ out, err }) => (got.v = (/\d+\.\d+[\w.+-]*/.exec(out || err)?.[0] ?? '').replace(/\.$/, '')))
+  }
+  return versions.get(id).v
 }
 
-// Every CLI, for the settings page: installed (and its version), or how to install it
-export async function clisInfo() {
-  return Promise.all(Object.entries(CLIS).map(async ([id, k]) => {
+// Every CLI, for the settings page: installed (its version, pending: not known yet), or how to install it
+export function clisInfo() {
+  return Object.entries(CLIS).map(([id, k]) => {
     const where = onPath(k.bin)
     const routes = k.install.filter(fits)
     const pick = routes.find(ready)
     const inst = installs.get(id)
     return {
-      id, title: k.title, login: k.login, page: k.page, installed: Boolean(where), version: where ? await versionOf(id) : '',
+      id, title: k.title, login: k.login, page: k.page, installed: Boolean(where), version: where ? (versionOf(id) ?? '') : '', ...(where && versionOf(id) === undefined && { pending: true }),
       ...(!where && { install: pick ? shown(pick) : '', commands: routes.map(shown), needs: pick ? '' : [...new Set(routes.map((r) => ({ npm: 'Node.js (npm)', bash: 'curl', uv: 'uv or pipx', pipx: 'uv or pipx' })[r.cmd[0]] ?? r.cmd[0]))].join(' or ') }),
       ...(inst && { installing: inst.running, log: inst.log.slice(-3000), error: inst.error }),
     }
-  }))
+  })
 }
 
 // Installs one in the background, by the first way that fits this machine; one at a time (npm's global

@@ -2,6 +2,13 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.82 (2026-11-23)
+
+- **The coding CLIs in Add a provider show at once**: each one's version fills in as it's asked (a
+  shimmer until then), not after the slowest. Installed ones come first, with a ✓; the rest have an
+  **Install** button (or **Get it**, its page, when nothing here can install it), a spinner while
+  installing, and **Failed · try again**.
+
 ## 0.1.81 (2026-11-23)
 
 - A coding CLI's model shows "–" for its context on the Models page (it keeps its own; it showed 10M).
