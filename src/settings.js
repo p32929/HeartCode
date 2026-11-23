@@ -66,7 +66,7 @@ const FILES = [
   ['HEARTCODE.md', 'Instructions for every project (like AGENTS.md, for all of them)', false, '- Answer briefly.\n- Use pnpm, not npm.'],
 ]
 // The prompts the page edits: every section of these files (prompts/*.md); the system prompts first.
-const PROMPT_FILES = ['agent', 'guided', 'compact', 'tests']
+const PROMPT_FILES = ['agent', 'guides', 'guided', 'compact', 'tests']
 const FIRST = { 'agent/system': 'System prompt (models with tool calls)', 'guided/system': 'System prompt (guided mode: models without tool calls)' }
 const ownPrompts = (file) => path.join(HOME, 'prompts', `${file}.md`)
 const tilde = (p) => (p.startsWith(os.homedir() + path.sep) ? '~' + p.slice(os.homedir().length) : p)

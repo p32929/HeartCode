@@ -5,6 +5,7 @@ import { log } from './log.js'
 import { slug, fullSlug, keywords } from './memory.js'
 import { fillArgs, skillFiles, readSkillFile } from './skills.js'
 import { prompt } from './prompts.js'
+import { GUIDE_NAMES, guideList, guideText } from './guides.js'
 import path from 'node:path'
 import os from 'node:os'
 import { spawn, execFileSync } from 'node:child_process'
@@ -781,6 +782,8 @@ export function extraTools(s) {
       parameters: obj({ action: { type: 'string', enum: ['write', 'read', 'search', 'delete'] }, name: str, description: str, type: str, tags: str, scope: { type: 'string', enum: ['project', 'global'] }, content: str, query: str }, ['action']),
     })
   }
+  // guides for kinds of work (guides.js): always there, so the model can look one up whenever it needs it
+  if (!s.ownSystem) out.push({ name: 'guide', description: prompt('agent/tool-guide', { guides: guideList() }), parameters: obj({ name: { type: 'string', enum: GUIDE_NAMES } }, ['name']) })
   const forModel = [...(s.skills?.values() ?? [])].filter((k) => k.use !== 'me') // "use: me" skills cost nothing here; "always" ones are in the system prompt, and listed so their files can be read
   if (forModel.length) {
     const skills = forModel.map((k) => `${k.name}: ${k.description}`).join('\n')
@@ -1826,6 +1829,13 @@ async function tool(name, args, s, signal, id) {
         return await s.subagent(args, signal, id)
       case 'ask_user':
         return await askUser(s, args)
+      case 'guide': {
+        const g = String(args.name ?? '').trim().toLowerCase()
+        if (!GUIDE_NAMES.includes(g)) return `error: no guide "${args.name}". Guides: ${GUIDE_NAMES.join(', ')}`
+        const sent = (s.chat.sentNotes ??= [])
+        if (!sent.includes(`domain:${g}`)) sent.push(`domain:${g}`) // not added again by itself (agent.js guidesFor)
+        return guideText(s, g)
+      }
       case 'skill': {
         const k = s.skills?.get(String(args.name ?? ''))
         if (!k || k.use === 'me') return `error: no skill "${args.name}". Skills: ${[...(s.skills?.values() ?? [])].filter((x) => x.use !== 'me').map((x) => x.name).join(', ') || 'none'}`

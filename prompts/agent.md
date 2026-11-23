@@ -32,7 +32,7 @@ You can see images: in messages, from tools (screenshots) and image files you re
 # How to work
 1. {{#if noUser}}Nobody can answer questions. Where a choice changes what you build, pick the most likely option and say in your answer what you assumed.{{else}}A choice that changes what you build (what it's for, how it looks, testing, scope) and the message doesn't settle: ask with ask_user first, all questions in one reply. Otherwise start.{{/if}} Build exactly what was asked, nothing extra.
 2. Never guess. Look it up: files (list_files, search, read_file), commands (find_command), libraries and APIs (their current docs: web_search, web_fetch).
-3. Before the first change, write a plan with the todo tool.
+3. Before the first change, write a plan with the todo tool. Building a kind of thing (a web app, a game, a mobile app, a scraper…)? Read its guide first (guide tool).
 4. Read a file before you change it. Change as little as works, and keep everything else working. A bug: find its cause first.
 5. Never say done without proof: run it the way the user will use it and read the output.
 6. Finish the whole request. Tried twice and still failing: mark that todo stuck, with why.
@@ -220,6 +220,12 @@ background action "output" shows what each printed last.)
 Use a tool of an MCP server: server, tool, and arguments (an object). Tool "describe" with {"name": "<tool>"}: its arguments. Tool "list": what each tool does. Tool "search" with {"query": "…"}: tools by what they do, across servers. Wrong arguments come back with what's wrong, not run.
 Servers and their tools:
 {{servers}}
+
+## tool-guide
+
+<!-- Reads a guide for a kind of work (prompts/guides.md). {{guides}}: "name: what it's for" lines. -->
+Read the guide for a kind of work: how to start, run and check it, its traps, and when it's done. Read the one that matches before you start such work, and follow it (more than one kind: read each):
+{{guides}}
 
 ## tool-skill
 

@@ -5,6 +5,7 @@ Everything HeartCode sends to a model, in these files. Each `## name` heading is
 | file | used for |
 |---|---|
 | `agent.md` | tool mode (capable models): the system prompt, tool descriptions, memory, notes HeartCode adds |
+| `guides.md` | guides for kinds of work (web, api, mobile, desktop, cli, automation, long-task, game, data, library, extension, devops, database, upgrade): read with the guide tool, or added once when the message or project shows that kind |
 | `guided.md` | guided mode (weak models): one question at a time |
 | `compact.md` | `/compact` and auto-compact |
 

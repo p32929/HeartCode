@@ -2,6 +2,18 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.83 (2026-11-23)
+
+- **Guides for kinds of work**, so any model (the smallest too) knows how to do it: web, API, mobile,
+  desktop, command-line tools, automation and scraping, long tasks, games, data, libraries,
+  extensions, Docker/CI/deploying, databases, upgrades and refactors. Each is short and the same
+  shape: when it's done, how to start, run and check it, its traps. Not sent up front: the model
+  reads one with the new **guide** tool (its list says what each is for; the system prompt says to
+  read the one that matches before building), and HeartCode adds the right one itself, once per
+  conversation, with the first plan or change of a message whose words or project files show the
+  kind (a game, `pubspec.yaml`, React in package.json…). Never for a question answered by looking.
+  Editable on `/settings` → System prompt (guides).
+
 ## 0.1.82 (2026-11-23)
 
 - **The coding CLIs in Add a provider show at once**: each one's version fills in as it's asked (a

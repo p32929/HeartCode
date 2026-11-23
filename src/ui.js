@@ -436,7 +436,7 @@ const GROUPS = { read_file: ['Read', 'file', 'files', 'reading'], search: ['Sear
 export const ownAsk = new AsyncLocalStorage()
 
 export const safeText = (t) => String(t).replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '').replace(/\x1b(?!\[[0-9;]*m)|[\x00-\x08\x0b\x0c\x0e-\x1a\x1c-\x1f\x7f\x9b]/g, '')
-export const STEP_NAMES = { read_file: 'Read', write_file: 'Write', edit_file: 'Edit', run: 'Run', run_command: 'Run', 'run in background': 'Run in background', search: 'Search', list_files: 'List', web_fetch: 'Fetch', web_search: 'Web search', todo: 'Plan', agent: 'Helper', ask_user: 'Ask', changes: 'Changes', find_command: 'Find command', lsp: 'Code check', mcp: 'Tool', memory: 'Memory', skill: 'Skill', background: 'Background', done: 'Done' }
+export const STEP_NAMES = { read_file: 'Read', write_file: 'Write', edit_file: 'Edit', run: 'Run', run_command: 'Run', 'run in background': 'Run in background', search: 'Search', list_files: 'List', web_fetch: 'Fetch', web_search: 'Web search', todo: 'Plan', agent: 'Helper', ask_user: 'Ask', changes: 'Changes', find_command: 'Find command', lsp: 'Code check', mcp: 'Tool', memory: 'Memory', skill: 'Skill', guide: 'Guide', background: 'Background', done: 'Done' }
 
 const short = (ms) => {
   const s = Math.max(0, Math.floor(ms / 1000))

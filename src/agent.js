@@ -19,6 +19,7 @@ import { loadHooks, runHooks } from './hooks.js'
 import { takeConfigErrors, HELPER_JOBS } from './config.js'
 import { c, Block, Markdown, color, diffLines, renderDiff, STEP_NAMES } from './ui.js'
 import { fetch } from './http.js' // not the built-in one: see http.js
+import { detect, guideText, guideVars } from './guides.js'
 
 // Images for a helper (the agent tool's "images"), as data: URLs: image URLs (fetched), data: URLs,
 // or files: in the project, saved screenshots (OUTPUTS), or a path the user gave in a message.
@@ -938,6 +939,7 @@ async function runNative(s, task, images, signal) {
   const said = ui.permission === 'plan' && !s.isSub ? `${text}\n\n${prompt('agent/plan-mode')}` : text
   const content = images.length ? [{ type: 'text', text: said }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))] : said
   s.messages.push({ role: 'user', content })
+  s.domainGuides = detect(s.root, task) // the guides for this kind of work, added once it starts on it (guidesFor)
   if (!s.client.cli) attachNamed(s, task) // files the message names: as if already read (saves a round trip each); a coding CLI reads them itself
   // the tools: built again each step (the model answering may change; client.js leaves them out for
   // one that can't call tools; plan mode may be left mid-message)
@@ -1421,12 +1423,18 @@ const EDITS = new Set(['edit_file', 'write_file', 'append_file', 'apply_patch'])
 // compacting or going back, which drop it). Not with --system-prompt (the program's workflow), and
 // not after read_file (a file read again replaces its earlier copy, and what came with it).
 const GUIDES = { list_files: ['find'], search: ['find'], lsp: ['find'], find_command: ['find'], todo: ['code', 'parts'], edit_file: ['code', 'check'], write_file: ['code', 'check'], append_file: ['code', 'check'], apply_patch: ['code', 'check'], run_command: ['check'], web_search: ['research'], web_fetch: ['research'] }
+// The guide for the kind of work (guides.js: a web app, a game, a scraper…) comes the same way, with the
+// first plan or change of a message whose words or project show that kind: not for a question
+// answered by looking. Once per conversation each, and not when the model already read it (guide tool).
+const STARTS_WORK = new Set(['todo', 'edit_file', 'write_file', 'append_file', 'apply_patch'])
 function guidesFor(s, name) {
-  if (s.ownSystem || !GUIDES[name]) return ''
+  if (s.ownSystem) return ''
   const sent = (s.chat.sentNotes ??= [])
-  const due = GUIDES[name].filter((k) => !sent.includes(`guide:${k}`) && (k !== 'parts' || (!s.isSub && s.subagent && s.team?.().length))) // parts: only with other models to give them to
+  const due = (GUIDES[name] ?? []).filter((k) => !sent.includes(`guide:${k}`) && (k !== 'parts' || (!s.isSub && s.subagent && s.team?.().length))) // parts: only with other models to give them to
   sent.push(...due.map((k) => `guide:${k}`))
-  return due.map((k) => `\n\n${prompt(`agent/guide-${k}`, { memory: Boolean(s.memory) && !s.isSub, noUser: Boolean(s.ui.noUser || s.isSub), page: `"${process.execPath}" "${BIN}" page` })}`).join('')
+  const kinds = STARTS_WORK.has(name) ? (s.domainGuides ?? []).filter((g) => !sent.includes(`domain:${g}`)) : []
+  sent.push(...kinds.map((g) => `domain:${g}`))
+  return [...due.map((k) => prompt(`agent/guide-${k}`, guideVars(s))), ...kinds.map((g) => guideText(s, g))].map((t) => `\n\n${t}`).join('')
 }
 // Tools that run or look at what was made (a command, a test, a browser, a helper): a check after a change.
 const CHECKS = new Set(['run_command', 'mcp', 'agent', 'lsp'])
