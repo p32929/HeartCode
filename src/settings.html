@@ -874,6 +874,9 @@
   .mtable li .acts .ib.k-info { color: var(--c-slate); }
   .mtable li .acts .ib.k-edit { color: var(--c-violet); }
   .mtable li .acts .ib.k-del { color: var(--c-red); }
+  /* every dialog: at most 80% of the screen each way (its own width may be less); what doesn't fit scrolls inside */
+  dialog { max-width: 80vw !important; max-height: 80vh !important; max-height: 80dvh !important; }
+  dialog .actions:last-child:not(#p-added) { position: sticky; bottom: -24px; margin-bottom: -24px; padding-bottom: 24px; background: var(--panel); z-index: 1; } /* its buttons stay in view while the rest scrolls */
 </style>
 </head>
 <body>

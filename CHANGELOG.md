@@ -2,6 +2,11 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.90 (2026-11-23)
+
+- **No dialog on the settings page is bigger than 80% of the window**, either way; what doesn't fit
+  scrolls inside it, and its buttons (Cancel, Add, Save…) stay in view at the bottom.
+
 ## 0.1.89 (2026-11-23)
 
 - **An icon before each provider's name** (Models list, Providers, "HeartCode uses"): a terminal
