@@ -296,7 +296,7 @@ class Guided {
             const gone = { provider: this.s.client.provider, model: was } // before moveOn changes them
             if (this.s.client.moveOn?.(`${was} said it was done, but ${missing === 'nothing' ? 'changed nothing' : "didn't run its change"}`)) {
               record(gone, 'handover') // its track record (record.js)
-              this.ui.warn(`${was} said it was done, but ${missing === 'nothing' ? 'changed nothing' : "didn't run its change"}; handing over to ${this.s.client.model}`)
+              this.ui.handover(this.s.client.model, `${was} said it was done, but ${missing === 'nothing' ? 'changed nothing' : "didn't run its change"}`)
               this.held = 0
             }
           }
@@ -336,7 +336,7 @@ class Guided {
         const gone = { provider: this.s.client.provider, model: was } // before moveOn changes them
         const why = repeats >= 2 ? 'did the same thing three times in a row' : 'kept doing the same thing (three times)'
         record(gone, 'handover') // its track record (record.js)
-        if (this.s.client.moveOn?.(`${was} ${why}`)) this.ui.warn(`${was} ${why}; handing over to ${this.s.client.model}`)
+        if (this.s.client.moveOn?.(`${was} ${why}`)) this.ui.handover(this.s.client.model, `${was} ${why}`)
         else this.ui.warn(`${was} ${why} — it carries on, told so; Esc stops it`)
         this.note(null, 'warning', prompt('guided/note-repeated'))
         repeats = 0

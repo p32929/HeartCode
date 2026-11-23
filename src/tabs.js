@@ -119,6 +119,7 @@ export class Tabs {
   //  │ 1 heart_cli │ │ 2 fix tests ●│  Alt+T open a new tab
   // ─╯             ╰─┴──────────────┴──────────────────
   bar(cols = 100) {
+    if (this.list.length < 2) return [] // one tab: no bar (the header says how to open another)
     const mark = { '?': c.warn('?'), '●': c.brand('●'), '✓': c.ok('✓') }
     const room = Math.max(6, Math.floor((cols - 24) / this.list.length) - 7) // a name's cells, so they all fit
     let [top, mid, bottom] = [' ', ' ', c.ghost('─')]

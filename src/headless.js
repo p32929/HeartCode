@@ -38,7 +38,7 @@ export const PERMISSION_MODES = { all: 'all', commands: 'commands', ask: 'ask', 
 // by stream-json: a system message each) as data.
 export class HeadlessUI {
   constructor({ permission = 'all', verbose = false } = {}) {
-    Object.assign(this, { permission, verbose, log: [], showThinking: true, full: false, noUser: true, event: null })
+    Object.assign(this, { permission, verbose, log: [], full: false, noUser: true, event: null })
     // helpers at work (agent.js: label → { id, model, what }): each change sent as a "helper" event
     const ui = this
     this.helpers = new (class extends Map {
@@ -55,6 +55,9 @@ export class HeadlessUI {
   }
   #err(text) {
     if (this.verbose) process.stderr.write(`${text}\n`)
+  }
+  handover(to, why) {
+    this.warn(`${to} takes over: ${why}`)
   }
   warn(text) {
     log('warn', text)

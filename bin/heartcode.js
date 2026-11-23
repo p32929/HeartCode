@@ -60,7 +60,6 @@ ${c.bold('options')}
       --api-key <key>    API key for --base-url
   -y, --yes              do everything without asking (the default; through --acp, an editor: ask)
       --ask              ask before every edit and command, this run
-      --hide-thinking    the model's thinking: only its last two lines while it thinks (the default; Alt+O shows all of it)
   -C, --cwd <dir>        project folder (default: current folder)
       --temp             keep nothing: a throwaway settings folder (providers, model info,
                          prices and notes copied in), shared by the --temp runs going on at once
@@ -113,7 +112,6 @@ const SECTIONS = [
   ]],
   ['settings', [
     ['/notifications', 'a sound and/or a desktop notification when a task finishes, fails or waits for you: on or off'],
-    ['/toggle_thinking', "the model's thinking: its last two lines, or all of it (Alt+O)"],
     ['/todos', 'the whole plan of the task at work, every step and its state (Alt+L)'],
     ['/voice', 'dictate a message (or Space in an empty box, once voice is set up): it shows in the box while speaking, Enter sends it, Esc cancels'],
   ]],
@@ -154,7 +152,7 @@ for (const [, list] of SECTIONS) list.sort(byName) // alphabetical, in /help and
 const COMMANDS = SECTIONS.flatMap(([, list]) => list).sort(byName)
 // Typed while a task works, these run at once, beside it: they leave the conversation alone. The
 // others (/compact, /rewind, /resume, /init…) wait in the queue until it's done.
-const RIGHT_AWAY = new Set(['help', 'todos', 'cost', 'context', 'background', 'model_info', 'diff', 'copy', 'mcp', 'doctor', 'toggle_thinking', 'notifications', 'btw', 'rename', 'export', 'tab', 'close_tab', 'exit', 'quit', 'settings', 'login_mcp', 'install_skill', 'import', 'voice', 'select_model'])
+const RIGHT_AWAY = new Set(['help', 'todos', 'cost', 'context', 'background', 'model_info', 'diff', 'copy', 'mcp', 'doctor', 'notifications', 'btw', 'rename', 'export', 'tab', 'close_tab', 'exit', 'quit', 'settings', 'login_mcp', 'install_skill', 'import', 'voice', 'select_model'])
 const helpText = (sections) => sections.map(([title, list]) => `  ${c.bold(title)}\n` + list.map(([n, d]) => `  ${c.cyan(n.padEnd(17))}  ${d}`).join('\n')).join('\n\n')
 const SLASH = helpText(SECTIONS)
 
@@ -170,7 +168,6 @@ function keysHelp(keys = {}, mouse = false, voice = false) {
     ['Esc', 'while it works: queued messages back into the box, then clears the box, then stops the task (twice)'],
     ['Esc Esc', 'rewind to an earlier message (at the prompt)'],
     ['Shift+Tab', 'change what runs without asking (permissions)'],
-    [forAct('toggle_thinking'), "the model's thinking: after an answer, all of it in a box; while it works, all of it as it comes or its last two lines"],
     [forAct('show_plan'), 'the whole plan in a box (only three of its steps show while it works)'],
     [forAct('background_log'), "the background commands' logs in a dialog, a tab each (←/→ switch, ↑/↓ scroll, K twice stops one, Esc closes); with text in the box it moves back a word instead"],
     [forAct('new_tab'), 'new tab'],
@@ -218,10 +215,8 @@ const mask = (k) => (k ? (k.length > 12 ? `${k.slice(0, 4)}…${k.slice(-4)}` : 
 // The status bar's default layout (two lines): the model and what it can do, then the run's stats and
 // controls — model and context on the left, abilities and controls pushed to the right. cfg.statusBar
 // overrides it — see App.status for the item names and format.
-const DEFAULT_STATUS = [
-  { left: ['provider', 'model'], right: ['mode', 'thinking', 'images'] },
-  { left: ['ctx', 'tps', 'autocompact'], right: ['background', 'permissions', 'worktree', 'cost'] },
-]
+const DEFAULT_STATUS = [{ left: ['provider', 'model', 'ctx', 'tps'], right: ['mode', 'thinking', 'autocompact', 'background', 'worktree', 'permissions', 'cost'] }] // one row
+const DROP_FIRST = ['tps', 'images', 'thinking', 'autocompact', 'provider', 'cost', 'mode', 'ctx', 'worktree'] // too narrow: these go, in this order (never cut mid-word)
 
 class App {
   constructor(cfg, ui, root) {
@@ -379,9 +374,9 @@ class App {
       const i = client.rotation.list.indexOf(t)
       const f = failed?.e
       const from = failed?.t
-      const why = f ? `${failed.t.model} ${f.status === 429 ? 'rate-limited (429)' : `failed (${clip(shortError(f), 50)})`} → ` : ''
+      const why = f ? `${failed.t.model} ${f.status === 429 ? 'hit its rate limit' : `failed (${clip(shortError(f), 60)})`}` : i ? 'the model before it failed' : 'your first model again'
       failed = null
-      switched = c.dim(`↻ ${why}${t.provider} · ${t.model} answered${i ? ` (#${i + 1} in the model list)` : ' (#1 again)'}`)
+      switched = c.faint(`↻ ${t.model} takes over · ${why}`)
       ui.event?.({ subtype: 'model_switch', from: from ? `${from.provider}/${from.model}` : null, to: `${t.provider}/${t.model}`, reason: f ? (f.status === 429 ? 'rate-limited (429)' : shortError(f)) : null, place: i + 1 })
       setImmediate(client.announceSwitch)
     }
@@ -669,8 +664,14 @@ class App {
     const end = cursor + (/^\S*/.exec(line.slice(cursor))?.[0].length ?? 0)
     let m = /^\/(\S*)$/.exec(before)
     if (m) {
-      const items = this.commands().map(([value, desc, args]) => ({ value, desc, space: args, start: 0, end }))
-      const hits = rank(items, '/' + m[1])
+      // the menu says each in a few words (/help says all of it); just "/": the ones you used last first
+      let items = this.commands().map(([value, desc, args]) => ({ value, desc: desc?.split(/ · |: |; | \(/)[0], space: args, start: 0, end }))
+      if (!m[1]) {
+        const used = [...new Set([...(this.ui.history?.() ?? [])].reverse().map((l) => /^\/\S+/.exec(l)?.[0]).filter(Boolean))]
+        const at = (x) => (used.includes(x.value) ? used.indexOf(x.value) : Infinity)
+        items = [...items].sort((a, b) => at(a) - at(b))
+      }
+      const hits = m[1] ? rank(items, '/' + m[1]) : items
       return hits.length === 1 && hits[0].value === before ? [] : hits
     }
     m = /^\/(\w+)\s+(?:(\S+)\s+)?(\S*)$/.exec(before)
@@ -725,8 +726,8 @@ class App {
     const parts = {
       provider: `${c.brand('●')} ${c.muted(now.provider)}`,
       model,
-      mode: strat ? (strat.actions === 'tools' ? null : c.muted('no tool calls (guided)')) : c.faint('checked at the first message'), // what it can do: known once it's been asked
-      thinking: strat?.thinking ? c.think(`thinking · ${effortOf(cfg)}`) + (ui.showThinking ? c.faint(' (all)') : '') : null,
+      mode: strat && strat.actions !== 'tools' ? c.muted('no tools') : null, // what it can do: known once it's been asked
+      thinking: strat?.thinking ? c.think(`thinking${cfg.effort ? ` · ${cfg.effort}` : ''}`) : null, // the effort only when it was set
       images: strat?.vision ? c.muted('images') : null,
       ctx: null,
       tps: null,
@@ -735,7 +736,7 @@ class App {
       worktree: this.worktree ? c.info(`⎇ ${this.worktree.branch}`) : null,
       background: runningJobs(this.root).length ? c.info(`⚙ ${runningJobs(this.root).length} running`) + c.faint(' Alt+B') : null,
       update: this.update?.newer ? c.green(`⬆ ${this.update.latest}`) + c.faint(' /update') : null,
-      permissions: { all: c.green('⏵⏵ all allowed'), commands: c.yellow('ask before commands'), ask: c.yellow('ask before changes'), plan: c.info('⏸ plan mode') }[ui.permission],
+      permissions: { all: c.green('runs everything'), commands: c.yellow('asks before commands'), ask: c.yellow('asks before changes'), plan: c.info('plan mode') }[ui.permission],
     }
     if (strat) {
       const used = this.s?.client.lastTokens || Math.round(estMessages(this.chat?.messages ?? []) * (strat.ratio ?? 1)) // a resumed chat before its first request: estimated
@@ -753,7 +754,10 @@ class App {
     // background commands and a newer HeartCode are shown also on a bar laid out before there were these items
     for (const id of ['update', 'background']) if (parts[id] && !JSON.stringify(layout).includes(`"${id}"`)) layout = [...layout.slice(0, -1), ...layout.slice(-1).map((row) => (Array.isArray(row) ? { left: row, right: [id] } : { ...row, right: [id, ...(row.right ?? [])] }))]
     const line = (row) => {
-      const names = (g) => (g ?? []).map((t) => parts[t]).filter(Boolean).join(sep)
+      const gone = new Set()
+      const names = (g) => (g ?? []).filter((t) => !gone.has(t)).map((t) => parts[t]).filter(Boolean).join(sep)
+      const all = () => [names(Array.isArray(row) ? row : row?.left), names(Array.isArray(row) ? null : row?.right)].filter(Boolean).join(sep)
+      for (const t of DROP_FIRST) if (vis(all()) > cols - 2 && parts[t]) gone.add(t)
       const left = names(Array.isArray(row) ? row : row?.left)
       const right = names(Array.isArray(row) ? null : row?.right)
       if (!right) return left
@@ -1756,11 +1760,6 @@ async function slash(app, line, working = false) {
       return ui.showPlan()
     case 'notifications':
       return askAlerts(app)
-    case 'toggle_thinking':
-      ui.showThinking = !ui.showThinking
-      ui.print(c.dim(ui.showThinking ? 'thinking shown: all of it (Alt+O: last two lines)' : 'thinking shown: its last two lines (Alt+O: all of it)'))
-      if (ui.showThinking && !ui.thinkTail) ui.showLastThought() // the one just over: all of it now
-      return
   }
   if (!['model_info', 'compact'].includes(cmd)) {
     app.skills = loadSkills(app.root) // edits to skill files apply right away
@@ -1830,7 +1829,7 @@ async function runTask(app, task, ctl) {
   } catch (e) {
     ui.stopSpin()
     log('error', e.name === 'AbortError' || ctl?.signal.aborted ? 'task interrupted by the user' : e.stack)
-    if (e.name === 'AbortError' || ctl?.signal.aborted) ui.print(c.yellow('\ninterrupted'))
+    if (e.name === 'AbortError' || ctl?.signal.aborted) ui.print(c.muted('\n⏹ stopped'))
     else {
       ui.print(c.red(`\nerror: ${e.message}`))
       notify(app.cfg, 'failed', `❌ Failed · ${path.basename(app.root)}\n${clip(task.split('\n')[0], 200)}\n\n${clip(e.message, 1500)}`)
@@ -1931,7 +1930,8 @@ async function repl(app, f = {}) {
   ui.folder = app.root // what a double click on the header's folder copies
   ui.header = (cols = 100) => {
     const room = cols - 2 - width(`♥ HeartCode ${VERSION}  `) // the folder's own name (its end) stays in sight
-    const keys = [['/', 'run a command'], ['@', 'attach a file'], ...(ui.voiceReady?.() ? [['Space', 'talk (voice)']] : []), [NEWLINE_KEY, 'add a new line'], ui.busySince ? ['Esc twice', 'stop'] : ['Esc Esc', 'go back to a message'], ['Shift+Tab', 'change permissions']]
+    // the keys only until the first message: after that the room is the conversation's (/help has them all)
+    const keys = app.chat?.messages?.length ? [] : [['/', 'commands'], ['@', 'attach a file'], ...(ui.voiceReady?.() ? [['Space', 'talk']] : []), [NEWLINE_KEY, 'new line'], ['Esc Esc', 'go back to a message'], ['Shift+Tab', 'permissions'], ...(ui.keyFor('new_tab') ? [[ui.keyFor('new_tab'), 'new tab']] : [])]
     // the keys: on a second line when they don't fit one, broken between keys (never inside one)
     const rows = []
     for (const kd of keys) {
@@ -1942,7 +1942,7 @@ async function repl(app, f = {}) {
     return [
       `${c.brand('♥')} ${c.bright(c.bold('HeartCode'))} ${c.faint(VERSION)}  ${c.muted(width(where) > room ? '…' + where.slice(-(room - 1)) : where)}`,
       ...rows.map((row) => row.map(([k, d]) => `${c.muted(k)} ${c.faint(d)}`).join(c.ghost(' · '))),
-      '',
+      ...(rows.length ? [''] : []),
     ]
   }
   if (!ui.full) ui.print(ui.header().join('\n'))
@@ -1971,12 +1971,13 @@ async function repl(app, f = {}) {
         ui.render?.()
       })
       .catch(() => {})
-  // the first start: whether to be told when a task finishes (once, in one tab)
-  if (cfg.alerts === undefined && !alertsAsked) {
-    alertsAsked = true
-    await askAlerts(app, true)
-  }
   for (;;) {
+    // the first start: whether to be told when a task finishes (once, in one tab); once there's a model
+    // to work with (not over the "set up a model" screen)
+    if (cfg.alerts === undefined && !alertsAsked && cfg.providers[cfg.provider] && cfg.model) {
+      alertsAsked = true
+      await askAlerts(app, true)
+    }
     const line = await ui.ask(` ${c.magenta('♥')} `, { suggest: true, initial: app.nextInput, history: true })
     app.nextInput = undefined
     if (line === null) break
@@ -1985,8 +1986,8 @@ async function repl(app, f = {}) {
     ctl = new AbortController()
     app.signal = ctl.signal // Esc stops whatever this line started (a task, a probe, …)
     ui.escArm = 0 // a fresh task: a first Esc from before doesn't count toward stopping this one
-    ui.busy() // the spinner stays until this line's work is done
     const command = app.isCommand(t)
+    ui.busy(command ? 400 : 0) // the spinner stays until this line's work is done (a command: if it takes a while)
     if (command) {
       const mark = ui.mark?.() // what it prints goes back out of the conversation when it's done
       try {
@@ -2181,7 +2182,6 @@ async function main() {
         saveConfig(cfg)
       }
     }
-    ui.showThinking = false // the thinking's last two lines while it thinks; Alt+O shows all of it (--hide-thinking: the same)
     const app = new App(cfg, ui, root)
     usePromptsFrom(app.root) // its .heartcode/prompts override the built-in sections
     ui.suggest = (line, cursor) => app.suggest(line, cursor)

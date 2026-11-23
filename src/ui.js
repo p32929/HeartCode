@@ -109,7 +109,7 @@ setTheme()
 
 // keybindings.json: { "alt+g": "cycle_permissions", "alt+r": "/rewind", "shift+tab": "none" }.
 // Actions: stop, send_first, send_all, queue_mode, cycle_permissions, newline, clear_input, scroll_up, scroll_down (a page),
-// scroll_line_up, scroll_line_down (3 lines), scroll_top, scroll_bottom, voice, toggle_thinking, show_plan, background_log, new_tab,
+// scroll_line_up, scroll_line_down (3 lines), scroll_top, scroll_bottom, voice, show_plan, background_log, new_tab,
 // close_tab, next_tab, prev_tab, tab_1…tab_9, none (turns a
 // built-in key off); anything else is sent as typed (a /command or a message). Ctrl+C stays Ctrl+C.
 // A key as people read it ("alt+shift+down" → "Alt+Shift+↓")
@@ -145,7 +145,7 @@ export const keyId = (key, s = '') => CONTROL_KEYS[key.sequence ?? s] ?? [key.ct
 // wheel do), Alt+Shift+↑↓ to its top and bottom; Alt+O: all of the model's thinking, or its last lines;
 // Alt+L: the whole plan.
 // keybindings.json can move any of them.
-export const DEFAULT_KEYS = { 'alt+o': 'toggle_thinking', 'alt+l': 'show_plan', 'alt+b': 'background_log', 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+shift+up': 'scroll_top', 'alt+shift+down': 'scroll_bottom', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
+export const DEFAULT_KEYS = { 'alt+l': 'show_plan', 'alt+b': 'background_log', 'alt+s': 'send_first', 'alt+a': 'send_all', 'alt+m': 'queue_mode', 'shift+up': 'scroll_line_up', 'shift+down': 'scroll_line_down', 'alt+up': 'scroll_up', 'alt+down': 'scroll_down', 'alt+shift+up': 'scroll_top', 'alt+shift+down': 'scroll_bottom', 'alt+t': 'new_tab', 'alt+w': 'close_tab', 'alt+n': 'next_tab', 'alt+p': 'prev_tab', ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`alt+${n}`, `tab_${n}`])) }
 export function loadKeys(file = path.join(HOME, 'keybindings.json')) {
   let raw = {}
   try {
@@ -424,6 +424,9 @@ export function wrapParts(line, cols, sep = ' · ') {
 }
 
 // 4000 → "4s", 75000 → "1m 15s", 2h 3m: a clock that fits on a busy line
+// a step's line says what it does, in words (the tools' own names stay the model's)
+export const STEP_NAMES = { read_file: 'Read', write_file: 'Write', edit_file: 'Edit', run: 'Run', run_command: 'Run', 'run in background': 'Run in background', search: 'Search', list_files: 'List', web_fetch: 'Fetch', web_search: 'Web search', todo: 'Plan', agent: 'Helper', ask_user: 'Ask', changes: 'Changes', find_command: 'Find command', lsp: 'Code check', mcp: 'Tool', memory: 'Memory', skill: 'Skill', background: 'Background', done: 'Done' }
+
 const short = (ms) => {
   const s = Math.max(0, Math.floor(ms / 1000))
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`
@@ -787,8 +790,6 @@ export class UI {
     this.onInterrupt = null
     this.timer = null
     this.label = ''
-    this.showThinking = false // all of it as it comes (Alt+O); off: its last two lines, live, above the spinner
-    this.thinkTail = '' // the thinking coming in now, for those two lines
     this.tail = ''
     // suggest(line, cursor) → [{ value, desc, start, end, space, insertOnly }] for the menu under the prompt
     this.suggest = null
@@ -994,13 +995,10 @@ export class UI {
     const done = todos.length - open.length
     const mark = { pending: c.muted('☐'), in_progress: c.info('◐'), completed: c.faint('☑'), stuck: c.warn('⚠') }
     const by = (t) => (t.by ? c.faint(' · ') + (t.status === 'in_progress' ? c.info(t.by) : c.faint(t.by)) : '') // the model a part was given to
-    const line = (t) => fit(`    ${mark[t.status]} ${t.status === 'in_progress' ? c.info(c.bold(t.content)) : t.status === 'completed' ? c.faint(t.content) : t.status === 'stuck' ? c.warn(t.content) : c.muted(t.content)}${by(t)}`, cols)
-    const { shown, hidden } = planPick(todos)
-    return [
-      fit(`  ${c.muted('Plan')} ${c.faint(`· ${done} of ${todos.length} done`)}`, cols),
-      ...shown.map(line),
-      ...(hidden ? [fit(`    ${c.faint(`… ${hidden} more${this.keyFor('show_plan') ? ` · ${this.keyFor('show_plan')} shows all of it` : ''}`)}`, cols)] : []),
-    ]
+    // one line: how far it is, the step being done now (the whole plan: show_plan)
+    const now = todos.find((t) => t.status === 'in_progress') ?? open[0]
+    const k = this.keyFor('show_plan')
+    return [fit(`  ${c.muted(`Plan ${done}/${todos.length}`)} ${mark[now.status]} ${c.info(now.content)}${by(now)}${k ? c.faint(` · ${k} all of it`) : ''}`, cols)]
   }
 
   // The whole plan in a box (show_plan, /todos): every step and its state; the key closes it again.
@@ -1043,45 +1041,25 @@ export class UI {
     return out
   }
 
-  // One model reply: thinking (dim, its own block) kept apart from the answer.
+  // One model reply: its thinking (dim, its own block), all of it as it comes, then the answer.
   // who: the model thinking, named over its thinking (helpers say their own: helperUI in agent.js)
   response(who) {
-    const t0 = Date.now()
-    this.lastThought = null // the key shows this reply's thinking from now on, not an older one's
-    const secs = () => duration(Date.now() - t0)
     const write = (x) => this.write(x)
     let think = null
     let text = null
-    let thought = '' // all of it so far: shown whole when Alt+O switches to all of it midway
-    const summary = () => {
-      this.thinkTail = ''
-      if (thought.trim() && !think) {
-        // what it thought stays in the conversation: its last two rows on this screen (all of it: Alt+O)
-        const last = lastRows(thought, Math.max(20, (this.out.columns || 80) - 4), 2)
-        this.print(c.faint(c.italic(`✻ ${who ? `${who} ` : ''}thought for ${secs()}${this.keyFor('toggle_thinking') ? ` · ${this.keyFor('toggle_thinking')} shows all of it` : ''}`)))
-        this.print(c.think(c.italic(last.map((l) => `  ${l}`).join('\n'))))
-        this.lastThought = { who, text: thought } // Alt+O shows it, now that it's over (showLastThought)
-      }
-    }
     return {
       think: (t) => {
         if (!t || text) return
         this.tokenAt = Date.now() // it answers: no longer "waiting for" it
-        thought += t
-        if (!this.showThinking && !think) {
-          this.thinkTail = thought.slice(-4000) // its last two lines, live (render)
-          return this.spinner('thinking') // the time: in the line under it (and "thought for" after)
-        }
         if (!think) {
-          this.thinkTail = ''
           this.replying = true // its own text shows it's at work: no spinner line after it
           this.liveStep = null
+          this.label = 'thinking'
           this.gap()
-          this.print(c.faint(c.italic(`✻ ${who ? `${who} is thinking` : 'Thinking'}…`)))
+          this.print(c.faint(c.italic(`✻ ${who ? `${who} thinking` : 'thinking'}`)))
           const style = (x) => c.think(c.italic(x))
           think = new Block(write, { style })
           if (color) think = new Markdown(think, style)
-          return think.push(thought) // what came before the switch too
         }
         think.push(t)
       },
@@ -1094,7 +1072,6 @@ export class UI {
           if (this.label === 'thinking') this.label = 'answering'
           think?.end()
           this.gap()
-          summary()
           text = new Block(write, { marker: '● ', markerStyle: (x) => c.bright(c.bold(x)), style: c.text })
           if (color) text = new Markdown(text, c.text) // plain text (piped, NO_COLOR) stays as the model wrote it
         }
@@ -1103,21 +1080,10 @@ export class UI {
       end: () => {
         if (text) text.end()
         else if (think) think.end()
-        else summary()
         this.replying = false
         this.afterBlock = Boolean(text || think)
       },
     }
-  }
-
-  // The thinking that was shown as two lines, all of it (Alt+O after it's over): true when there was some
-  showLastThought() {
-    const t = this.lastThought
-    if (!t?.text.trim()) return false
-    this.lastThought = null
-    this.print(c.faint(c.italic(`✻ ${t.who ? `${t.who}'s` : 'The'} thinking, all of it:`)))
-    this.print(c.think(c.italic(t.text.trim().replace(/^/gm, '  '))))
-    return true
   }
 
   #rl() {
@@ -1127,7 +1093,11 @@ export class UI {
     // escapeCodeTimeout: how long a lone Esc waits to be the start of a key's sequence. Readline's
     // 500ms made Esc Esc and a letter typed right after one Alt+letter: the letter was lost and the
     // input not cleared. Sequences come in one piece (and keyStream holds a split one for 50ms).
-    this.rl = readline.createInterface({ input, output: this.out, terminal, historySize: 0, escapeCodeTimeout: 50 }) // HeartCode keeps its own history (below)
+    // In full screen render() draws everything: readline writes nothing. Its own redraws (a refresh,
+    // Enter, a resize) wrote "clear to the end of the screen" straight to the terminal, wiping the input
+    // box and the status bar until the next frame that differed.
+    const output = terminal ? Object.create(this.out, { write: { value: (...a) => (this.full ? true : this.out.write(...a)) } }) : this.out
+    this.rl = readline.createInterface({ input, output, terminal, historySize: 0, escapeCodeTimeout: 50 }) // HeartCode keeps its own history (below)
     // Our own line queue, so piped input isn't lost between questions.
     this.rl.on('line', (l) => {
       if (this.sent !== undefined) [l, this.sent] = [this.sent, undefined] // readline mangles multi-line text
@@ -1219,7 +1189,7 @@ export class UI {
       this.flash = null
       const d = this.dialogAt
       if (modal && d && (x < d.x || y < d.y || x > d.x + d.W + 1 || y > d.y + d.H + 1)) return this.dialog ? this.setDialog(null) : this.render() // outside a dialog: closed (a question stays)
-      if (!modal && y <= 3 && this.onTabClick) return this.onTabClick(x - 1) // the tab bar's 3 rows
+      if (!modal && y <= (this.tabBar?.(this.out.columns || 80)?.length ?? 0) && this.onTabClick) return this.onTabClick(x - 1) // the tab bar's rows (none with one tab)
       if (modal || this.regions?.has(y)) {
         // a dialog, the header, the input, the status bar: a screen selection (a click without a drag: the dialog's own)
         this.ssel = { a: { x, y }, b: { x, y }, moved: false, rows: this.regions, inDialog: modal }
@@ -1415,15 +1385,11 @@ export class UI {
       // else what's being done; the time in all (and Esc) on the next, on more lines when it doesn't fit
       const request = this.requestSince?.()
       const label = this.#label()
-      const waiting = request && !(this.tokenAt >= request) && this.beforeRetry === undefined
-      const status = waiting ? `${/^(working|thinking|answering)$/.test(plainOf(label)) ? '' : `${label} · `}waiting for ${this.waitingFor?.() || 'the model'} ${short(Date.now() - request)}` : label
-      const timer = this.busySince ? [this.beforeRetry !== undefined && 'no answer yet', `${short(this.worked())} in all`, 'Esc twice to stop', this.thinkTail && this.keyFor('toggle_thinking') && `${this.keyFor('toggle_thinking')} shows all thinking`].filter(Boolean).join(' · ') : ''
-      if (this.thinkTail) {
-        // the thinking's last two lines (long ones wrapped), dim, changing as it comes
-        for (const l of lastRows(this.thinkTail, Math.max(20, cols - 6), 2)) bottom.push(fit(`  ${c.think(c.italic(l))}`, cols))
-      }
-      bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(status)}`, cols))
-      if (timer) bottom.push(...wrapParts(timer, cols - 2).map((r) => fit(`  ${c.faint(r)}`, cols)))
+      const waiting = request && !(this.tokenAt >= request) && this.beforeRetry === undefined && Date.now() - request > 2000
+      const status = waiting ? `${/^(working|thinking|answering)$/.test(plainOf(label)) ? '' : `${label} · `}waiting for ${this.waitingFor?.() || 'the model'}` : label
+      const timer = this.busySince ? `${short(this.worked())} · Esc twice to stop` : ''
+      // one row; a long status (a retry, a command's last line) wraps instead of being cut
+      wrapParts(`${status}${timer ? ` · ${timer}` : ''}`, cols - 2).forEach((r, i) => bottom.push(fit(`${i ? ' ' : c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(r)}`, cols)))
       // helpers at work (agent.js keeps them in this.helpers: label → what it's doing), then the plan
       const helpers = [...this.helpers]
       for (const [name, { model, what }] of helpers.slice(0, helpers.length > 6 ? 5 : 6)) bottom.push(fit(`  ${c.faint('◦')} ${c.muted(name)}${model ? `${c.faint(' · ')}${c.info(model)}` : ''}${what ? c.faint(` · ${what}`) : ''}`, cols))
@@ -1434,10 +1400,19 @@ export class UI {
     if (this.ahead.length) {
       const key = (k, d) => `${c.muted(k)} ${c.faint(d)}`
       const sep = c.ghost(' · ')
-      const queued = `${c.bright(`queued ${this.ahead.length}`)}${sep}${c.faint(`when done: ${this.queueMode === 'one' ? 'one by one' : 'all together'}`)}${sep}${[['Esc', 'edit or cancel'], [this.keyFor('send_first'), 'send first now'], [this.keyFor('send_all'), 'send all now'], [this.keyFor('queue_mode'), 'change when done']].filter(([k]) => k).map(([k, d]) => key(k, d)).join(sep)}`
-      bottom.push(...wrapParts(queued, cols - 2, sep).map((r) => fit(`  ${r}`, cols))) // on more lines, not cut
-      for (const [i, l] of this.ahead.slice(0, 5).entries()) bottom.push(fit(`  ${c.accent(`${i + 1}.`)} ${c.muted(l.replace(/\s+/g, ' '))}`, cols))
-      if (this.ahead.length > 5) bottom.push(c.faint(`  … ${this.ahead.length - 5} more`))
+      const all = [['↑', 'edit'], [this.keyFor('send_first'), 'send now'], [this.keyFor('queue_mode'), this.queueMode === 'one' ? 'one by one' : 'all together']].filter(([k]) => k)
+      const said = `${c.faint(this.ahead.length > 3 ? `${this.ahead.length} queued` : 'queued')}`
+      // the keys that fit (never one cut in half); the message itself gives way first
+      let keys = all.map(([k, d]) => key(k, d)).join(sep)
+      for (let n = all.length; n > 1 && width(plainOf(`  ↳ x${sep}${said}${sep}${keys}`)) > cols - 10; n--) keys = all.slice(0, n - 1).map(([k, d]) => key(k, d)).join(sep)
+      const end = `${sep}${said}${sep}${keys}`
+      const shown = this.ahead.slice(-3)
+      for (const [i, l] of shown.entries()) {
+        const tail = i === shown.length - 1 ? end : ''
+        const room = Math.max(8, cols - 4 - width(plainOf(tail)))
+        const msg = l.replace(/\s+/g, ' ')
+        bottom.push(fit(`  ${c.accent('↳')} ${c.muted(width(msg) > room ? `${fit(msg, room - 1)}…` : msg)}${tail}`, cols))
+      }
     }
     if (this.noticeText) bottom.push(fit(this.noticeMark ? `${c.warn(this.noticeMark)} ${c.muted(this.noticeText)}` : `  ${c.muted(this.noticeText)}`, cols))
     if (menu.on && !asked) bottom.push(...this.#menuLines(cols))
@@ -1709,7 +1684,7 @@ export class UI {
     if (!this.onEscape) return
     if (Date.now() - (this.escArm ?? 0) < 2500) return (this.escArm = 0), this.onEscape()
     this.escArm = Date.now()
-    this.notice('Press Esc again to stop', 2500)
+    this.notice('Esc again to stop', 2500, '⏹')
   }
 
   // input), sent when the answer is done, or at once with send_first / send_all. Esc stops the task.
@@ -1725,16 +1700,10 @@ export class UI {
     const rl = this.rl
     const m = this.menu
     const it = m.on && m.items[m.sel] // a suggestion is highlighted (commands/@files show while working too)
-    // Esc, a layer at a time, and the work goes on: the queued messages come back into the box (to
-    // change, or drop); then what's in the box is cleared; only then does Esc stop the work
+    // Esc while it works: stop it (twice, so a stray tap doesn't); the suggestions open: closes them first.
+    // What's typed and what's queued stay (↑ brings a queued one back into the box)
     if (key.name === 'escape') {
-      if (m.on) return (m.off = rl.line), this.#suggestWhileWorking() // first Esc just closes the suggestions
-      if (this.ahead.length) {
-        const n = this.ahead.length
-        this.#unqueue(this.ahead.splice(0))
-        return this.notice(`${n === 1 ? 'The queued message is' : `${n} queued messages are`} back in the box: change ${n === 1 ? 'it' : 'them'} and press Enter, or Esc to clear`, 4000)
-      }
-      if (rl.line.trim()) return this.clearInput(), (this.escArm = 0), this.notice('Cleared · Esc twice stops the answer', 2500)
+      if (m.on) return (m.off = rl.line), this.#suggestWhileWorking()
       return this.escStop()
     }
     // ↑ in an empty box: the last queued message back into it, to change or drop
@@ -1795,19 +1764,6 @@ export class UI {
     switch (what) {
       case 'none':
         return
-      // the model's thinking: all of it as it comes, or its last two lines; one just over, all of it in a
-      // box now (the key closes it). A key, not a message: nothing is sent, queued or kept in ↑
-      // after an answer: its whole thinking in a box (the key closes it again; how thinking shows
-      // stays as it was); else how thinking shows switches: all of it as it comes, or its last two
-      // lines (a thought shown in full already goes on in full until its reply ends)
-      case 'toggle_thinking':
-      case '/toggle_thinking': {
-        const t = !this.busySince ? this.lastThought : null
-        if (t?.text?.trim()) return this.showText(`${t.who ? `${t.who}'s thinking` : 'Thinking'}`, t.text.trim(), 'toggle_thinking')
-        this.showThinking = !this.showThinking
-        const k = this.keyFor('toggle_thinking') ?? 'the key'
-        return this.notice(this.showThinking ? `Thinking: all of it, as it comes · ${k}: its last two lines` : `Thinking: its last two lines from the next reply on · ${k}: all of it`, 2500)
-      }
       case 'new_tab':
       case 'close_tab':
       case 'next_tab':
@@ -2063,7 +2019,7 @@ export class UI {
   // initial: text already typed in, ready to edit. suggest: show the suggestion menu while typing.
   // A one-line message just above the input until `ms` pass or a key is pressed ('' hides it).
   // mark: what goes before it ('!' a warning; '' none, for a state like voice listening)
-  notice(text, ms = 2000, mark = '!') {
+  notice(text, ms = 2000, mark = '') {
     this.noticeText = text
     this.noticeMark = mark
     clearTimeout(this.noticeTimer)
@@ -2383,12 +2339,13 @@ export class UI {
   unmark(m, title) {
     if (this.log !== m.log || this.log.length <= m.at || !this.log[m.at].startsWith(m.base)) return this.render()
     const text = [this.log[m.at].slice(m.base.length), ...this.log.slice(m.at + 1)].join('\n').replace(/^(\s*\n)+|\s+$/g, '')
+    if (!text.includes('\n') && !this.dialog) return this.render() // one line: it stays where it was printed
     this.log.length = m.at + 1
     this.log[m.at] = m.base
     Object.assign(this, { tail: m.tail, sgr: m.sgr })
     const lines = text ? text.split('\n') : []
     if (lines.length === 1 || (lines.length && this.dialog)) this.notice(lines[0], 4000, '›')
-    else if (lines.length) this.showText(title === '/toggle_thinking' ? 'Thinking' : title, text, title) // its key (Alt+O) closes it again
+    else if (lines.length) this.showText(title, text, title)
     else this.render()
   }
   // A blank line before a new block, unless there already is one.
@@ -2403,7 +2360,10 @@ export class UI {
   // page does): the line it has counts it (×2, ×3…) instead of another of the same, and its result
   // makes way for the new one's.
   step(name, detail = '', who = '') {
-    const line = `${c.accent('●')} ${c.accent(c.bold(name))} ${c.info(detail)}${who ? c.faint(` · ${who}`) : ''}`
+    name = STEP_NAMES[name] ?? name.replace(/_/g, ' ').replace(/^./, (x) => x.toUpperCase())
+    if (who && who === this.stepWho) who = '' // the model's name only when another one takes the next step
+    else if (who) this.stepWho = who
+    const line = `${c.accent('●')} ${c.accent(c.bold(name))}${detail ? ` ${c.info(detail)}` : ''}${who ? c.faint(` · ${who}`) : ''}`
     const was = this.lastStep
     const end = this.log.length - 1 // the line being written (empty, after a whole line)
     if (this.full && was?.line === line && was.log === this.log && this.log[was.at] === was.shown && !plainOf(this.log[end]) && (end === was.at + 1 || end === was.after)) {
@@ -2424,6 +2384,11 @@ export class UI {
     this.liveStep = null
     this.print(`  ${c.ghost('⎿')} ${c.faint(text)}`)
     if (this.lastStep?.log === this.log && this.lastStep.at === this.log.length - 3) this.lastStep.after = this.log.length - 1 // its step's, right under it
+  }
+  // another model takes over: one dim shape for all of them (not a warning: nothing to do)
+  handover(to, why) {
+    log('warn', `${to} takes over: ${why}`)
+    this.print(c.faint(`↻ ${to} takes over · ${why}`))
   }
   warn(text) {
     log('warn', text)
@@ -2460,10 +2425,11 @@ export class UI {
     const until = Date.now() + ms
     // why first, short: "cannot reach http://127.0.0.1:47329/v1/chat/completions (ECONNREFUSED)" → "can't reach 127.0.0.1:47329"
     let why = shortError(err).replace(/^cannot reach (\S+)(?: \([^)]*\))?/, (m, u) => `can't reach ${URL.canParse(u) ? new URL(u).host : u}`)
-    if (why.length > 50) why = `${why.slice(0, 49)}…`
+    if (why.length > 80) why = `${why.slice(0, 79)}…`
     const left = () => Math.max(0, Math.ceil((until - Date.now()) / 1000)) * 1000
-    if (next) return this.spinner(() => `${c.yellow('⚠')} ${why} · trying ${next.provider} · ${next.model}${left() ? ` in ${short(left())} (all failed once)` : ''} (try ${attempt})`)
-    this.spinner(() => `${c.yellow('⚠')} ${why} · retrying in ${short(left())} (try ${attempt})`)
+    const who = this.waitingFor?.()
+    if (next) return this.spinner(() => `⚠ ${who ? `${who}: ` : ''}${why} · trying ${next.model}${left() ? ` in ${short(left())}` : ''}`)
+    this.spinner(() => `⚠ ${who ? `${who}: ` : ''}${why} · trying again in ${short(left())} (try ${attempt})`)
   }
 
   stopSpin() {
@@ -2478,17 +2444,22 @@ export class UI {
 
   // Full screen: from the moment work starts until it's done (a task, a probe, a command), the
   // spinner row stays on, whatever gets printed meanwhile. It steps aside while asking the user.
-  busy() {
+  // later: the spinner only if it's still at work then (a command that answers at once shows none)
+  busy(later = 0) {
     if (!this.full) return
     this.busySince = Date.now()
     this.waited = 0
-    this.spinner('working')
+    clearTimeout(this.busyLater)
+    if (!later) return this.spinner('working')
+    this.busyLater = setTimeout(() => this.busySince && !this.timer && this.spinner('working'), later)
+    this.busyLater.unref?.()
   }
   // time spent on the work so far, without the time it waited for your answers
   worked() {
     return Date.now() - this.busySince - this.waited - (this.asking ? Date.now() - this.askedAt : 0)
   }
   idle() {
+    clearTimeout(this.busyLater)
     this.busySince = null
     this.stopSpin()
   }

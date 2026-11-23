@@ -209,11 +209,11 @@ Ask it to read, change, run and fix things in your project, like any coding agen
 1. `/` shows every command; `heart --help` lists the rest.
 2. `Shift+Tab` changes what it may do without asking.
 3. `Esc` twice (or `Ctrl+C` twice) stops it; `Esc` also closes a dialog.
-4. While it works, `Enter` queues a message. `Esc` (or `↑`) takes queued messages back into the box
-  to change or drop, without stopping the work.
-5. `Shift+Enter` (or `Option+Enter`) adds a new line. `Alt+O` shows all of the model's thinking (two lines
-  of it show otherwise), `Alt+L` the whole plan (three of its steps show while it works). The same
-  call made again and again shows once, with a count (×4).
+4. While it works, `Enter` queues a message; `↑` takes the last one back into the box to change or
+  drop, without stopping the work.
+5. `Shift+Enter` (or `Option+Enter`) adds a new line. The model's thinking shows in full in the
+  conversation, as it comes. `Alt+L` shows the whole plan (one line of it shows while it works). The
+  same call made again and again shows once, with a count (×4).
 6. While it works, commands that don't change the conversation (`/help`, `/cost`, `/diff`,
   `/settings`…) run at once; the ones that do (`/compact`, `/rewind`…) wait until it's done.
 

@@ -2,6 +2,29 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.70 (2026-11-23)
+
+- **The model's thinking shows in full in the conversation**, as it comes, and stays there (no more
+  two lines above the spinner; `Alt+O`, `/toggle_thinking` and `--hide-thinking` are gone).
+- **The input box and status bar no longer vanish** after a task: readline wrote "clear to the end of
+  the screen" straight to the terminal in full screen; it writes nothing there now.
+- **Esc while it works means stop** (press it twice); it no longer pulls queued messages back or clears
+  the box first. `↑` brings a queued message back.
+- **Steps in words**: Read, Edit, Run, Search, Plan… instead of tool names, the model named only when
+  it changes. A command shows its last lines of output, not just "exit 0".
+- **Less on screen**: one spinner row (time and Esc beside it; "waiting for" only after 2 seconds), a
+  one-line plan, one line per queued message, no tab bar with one tab, a one-line header (the key
+  hints only before the first message), a one-row status bar that drops items to fit a narrow window.
+- **A line says why the model answers again** (HeartCode asked whether every part is done), and every
+  model takeover reads the same: `↻ llama takes over · qwen hit its rate limit`.
+- **Plainer words**: "runs everything", "asks before changes", "no tools", "stopped"; no
+  "checked at the first message"; the thinking effort only when you set one. Retries say which model
+  failed and wrap instead of being cut.
+- **No price for local models** (a local model showed another provider's price).
+- **Commands that answer at once** show no spinner, and a one-line answer stays in the conversation.
+- **The "/" menu** puts the commands you used last first, with short descriptions.
+- **The notifications question** at the first start waits until a model is set up.
+
 ## 0.1.69 (2026-11-18)
 
 - **Update model info and Test all are separate buttons again** (as in 0.1.67), instead of one

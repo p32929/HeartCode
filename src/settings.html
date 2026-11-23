@@ -3643,8 +3643,7 @@ let sbLines = [] // [{ left:[id…], right:[id…] }]
 let sbDrag = null // the chip being dragged: { id, from: 'palette' | { line, side, idx } }
 let sbSaveTimer = null
 const SB_DEFAULT = () => [
-  { left: ['provider', 'model'], right: ['mode', 'thinking', 'images'] },
-  { left: ['ctx', 'tps', 'autocompact'], right: ['background', 'permissions', 'worktree', 'cost'] },
+  { left: ['provider', 'model', 'ctx', 'tps'], right: ['mode', 'thinking', 'autocompact', 'background', 'worktree', 'permissions', 'cost'] },
 ]
 const sbLabel = (id) => (SB_ITEMS.find((i) => i.id === id) || {}).label || id
 const sbSample = (id) => (SB_ITEMS.find((i) => i.id === id) || {}).sample || id

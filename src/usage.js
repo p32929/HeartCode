@@ -43,6 +43,7 @@ export async function loadPrices({ url = 'https://models.dev/api.json', timeout 
   return table
 }
 
+const LOCAL = /^(localhost|127\.|0\.0\.0\.0|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|[^.:]+(:\d+)?$)/ // this computer, the local network, a bare host name
 const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
 const hostOf = (url) => {
   try {
@@ -63,7 +64,8 @@ export function priceOf(provider, baseUrl, model) {
     return null
   }
   const own = all.filter(ownBy(provider, baseUrl))
-  return find(own) ?? find(all)
+  // not models.dev's provider: another's price only for a hosted one (a local model costs nothing)
+  return find(own) ?? (LOCAL.test(hostOf(baseUrl)) ? null : find(all))
 }
 // models.dev's providers that are this one: by its name in HeartCode, or its URL.
 const ownBy = (provider, baseUrl) => {

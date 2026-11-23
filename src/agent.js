@@ -17,7 +17,7 @@ import { serversNote } from './lsp.js'
 import { newlyEnded, jobLine } from './background.js'
 import { loadHooks, runHooks } from './hooks.js'
 import { takeConfigErrors, HELPER_JOBS } from './config.js'
-import { c, duration, Block, Markdown, color, diffLines, renderDiff } from './ui.js'
+import { c, Block, Markdown, color, diffLines, renderDiff, STEP_NAMES } from './ui.js'
 import { fetch } from './http.js' // not the built-in one: see http.js
 
 // Images for a helper (the agent tool's "images"), as data: URLs: image URLs (fetched), data: URLs,
@@ -277,7 +277,7 @@ export class Session {
       record({ provider: t.provider ?? this.client.provider, model: t.model ?? this.client.model }, answer ? 'helped' : 'helper-failed') // its track record (record.js)
       if (answer) return t === first ? answer : `(Answered by ${name(t)}, not ${name(first)}${failed.length ? `: ${failed.join('; ')}` : ''})\n\n${answer}`
       if (failed.length < i + 1) failed.push(`${t.model}: no reply`)
-      if (order[i + 1]) this.ui.warn(`${t.model} couldn't do it (${failed.at(-1).slice(t.model.length + 2)}); handing it to ${order[i + 1].model}`)
+      if (order[i + 1]) this.ui.handover(order[i + 1].model, `${t.model} couldn't do it (${failed.at(-1).slice(t.model.length + 2)})`)
     }
     return `error: none of your models that can do it managed: ${failed.join('; ')}`
   }
@@ -984,7 +984,7 @@ async function runNative(s, task, images, signal) {
     record(client, 'handover') // its track record (record.js)
     s.gaveUp.add(`${client.provider}/${was}`) // not gone back to this message, nor asked for a second opinion
     if (strongest(s, client, `${was} ${why}`) || client.moveOn?.(`${was} ${why}`, s.gaveUp)) {
-      ui.warn(`${was} ${why}; handing over to ${client.model}`)
+      ui.handover(client.model, `${was} ${why}`)
       // the next model sees the whole conversation: told it's taking over, and not to repeat what didn't work
       s.messages.push({ role: 'user', content: prompt('agent/taken-over', { was, why, plan: (s.chat.todos ?? []).filter((t) => t.status !== 'completed').map((t) => `- ${t.content}${t.why ? ` (stuck: ${t.why})` : ''}`).join('\n') }) })
       s.stuckReports = 0
@@ -1043,8 +1043,8 @@ async function runNative(s, task, images, signal) {
     // A long tool call (a whole file) streams in silently: say what's being written.
     const onToolDelta = (name, args) => {
       const file = /"path"\s*:\s*"([^"]+)"/.exec(args)?.[1]
-      const what = name === 'run_command' ? 'preparing a command' : EDITS.has(name) && file ? `writing ${file}` : `preparing ${name}${file ? ` ${file}` : ''}` // only an edit is "writing" a file
-      ui.spinner(`${what} · ${args.length >= 1000 ? `${(args.length / 1000).toFixed(1)}k` : args.length} chars`)
+      const what = name === 'run_command' ? 'writing a command' : EDITS.has(name) && file ? `writing ${file}` : `${{ read_file: 'reading', search: 'searching', list_files: 'listing', web_fetch: 'fetching', web_search: 'searching the web', todo: 'planning', agent: 'briefing a helper' }[name] ?? 'preparing'}${file ? ` ${file}` : ''}` // only an edit is "writing" a file
+      ui.spinner(`${what}${args.length >= 2000 ? ` · ${(args.length / 1000).toFixed(1)}k characters` : '…'}`)
     }
     // the prompts or HEARTCODE.md changed meanwhile (applySettings): the system prompt again, now
     if (s.refreshSystem && s.messages[0]?.role === 'system') s.messages[0] = { ...s.messages[0], content: SYSTEM(s) }
@@ -1158,7 +1158,7 @@ async function runNative(s, task, images, signal) {
       if (movedOn < (client.rotation?.list.length ?? 1) - 1 && client.moveOn(`${was}: ${empty} empty replies in a row`)) {
         movedOn++
         empty = 0
-        ui.warn(`${was} keeps replying with nothing; going on with ${client.model}`)
+        ui.handover(client.model, `${was} keeps replying with nothing`)
         continue
       }
       return finalAnswer(s, signal)
@@ -1224,6 +1224,7 @@ async function runNative(s, task, images, signal) {
         s.wrapUpLater?.(task, res.content) // after the answer, beside what comes next
         return res.content
       }
+      if (!s.isSub) ui.print(c.faint(c.italic(`✻ ${undeclared ? 'HeartCode asked whether every part is done and checked' : 'not finished yet: HeartCode asked it to go on'}`))) // the next answer isn't a mystery
       nudged++
       sinceNudge = false
       s.saidDone = null // sent back: said again once it's finished
@@ -1803,7 +1804,6 @@ function helperUI(ui, label, model) {
   // conversation's; with other helpers replying at the
   // same time, held until its reply ends, then printed at once (two streams would interleave).
   const response = () => {
-    const t0 = Date.now()
     let thought = ''
     let said = ''
     const alone = !streaming.get(ui)
@@ -1815,7 +1815,7 @@ function helperUI(ui, label, model) {
       end() {
         streaming.set(ui, streaming.get(ui) - 1)
         if (live) live.end()
-        else if (thought.trim()) ui.print(c.faint(c.italic(`  ✻ ${label} thought for ${duration(Date.now() - t0)}`)) + (ui.showThinking ? `\n${c.think(c.italic(thought.trim().replace(/^/gm, '    ')))}` : ''))
+        else if (thought.trim()) ui.print(c.faint(c.italic(`  ✻ ${label} thinking`)) + `\n${c.think(c.italic(thought.trim().replace(/^/gm, '    ')))}`)
         if (!said.trim()) return
         ui.print(`  ${c.bright(c.bold('●'))} ${c.bold(label)}`)
         let block = new Block((x) => ui.write(x), { marker: '    ', style: c.text })
@@ -1841,7 +1841,7 @@ function helperUI(ui, label, model) {
     step: (name, detail = '') => {
       if (ui.afterBlock) ui.gap()
       ui.afterBlock = false
-      ui.print(`  ${c.accent('●')} ${c.accent(c.bold(`${label} › ${name}`))} ${c.info(detail)}${model ? c.faint(` · ${model}`) : ''}`)
+      ui.print(`  ${c.accent('●')} ${c.accent(c.bold(`${label} › ${STEP_NAMES[name] ?? name}`))} ${c.info(detail)}${model ? c.faint(` · ${model}`) : ''}`)
       status(`${name} ${detail}`)
     },
     result: (text) => ui.print(`    ${c.ghost('⎿')} ${c.faint(text)}`),

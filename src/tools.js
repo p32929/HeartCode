@@ -569,12 +569,12 @@ export async function runConfirmed(s, cmd, signal, background = false, wait) {
   try {
     lines = fs.readFileSync(job.file, 'utf8').split(/\r?\n|\r/).filter((l) => l.trim()).length
   } catch {}
-  s.ui.result(`exit ${job.code}${lines ? ` · ${lines} line${lines === 1 ? '' : 's'}` : ''}`)
-  // failed: its last lines under it (what went wrong, usually), aligned with the result's text
-  // why it failed: the last error line and what follows it (a stack's end says nothing), else the last lines
-  const tail = job.code !== 0 ? tailLines(job, 40).filter((x) => x.trim()) : []
-  const at = tail.findLastIndex((l) => /\b(error|exception|failed|fail|assert\w*|cannot|not found|denied)\b/i.test(l))
-  if (job.code !== 0) for (const l of at === -1 ? tail.slice(-3) : tail.slice(at, at + 3)) s.ui.print(`${s.isSub ? '      ' : '    '}${c.faint(clip(l.trimEnd(), 120))}`)
+  s.ui.result(job.code === 0 ? (lines ? `${lines} line${lines === 1 ? '' : 's'} of output` : 'no output') : `failed (exit ${job.code})`)
+  // its last lines under it; failed: the last error line and what follows it (a stack's end says
+  // nothing), else the last lines
+  const tail = tailLines(job, 40).filter((x) => x.trim())
+  const at = job.code !== 0 ? tail.findLastIndex((l) => /\b(error|exception|failed|fail|assert\w*|cannot|not found|denied)\b/i.test(l)) : -1
+  for (const l of at === -1 ? tail.slice(-3) : tail.slice(at, at + 3)) s.ui.print(`${s.isSub ? '      ' : '    '}${c.faint(clip(l.trimEnd(), 120))}`)
   const changed = changesSince(s, before)
   return `exit code ${left ? 0 : job.code}\n${output.trim() || '(no output)'}${changed ? `\nFiles this command changed: ${changed}` : ''}${left ? `\n${prompt('agent/left-running', { id: job.id })}` : ''}`
 }
@@ -825,7 +825,7 @@ async function todoTool(s, args, signal, id) {
   // or one does it step by step. Nobody to answer (headless, no reply in time): several, the recommended
   const pending = todos.filter((t) => t.status === 'pending')
   if (s.split === undefined && !s.isSub && s.subagent && s.team?.().length && s.ui.permission !== 'plan' && pending.length >= 2) {
-    const said = await askUser(s, { question: `The plan has ${todos.length} steps. Work on it with several agents at once?`, header: 'Agents', options: [{ label: 'Several agents at once', description: 'steps that stand alone run side by side, each on the model best at it; one no model is sure of is done by two, and the better kept' }, { label: 'One agent', description: 'one model does every step, in turn' }] })
+    const said = await askUser(s, { question: `The plan has ${todos.length} steps. Work on it with several agents at once?`, header: 'Agents', options: [{ label: 'Several agents at once', description: 'steps that stand alone run side by side, each on the model best at it' }, { label: 'One agent', description: 'one model does every step in turn' }] })
     s.split = /One agent/.test(said) ? 'one' : 'several'
     log('parts', `the user chose: ${s.split} (${said})`)
   }
