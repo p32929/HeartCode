@@ -2,6 +2,14 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.97 (2026-11-24)
+
+- **`/update` shows the whole changelog**, newest first, with the versions since yours marked
+  `· new`; PgUp/PgDn or the mouse wheel scroll it (↑↓ still choose Update now / Not now). It said
+  "no changelog found": it was read from GitHub's main branch, which can be behind npm; now it's
+  the changelog of the version on offer, from its npm package.
+- Any question with a long text above its choices scrolls the same way.
+
 ## 0.1.96 (2026-11-24)
 
 - **A test no longer passes a model that only seemed to answer.** Asked to reply "OK":

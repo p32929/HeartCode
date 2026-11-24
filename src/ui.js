@@ -830,6 +830,12 @@ export class UI {
     if (was && was !== dialog) was.close?.()
     this.render()
   }
+  // a question's long text moved by n lines (drawn in #question, which keeps it in range)
+  #scrollText(n) {
+    const p = this.menu.pick
+    p.textTop = Math.max(0, Math.min((p.textTop ?? 0) + n, p.textMax))
+    this.render()
+  }
   // Text to read (a command's answer: /help, /context, /diff…) in a dialog: ↑/↓, PgUp/PgDn, Home/End
   // and the wheel scroll it, Esc closes it (and toggle: a key's action, as the key that opened it).
   // Without the full screen: printed.
@@ -938,6 +944,18 @@ export class UI {
       const r = wrapWords(t, w)
       return r.length <= n ? r : [...r.slice(0, n - 1), `${fit(r[n - 1], w - 1)}…`]
     }
+    // a picker's text longer than its room (the whole changelog on /update): a window of it, which
+    // PgUp/PgDn and the wheel move (↑↓ still choose), and where it is under it
+    const scrolled = (lines, n) => {
+      if (!pick) return clip(lines, n)
+      const room = Math.max(1, n - 1)
+      pick.textMax = Math.max(0, lines.length - room)
+      if (!pick.textMax) return lines
+      pick.textTop = Math.max(0, Math.min(pick.textTop ?? 0, pick.textMax))
+      pick.textPage = Math.max(1, room - 1)
+      const t = pick.textTop
+      return [...lines.slice(t, t + room), c.faint(`${t + 1}–${Math.min(lines.length, t + room)} of ${lines.length} lines · PgUp/PgDn or the wheel scroll`)]
+    }
     let at = 0
     return {
       title: long || title.length > 200 ? '' : title,
@@ -969,7 +987,7 @@ export class UI {
             })
         const want = cards ? blocks.flat().length : Math.max(1, m.items.length)
         const least = Math.min(want, cards ? Math.max(...blocks.map((b) => b.length)) + 2 : 3) // the choices give way first, down to this
-        const top0 = clip(intro, Math.max(3, h - tail.length - filter.length - least))
+        const top0 = scrolled(intro, Math.max(3, h - tail.length - filter.length - least))
         const room = Math.max(1, h - tail.length - filter.length - top0.length)
         let list
         if (!choices.length) list = [c.faint(`nothing matches "${rl.line}"`)]
@@ -1188,6 +1206,7 @@ export class UI {
     if (b & 64) {
       if ((b & 0xc3) !== 64 && (b & 0xc3) !== 65) return
       if (this.dialog) return this.dialog.key?.({ name: b & 1 ? 'down' : 'up', wheel: true }), this.render()
+      if (this.asking && this.menu.pick?.textMax) return this.#scrollText(b & 1 ? 3 : -3) // a question's long text
       return this.#wheel(b & 1 ? -1 : 1) // 64 up, 65 down
     }
     if ((b & 3) !== 0 && !up) return // the left button only (a release says 3 in some terminals)
@@ -1581,6 +1600,7 @@ export class UI {
           return this.render()
         }
       }
+      if ((key.name === 'pageup' || key.name === 'pagedown') && this.menu.pick?.textMax) return this.#scrollText(key.name === 'pageup' ? -this.menu.pick.textPage : this.menu.pick.textPage)
       if (key.name === 'pageup' || key.name === 'pagedown') return this.scrollBy(key.name === 'pageup' ? this.page() : -this.page())
       const m = this.menu
       const it = m.on && m.items[m.sel]
