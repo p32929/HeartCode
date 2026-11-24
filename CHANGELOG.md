@@ -2,13 +2,17 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.100 (2026-11-24)
+
+- The 0.1.99 note named the wrong key for the whole plan: it's Alt+L.
+
 ## 0.1.99 (2026-11-24)
 
 - **One quiet row under the conversation while it works**: what's happening in a few words
   ("thinking", "running a command", "searching the web"), the plan's progress and helpers as a
   count ("plan 2/5 · 2 helpers"), the time, and Esc. The command, its output, the helpers' doings
   and the plan's steps are no longer listed there: what's being done is in the conversation above
-  (each step as it runs). The whole plan: Alt+P (`show_plan`) as before.
+  (each step as it runs). The whole plan: Alt+L (`show_plan`) as before.
 - **The ♥ by the input beats while HeartCode works on your message** (lub-dub, then a rest).
 
 ## 0.1.98 (2026-11-24)
