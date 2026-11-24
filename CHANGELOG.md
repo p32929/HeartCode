@@ -2,6 +2,11 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.101 (2026-11-24)
+
+- **Room above the status line**: three empty rows between the conversation and "thinking · 27s"
+  while it works (one on a short terminal), so the two don't run together.
+
 ## 0.1.100 (2026-11-24)
 
 - The 0.1.99 note named the wrong key for the whole plan: it's Alt+L.

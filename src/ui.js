@@ -1415,7 +1415,7 @@ export class UI {
       const what = plainOf(status).split(' › ')[0]
       const tail = [...extra, timer].filter(Boolean).join(' · ')
       const room = Math.max(10, cols - 3 - width(tail) - (tail ? 3 : 0))
-      bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(width(what) > room ? `${fit(what, room - 1)}…` : what)}${tail ? c.faint(` · ${tail}`) : ''}`, cols))
+      bottom.push(...Array(rows >= 24 ? 3 : 1).fill(''), fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(width(what) > room ? `${fit(what, room - 1)}…` : what)}${tail ? c.faint(` · ${tail}`) : ''}`, cols)) // apart from the conversation above it: three empty rows (one on a short screen)
     }
     if (this.scroll) bottom.push(c.dim(`  ↓ ${Number.isFinite(this.scroll) ? this.scroll : 'more'} lines below · held here for reading${this.keyFor('scroll_bottom') ? ` · ${this.keyFor('scroll_bottom')} to the bottom` : ''}`))
     if (this.ahead.length) {
