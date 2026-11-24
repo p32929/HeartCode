@@ -202,6 +202,7 @@ function sliceCols(text, from, to) {
   return out
 }
 const FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+const BEAT = [1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0] // the ♥ while it works, a frame (80 ms) each: lub, dub, rest
 
 // 75000 → "1 minute 15 seconds"; the two biggest units: "5 hours 33 minutes", "2 days 3 hours"
 export function duration(ms) {
@@ -1015,21 +1016,6 @@ export class UI {
     }
   }
 
-  // The plan (todo list) while it works, kept in sight under the spinner: how much is done, and three
-  // of its steps (what's being done, then what's next); the rest on a key (show_plan).
-  #todoLines(cols) {
-    const todos = this.todos?.() ?? []
-    const open = todos.filter((t) => t.status !== 'completed')
-    if (!open.length) return []
-    const done = todos.length - open.length
-    const mark = { pending: c.muted('☐'), in_progress: c.info('◐'), completed: c.faint('☑'), stuck: c.warn('⚠') }
-    const by = (t) => (t.by ? c.faint(' · ') + (t.status === 'in_progress' ? c.info(t.by) : c.faint(t.by)) : '') // the model a part was given to
-    // one line: how far it is, the step being done now (the whole plan: show_plan)
-    const now = todos.find((t) => t.status === 'in_progress') ?? open[0]
-    const k = this.keyFor('show_plan')
-    return [fit(`  ${c.muted(`Plan ${done}/${todos.length}`)} ${mark[now.status]} ${c.info(now.content)}${by(now)}${k ? c.faint(` · ${k} all of it`) : ''}`, cols)]
-  }
-
   // The whole plan in a box (show_plan, /todos): every step and its state; the key closes it again.
   showPlan() {
     const todos = this.todos?.() ?? []
@@ -1401,7 +1387,9 @@ export class UI {
     const asked = this.asking && !this.histOn && rl
     // The input box: the rows around the cursor, at most INPUT_ROWS; the rules count the rest.
     const typing = !this.asking && rl && this.mainPrompt // working: what's typed meanwhile shows in the box
-    const input = asked ? layoutInput(this.mainPrompt ?? ' ', '', 0, cols) : this.asking || typing ? layoutInput(this.asking ? rl._prompt : this.mainPrompt, rl.line, rl.cursor, cols) : { rows: [''], cur: { row: 0, col: 0 } }
+    // while it works on your message, the input's ♥ beats (lub-dub, then a rest), a beat a second
+    const prompt = typing && this.busySince && this.timer && !BEAT[this.frame % BEAT.length] ? this.mainPrompt.replace('♥', '♡') : this.mainPrompt
+    const input = asked ? layoutInput(this.mainPrompt ?? ' ', '', 0, cols) : this.asking || typing ? layoutInput(this.asking ? rl._prompt : prompt, rl.line, rl.cursor, cols) : { rows: [''], cur: { row: 0, col: 0 } }
     const first = Math.max(0, Math.min(input.cur.row - INPUT_ROWS + 1, input.rows.length - INPUT_ROWS))
     const box = input.rows.slice(first, first + INPUT_ROWS)
     const inputRows = box.length
@@ -1419,13 +1407,15 @@ export class UI {
       const waiting = request && !(this.tokenAt >= request) && this.beforeRetry === undefined && Date.now() - request > 2000
       const status = String(waiting ? `${/^(working|thinking|answering)$/.test(plainOf(label)) ? '' : `${label} · `}waiting for ${this.waitingFor?.() || 'the model'}` : label).replace(/\s*[\r\n\t]+\s*/g, ' ') // never a line break or tab to the terminal: it would write on a row the screen doesn't know about, left there
       const timer = this.busySince ? `${short(this.worked())} · Esc twice to stop` : ''
-      // one row; a long status (a retry, a command's last line) wraps instead of being cut
-      wrapParts(`${status}${timer ? ` · ${timer}` : ''}`, cols - 2).forEach((r, i) => bottom.push(fit(`${i ? ' ' : c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(r)}`, cols)))
-      // helpers at work (agent.js keeps them in this.helpers: label → what it's doing), then the plan
-      const helpers = [...this.helpers]
-      for (const [name, { model, what }] of helpers.slice(0, helpers.length > 6 ? 5 : 6)) bottom.push(fit(`  ${c.faint('◦')} ${c.muted(name)}${model ? `${c.faint(' · ')}${c.info(model)}` : ''}${what ? c.faint(` · ${what}`) : ''}`, cols))
-      if (helpers.length > 6) bottom.push(c.faint(`  … ${helpers.length - 5} more`))
-      bottom.push(...this.#todoLines(cols))
+      // One row, always: what's happening in a few words, how far the plan is, helpers at work, the
+      // time. What's being done shows in the conversation above (its steps); nothing more here.
+      const todos = this.todos?.() ?? []
+      const done = todos.filter((t) => t.status === 'completed').length
+      const extra = [todos.length && done < todos.length ? `plan ${done}/${todos.length}` : '', this.helpers.size ? `${this.helpers.size} helper${this.helpers.size === 1 ? '' : 's'}` : ''].filter(Boolean)
+      const what = plainOf(status).split(' › ')[0]
+      const tail = [...extra, timer].filter(Boolean).join(' · ')
+      const room = Math.max(10, cols - 3 - width(tail) - (tail ? 3 : 0))
+      bottom.push(fit(`${c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(width(what) > room ? `${fit(what, room - 1)}…` : what)}${tail ? c.faint(` · ${tail}`) : ''}`, cols))
     }
     if (this.scroll) bottom.push(c.dim(`  ↓ ${Number.isFinite(this.scroll) ? this.scroll : 'more'} lines below · held here for reading${this.keyFor('scroll_bottom') ? ` · ${this.keyFor('scroll_bottom')} to the bottom` : ''}`))
     if (this.ahead.length) {

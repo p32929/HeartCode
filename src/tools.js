@@ -573,13 +573,7 @@ export async function runConfirmed(s, cmd, signal, background = false, wait) {
   const secs = Number(wait) > 0 ? Number(wait) : background ? 3 : 30
   const before = snapshot(s)
   const job = startJob(s.root, cmd)
-  // its latest output line beside it, read a few times a second (the label is re-read every frame)
-  let last = ''
-  let readAt = 0
-  s.ui.spinner(() => {
-    if (Date.now() - readAt > 250) [readAt, last] = [Date.now(), tailLines(job, 3).filter((l) => l.trim()).at(-1)?.trim() ?? '']
-    return `running ${clip(cmd.replace(/\s+/g, ' '), 50)}${last ? ` › ${clip(last.replace(/\s+/g, ' '), 60)}` : ''}` // one line: a multi-line command (a script) too
-  })
+  s.ui.spinner('running a command') // the command itself is the step above, in the conversation
   await waitFor(job, secs * 1000, signal)
   s.ui.stopSpin()
   if (!job.exited) {
@@ -623,7 +617,7 @@ async function backgroundTool(s, a, signal) {
     return was ? `Stopped #${job.id} (${job.command}).` : `#${job.id} had already exited with ${job.code}.`
   }
   if (Number(a.wait) > 0) {
-    s.ui.spinner(`waiting on #${job.id} ${clip(job.command, 60)}`)
+    s.ui.spinner('waiting for a background command')
     await waitFor(job, Number(a.wait) * 1000, signal)
     s.ui.stopSpin()
   }
@@ -1200,7 +1194,7 @@ async function webTool(s, name, args, signal) {
       log('research', `"${what}": ${saved.length} saved page(s) offered first`)
       return prompt('agent/research-saved', { query: what, pages: saved.map((r) => `- ${r.title} — ${r.url} (read ${r.fetched}${r.used_for ? `; used for: ${r.used_for}` : ''}) → ${r.file}`).join('\n') })
     }
-    s.ui.spinner(`searching: ${clip(what, 60)}`)
+    s.ui.spinner('searching the web')
     const out = await webSearch(what, { signal })
     if (s.root && !s.noResearch && !/^(error:|no results)/.test(out)) {
       const { file } = saveSearch(s.root, what, out)
@@ -1208,7 +1202,7 @@ async function webTool(s, name, args, signal) {
     }
     return out
   }
-  s.ui.spinner(`fetching ${clip(what, 60)}`)
+  s.ui.spinner('reading a web page')
   const allowed = hostsIn(s.task) // a local or private host you named: may be fetched
   if (!s.root || s.noResearch) return await webFetch(what, { start: args.start, signal, allowed }) // nothing kept (--no-memory)
   const page = await fetchPage(what, { signal, allowed })
@@ -1411,7 +1405,7 @@ async function callMcp(s, server, tool, a, signal) {
     s.mcpRead.add(`${server.name}\n${tool}`)
   }
   const done = await s.mcpGate?.() // a helper may be using the MCP servers (a browser): its turn first
-  s.ui.spinner(`${server.name} · ${tool}`)
+  s.ui.spinner(`using ${server.name}`)
   const started = Date.now()
   let r
   try {

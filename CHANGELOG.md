@@ -2,6 +2,15 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.99 (2026-11-24)
+
+- **One quiet row under the conversation while it works**: what's happening in a few words
+  ("thinking", "running a command", "searching the web"), the plan's progress and helpers as a
+  count ("plan 2/5 · 2 helpers"), the time, and Esc. The command, its output, the helpers' doings
+  and the plan's steps are no longer listed there: what's being done is in the conversation above
+  (each step as it runs). The whole plan: Alt+P (`show_plan`) as before.
+- **The ♥ by the input beats while HeartCode works on your message** (lub-dub, then a rest).
+
 ## 0.1.98 (2026-11-24)
 
 - **No more stray lines under the spinner.** A multi-line command (a script run with `node -e "…"`,
