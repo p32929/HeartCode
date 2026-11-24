@@ -2,6 +2,14 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.98 (2026-11-24)
+
+- **No more stray lines under the spinner.** A multi-line command (a script run with `node -e "…"`,
+  a heredoc) put its line breaks into the spinner ("running … › its last output line") and into its
+  step ("✓ Run …"); the terminal wrote them on rows the screen didn't track, which stayed there
+  ("s = s… › ok · 8m 53s") or scrambled the lines around them. Both are one line now, and nothing
+  drawn under the conversation can carry a line break or a tab.
+
 ## 0.1.97 (2026-11-24)
 
 - **`/update` shows the whole changelog**, newest first, with the versions since yours marked

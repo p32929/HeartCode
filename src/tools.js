@@ -578,7 +578,7 @@ export async function runConfirmed(s, cmd, signal, background = false, wait) {
   let readAt = 0
   s.ui.spinner(() => {
     if (Date.now() - readAt > 250) [readAt, last] = [Date.now(), tailLines(job, 3).filter((l) => l.trim()).at(-1)?.trim() ?? '']
-    return `running ${clip(cmd, 50)}${last ? ` › ${clip(last, 60)}` : ''}`
+    return `running ${clip(cmd.replace(/\s+/g, ' '), 50)}${last ? ` › ${clip(last.replace(/\s+/g, ' '), 60)}` : ''}` // one line: a multi-line command (a script) too
   })
   await waitFor(job, secs * 1000, signal)
   s.ui.stopSpin()

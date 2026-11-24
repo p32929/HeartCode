@@ -1417,7 +1417,7 @@ export class UI {
       const request = this.requestSince?.()
       const label = this.#label()
       const waiting = request && !(this.tokenAt >= request) && this.beforeRetry === undefined && Date.now() - request > 2000
-      const status = waiting ? `${/^(working|thinking|answering)$/.test(plainOf(label)) ? '' : `${label} · `}waiting for ${this.waitingFor?.() || 'the model'}` : label
+      const status = String(waiting ? `${/^(working|thinking|answering)$/.test(plainOf(label)) ? '' : `${label} · `}waiting for ${this.waitingFor?.() || 'the model'}` : label).replace(/\s*[\r\n\t]+\s*/g, ' ') // never a line break or tab to the terminal: it would write on a row the screen doesn't know about, left there
       const timer = this.busySince ? `${short(this.worked())} · Esc twice to stop` : ''
       // one row; a long status (a retry, a command's last line) wraps instead of being cut
       wrapParts(`${status}${timer ? ` · ${timer}` : ''}`, cols - 2).forEach((r, i) => bottom.push(fit(`${i ? ' ' : c.brand(FRAMES[this.frame % FRAMES.length])} ${c.muted(r)}`, cols)))
@@ -1448,6 +1448,7 @@ export class UI {
     if (this.noticeText) bottom.push(fit(this.noticeMark ? `${c.warn(this.noticeMark)} ${c.muted(this.noticeText)}` : `  ${c.muted(this.noticeText)}`, cols))
     if (menu.on && !asked) bottom.push(...this.#menuLines(cols))
     bottom.push(first ? note(first, '↑') : rule)
+    for (let i = 0; i < bottom.length; i++) bottom[i] = bottom[i].replace(/[\r\n\t]/g, ' ') // a row is one row: a break in a label (a helper's, a command's) would be written on a row the screen doesn't track
     const head = [...(this.tabBar?.(cols) ?? []), ...(this.header?.(cols) ?? [])].map((l) => fit(l, cols))
     const inputTop = rows - below.length - inputRows + 1 // first row of the input
     const avail = Math.max(0, inputTop - 1 - bottom.length - head.length)
@@ -2409,6 +2410,7 @@ export class UI {
   // are indented under it, kept apart from the others')
   // note: says what happened (learned, reviewed, removed), no result to wait for; ok false: a bad one
   step(name, detail = '', who = '', { sub = '', note = false, ok = true } = {}) {
+    detail = String(detail ?? '').replace(/\s*[\r\n\t]+\s*/g, ' ') // one line (a multi-line command): a step is a row, and a break in it scrambles the rows around it
     const key = sub
     if (note) {
       if (this.afterBlock) this.gap()
@@ -2446,6 +2448,7 @@ export class UI {
   // got, summed over a group (90 lines, 12 matches); files: the files a search found them in.
   // Called again for the same step: its words are added (an edit: "formatted with prettier").
   result(text = '', { ok = true, refused = false, none = false, n, unit, files, sub = '' } = {}) {
+    text = String(text ?? '').replace(/\s*[\r\n\t]+\s*/g, ' ') // one line, as the step's
     const st = this.steps?.get(sub)
     const item = st?.items.at(-1)
     if (!this.full || !st || st.log !== this.log) {
