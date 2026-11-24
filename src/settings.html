@@ -1960,13 +1960,15 @@ const MEANS = {
   502: '502: the provider (or a proxy before it) couldn\'t reach the model',
   503: '503: the model or provider is unavailable now',
   504: '504: the provider timed out',
+  'answered with an error': 'the request went through, but its answer is an error: not enough credits, upgrade your plan, a model that isn\'t available… (as text, not as an error code)',
+  "didn't answer": 'the request went through, but it didn\'t answer the question (asked to reply "OK"): an image or audio link, a safety verdict, something else altogether. Likely not a chat model',
   empty: 'it answered, but with no text at all',
   'no answer': 'no answer within the test timeout (Tests wait, above the list)',
   failed: 'it failed without a status code (a lost connection, an unreadable reply…)',
 }
 // What a test came to, in a word: works, its status code (402, 429…), empty, no answer or failed;
 // null while it runs or before it's tested
-const outcome = (r) => (!r || r.going ? null : r.ok ? 'works' : r.status ? String(r.status) : r.kind === 'empty' || (!r.kind && /nothing/.test(r.error)) ? 'empty' : r.kind === 'timeout' || (!r.kind && /within/.test(r.error)) ? 'no answer' : 'failed') // kind: said by the server (older results: their words)
+const outcome = (r) => (!r || r.going ? null : r.ok ? 'works' : r.kind === 'said-error' ? 'answered with an error' : r.kind === 'off-task' ? "didn't answer" : r.status ? String(r.status) : r.kind === 'empty' || (!r.kind && /nothing/.test(r.error)) ? 'empty' : r.kind === 'timeout' || (!r.kind && /within/.test(r.error)) ? 'no answer' : 'failed') // kind: said by the server (older results: their words)
 // The Works? cell: the last result (cut short, all of it on hover) and Test.
 function triedCell(t) {
   const r = TRIES[keyOf(t)]
@@ -1975,7 +1977,7 @@ function triedCell(t) {
     : r.going ? ['going', 'testing…', 'sending it a short message']
     : r.ok && r.toolsOk === false ? ['ok', `✓ ${(r.ms / 1000).toFixed(1)}s · ✗ tools`, `it answers ("${r.reply}"), but it couldn't do a small job with a tool, so it's a poor choice for work: ${r.toolsWhy}${secs}`]
     : r.ok ? ['ok', `✓ ${(r.ms / 1000).toFixed(1)}s`, `works: it answered "${r.reply}"${r.toolsOk ? ', and did a small job with a tool' : ''}${secs}`]
-    : ['bad', `✗ ${outcome(r)}`, `doesn't work: ${r.error}${secs}`] // the reason on hover
+    : ['bad', `✗ ${{ 'answered with an error': 'error reply', "didn't answer": 'off-topic' }[outcome(r)] ?? outcome(r)}`, `doesn't work: ${r.error}${secs}`] // short in the cell, the reason on hover
   return h('div', { className: 'try ' + cls }, h('span', { className: 'msg', textContent: text, title: about }))
 }
 function showTried(t) {

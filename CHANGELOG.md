@@ -2,6 +2,17 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.96 (2026-11-24)
+
+- **A test no longer passes a model that only seemed to answer.** Asked to reply "OK":
+  - **Answered with an error** (`✗ error reply`): its answer is an error as text ("doesn't have enough
+    credits", "Upgrade your plan", `Model "…" is not available`): the request went through, the
+    model doesn't work.
+  - **Didn't answer** (`✗ off-topic`): something else altogether (an image or audio link, a safety
+    verdict, a persona's greeting): likely not a chat model.
+  Both count as not working (helpers, Doesn't work) and are in the Result filter. Results already
+  saved are judged the same way, without testing again.
+
 ## 0.1.95 (2026-11-23)
 
 - **The Providers page, rewritten**: one state (the filters, the folds, the ticked models) and one way

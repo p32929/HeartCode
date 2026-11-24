@@ -264,7 +264,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   // doesn't stop them. Each result is kept in ~/.heart/model-tests.json ("provider/model" → { ok, ms,
   // reply | error, status, at }) and sent to the page as it comes.
   const TESTS_FILE = path.join(HOME, 'model-tests.json')
-  const tests = readJson(TESTS_FILE, {})
+  const tests = Object.fromEntries(Object.entries(readJson(TESTS_FILE, {})).map(([k, r]) => [k, judged(r)])) // older results judged the same way
   let saving = null
   const gone = new Set() // tests forgotten here since the last write
   // merged with the file as it is now: another HeartCode's results written meanwhile stay
@@ -309,7 +309,9 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       const reply = (r.content || '').trim()
       if (!reply && !r.toolCalls.length) return { ok: false, kind: 'empty', ms: Date.now() - t0, error: `it answered with nothing${r.usage?.completion_tokens ? ` (${r.usage.completion_tokens} tokens it said it wrote)` : ''}` }
       const ms = Date.now() - t0
-      return { ok: true, ms, reply: reply.slice(0, 80), ...(testedOf({ provider, model })?.mode === 'tools' && !c.cli && (await toolTest(c, stop))) }
+      const verdict = judged({ ok: true, ms, reply: reply.slice(0, 200) })
+      if (!verdict.ok) return verdict // an error said as its answer, or no answer to the question: no tool test
+      return { ...verdict, ...(testedOf({ provider, model })?.mode === 'tools' && !c.cli && (await toolTest(c, stop))) }
     } catch (e) {
       if (stop?.aborted) return { stopped: true }
       return { ok: false, ms: Date.now() - t0, status: e.status ?? null, ...(e.name === 'TimeoutError' && { kind: 'timeout' }), error: e.name === 'TimeoutError' ? noAnswer() : whyFailed(e), ...(e.retryAfter > 0 && { retryAfter: Number(e.retryAfter) }) }
@@ -1281,6 +1283,20 @@ function warm() {
     if (i + 300 < all.length) setImmediate(() => step(i + 300))
   }
   step(0)
+}
+
+// A test's answer, judged: asked to reply with just "OK", a model that answered with an error as its
+// text (a provider's "not enough credits", a CLI's "Model … is not available") or with something else
+// altogether (an image link, a safety verdict, a persona's greeting) doesn't work for HeartCode,
+// though the request went through. OK with more around it (thinking written into the answer) works.
+const SAID_ERROR = /\b(error|exception|execution failed|not available|unavailable|not supported|insufficient|not enough credits|enough credits|top ?up|upgrade your plan|recharg\w*|quota|rate.?limit\w*|unauthori[sz]ed|forbidden|invalid (api )?key|access denied|not allowed|exceeded|billing|payment required)\b/i
+export function judged(r) {
+  if (!r?.ok || typeof r.reply !== 'string') return r
+  const text = r.reply.trim()
+  if (/^\W*ok(ay)?\W*$/i.test(text)) return r
+  if (SAID_ERROR.test(text)) return { ...r, ok: false, kind: 'said-error', error: `it answered with an error: "${clip(text.replace(/\s+/g, ' '), 160)}"` }
+  if (!/\bok(ay)?\b/i.test(text)) return { ...r, ok: false, kind: 'off-task', error: `it didn't answer the question (asked to reply "OK"): "${clip(text.replace(/\s+/g, ' '), 160)}"` }
+  return r
 }
 
 // This machine's IPv4 addresses on its networks (Wi-Fi, Ethernet, a VPN), not the loopback one
