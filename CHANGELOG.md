@@ -2,6 +2,17 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.102 (2026-11-27)
+
+- **Import & export your settings** (`/settings` → Advanced → Import & export): tick what goes in the
+  file — providers and CLIs, the model list and helpers (with abilities set by hand), MCP servers,
+  skills, prompt changes — and whether API keys go too (off by default; without them, MCP servers'
+  env and headers stay out as well). Importing shows what the file has, with the same tickboxes, and
+  merges: it adds and updates what has the same name, and removes nothing of yours.
+- **A CLI that isn't installed on this computer comes in switched off** (tagged "not installed" on
+  Providers). Switching it on asks to install it first, then switches it on once it's in; Turn all on
+  and Turn on N providers leave those off and say so.
+
 ## 0.1.101 (2026-11-24)
 
 - **Room above the status line**: three empty rows between the conversation and "thinking · 27s"

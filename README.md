@@ -224,6 +224,13 @@ Ask it to read, change, run and fix things in your project, like any coding agen
 
 <img width="972" height="611" alt="Image" src="https://github.com/user-attachments/assets/dcf9488a-7cee-4a24-8e3e-c86876d379c9" />
 
+## Taking your setup to another computer
+
+`/settings` → Advanced → **Import & export**: export your providers, model list, MCP servers, skills and
+prompt changes to a file (API keys only if you tick them), and import it on the other computer. It
+merges into what's there. CLIs that computer doesn't have come in switched off; switching one on
+installs it first.
+
 ## More on the settings page
 
 What's in the sidebar:

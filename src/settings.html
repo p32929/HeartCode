@@ -272,6 +272,9 @@
   .preset.skel { pointer-events: none; }
   .preset.skel .shim:first-child { width: 70%; height: 13px; margin-top: 0; }
   @keyframes shim { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .move-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; align-items: start; }
+  .move-grid h2 { margin: 0 0 4px; font-size: 16px; }
+  .move-grid .opt input[type=checkbox]:disabled + i { opacity: .4; }
   .cli-bar { display: flex; align-items: center; gap: 12px; margin: 4px 0 10px; font-size: 13px; }
   #cli-form { width: min(980px, calc(100vw - 32px)); }
   .preset.cli .box { position: absolute; top: 10px; right: 10px; width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--line-strong); display: grid; place-items: center; color: transparent; }
@@ -895,7 +898,7 @@
       <a href="#mcp" data-page="mcp"><span class="ic">⧉</span> MCP servers <span class="count" id="n-mcp"></span></a>
       <a href="#prompts" data-page="prompts"><span class="ic">✎</span> System prompt</a>
       <div class="nav-group" role="separator"></div>
-      <a href="#logging" data-page="logging" data-tabs="logging files"><span class="ic">▤</span> Advanced <span class="count" id="n-failed"></span></a>
+      <a href="#logging" data-page="logging" data-tabs="logging files move"><span class="ic">▤</span> Advanced <span class="count" id="n-failed"></span></a>
     </nav>
     <div class="using" id="using"></div>
   </aside>
@@ -1118,6 +1121,27 @@
     </section>
 
     <!-- Advanced files -->
+    <section class="page" id="page-move">
+      <div class="head"><div><h1>Import &amp; export</h1><p class="lead">Take your setup to another computer, or bring one in. Importing adds to what's here and updates what has the same name: nothing of yours is removed.</p></div></div>
+      <div class="move-grid">
+        <div class="card">
+          <h2>Export</h2>
+          <p class="muted">What goes in the file:</p>
+          <div id="x-parts"></div>
+          <label class="opt"><div class="t"><b>Include API keys</b><span>Off: providers come without their keys, and MCP servers without their env and headers (they often hold tokens too). On: the file works at once on the other computer, but anyone with it has your keys.</span></div><span class="sw"><input type="checkbox" id="x-keys"><i></i></span></label>
+          <div class="actions"><button class="primary" id="x-go" type="button">Export to a file</button></div>
+        </div>
+        <div class="card">
+          <h2>Import</h2>
+          <p class="muted">A file exported from HeartCode (here or on another computer).</p>
+          <input type="file" id="i-file" accept=".json,application/json" hidden>
+          <div class="row" style="align-items:center;gap:10px"><button id="i-pick" type="button">Choose a file…</button><span class="muted mono" id="i-name"></span></div>
+          <div id="i-parts"></div>
+          <div class="hint" id="i-note"></div>
+          <div class="actions"><button class="primary" id="i-go" type="button" disabled>Import</button></div>
+        </div>
+      </div>
+    </section>
     <section class="page" id="page-files">
       <div class="head"><div><h1>Settings files</h1><p class="lead">The rest of HeartCode's settings, as the files they're kept in (<span class="mono" id="f-home"></span>). A JSON file that doesn't parse isn't saved; save one empty to delete it.</p></div></div>
       <div class="md">
@@ -1543,7 +1567,7 @@ addEventListener('scroll', drawVirtual, { capture: true, passive: true }) // the
 addEventListener('resize', drawVirtual)
 
 // pages: one at a time, from the address (#providers…)
-const PAGES = ['providers', 'models', 'general', 'statusbar', 'notify', 'logging', 'prompts', 'mcp', 'skills', 'files']
+const PAGES = ['providers', 'models', 'general', 'statusbar', 'notify', 'logging', 'prompts', 'mcp', 'skills', 'files', 'move']
 const page = () => (PAGES.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'providers')
 function showPage() {
   for (const p of PAGES) $('page-' + p).classList.toggle('on', p === page())
@@ -1560,7 +1584,7 @@ function showPage() {
 addEventListener('hashchange', showPage)
 // A sidebar item with several pages (data-tabs): a tab bar on top of each of them. Each page keeps
 // its own address (#providers, #statusbar, #files…), so links to one still open it.
-const TAB_NAMES = { models: 'List', providers: 'Providers', general: 'Settings', statusbar: 'Status bar', logging: 'Logs', files: 'Files' }
+const TAB_NAMES = { models: 'List', providers: 'Providers', general: 'Settings', statusbar: 'Status bar', logging: 'Logs', files: 'Files', move: 'Import & export' }
 const TAB_COUNTS = { providers: 'n-providers' } // a count shown on the tab, not the sidebar item
 for (const a of document.querySelectorAll('nav a[data-tabs]')) {
   const tabs = a.dataset.tabs.split(' ')
@@ -1644,6 +1668,74 @@ async function saveItem(kind, id, path, body, done) {
   return r
 }
 
+// --- Import & export (Advanced): the parts, ticked; keys only when asked; an import merged in ---
+const MOVE_PARTS = [
+  ['providers', 'Providers and CLIs', 'their addresses, which are on, models added by name (keys only with "Include API keys")'],
+  ['models', 'Model list and helpers', 'your models in order, what to do when one fails, the helpers and their jobs, abilities set by hand'],
+  ['mcp', 'MCP servers', 'the servers you added'],
+  ['skills', 'Skills', 'your own skills and their files'],
+  ['prompts', 'Prompt changes', 'your changes to HeartCode\'s prompts (System prompt)'],
+]
+const movePick = { x: new Set(['providers', 'models']), i: new Set() }
+let importing = null // { name, data }
+const partRows = (side, counts) => MOVE_PARTS.map(([k, label, desc]) => h('label', { className: 'opt' },
+  h('div', { className: 't' }, h('b', { textContent: `${label}${counts[k] != null ? ` (${counts[k]})` : ''}` }), h('span', { textContent: desc })),
+  h('span', { className: 'sw' }, h('input', { type: 'checkbox', checked: movePick[side].has(k), disabled: !counts[k], onchange: (e) => (e.target.checked ? movePick[side].add(k) : movePick[side].delete(k), drawMove()) }), h('i'))))
+function drawMove() {
+  if (!S) return
+  const mine = { providers: S.providers.length, models: S.order.length, mcp: S.mcp.filter((x) => x.from === 'yours').length, skills: S.skills.filter((x) => x.mine).length, prompts: S.prompts.filter((x) => x.changed).length }
+  for (const k of movePick.x) if (!mine[k]) movePick.x.delete(k)
+  put($('x-parts'), partRows('x', mine))
+  $('x-go').disabled = !movePick.x.size
+  const d = importing?.data
+  const theirs = d ? { providers: Object.keys(d.providers ?? {}).length, models: d.models?.list?.length, mcp: Object.keys(d.mcp ?? {}).length, skills: Object.keys(d.skills ?? {}).length, prompts: Object.values(d.prompts ?? {}).reduce((n, x) => n + Object.keys(x).length, 0) } : {}
+  put($('i-parts'), d ? partRows('i', theirs) : [])
+  $('i-go').disabled = !movePick.i.size
+  const clis = Object.entries(d?.providers ?? {}).filter(([, p]) => /^cli:\/\//i.test(p.baseUrl ?? '')).map(([n, p]) => ({ n, id: /^cli:\/\/([^/]+)/i.exec(p.baseUrl)[1] }))
+  const missing = CLIS ? clis.filter((x) => !CLIS.find((k) => k.id === x.id)?.installed).map((x) => x.n) : []
+  $('i-note').textContent = !d ? '' : [d.keys ? 'This file has API keys in it.' : 'No API keys in this file: add them under Providers (Edit) after importing.', missing.length && movePick.i.has('providers') ? `Not installed here, so they come in switched off: ${missing.join(', ')}. Switching one on asks to install it.` : ''].filter(Boolean).join(' ')
+}
+$('x-go').onclick = async () => {
+  const r = await api('/api/export', { parts: [...movePick.x], keys: $('x-keys').checked }).catch((e) => (toast(e.message, true), null))
+  if (!r) return
+  const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' })), download: `heartcode-settings-${new Date().toISOString().slice(0, 10)}.json` })
+  document.body.append(a)
+  a.click()
+  a.remove()
+  toast(`exported ${[...movePick.x].length} part${movePick.x.size === 1 ? '' : 's'}${$('x-keys').checked ? ', with your API keys: keep the file private' : ''}`)
+}
+$('i-pick').onclick = () => $('i-file').click()
+$('i-file').onchange = async (e) => {
+  const f = e.target.files[0]
+  e.target.value = ''
+  if (!f) return
+  let data
+  try {
+    data = JSON.parse(await f.text())
+    if (data?.heartcode !== 'settings') throw new Error()
+  } catch {
+    importing = null
+    drawMove()
+    return toast(`${f.name} isn't a HeartCode settings file`, true)
+  }
+  importing = { name: f.name, data }
+  movePick.i = new Set(MOVE_PARTS.map(([k]) => k).filter((k) => data[k] && Object.keys(data[k]).length))
+  $('i-name').textContent = `${f.name}${data.from ? ` · from HeartCode ${data.from}` : ''}`
+  if (!CLIS) loadClis() // which of its CLIs are installed here
+  drawMove()
+}
+$('i-go').onclick = async () => {
+  if (!importing) return
+  const r = await act('/api/import', { data: importing.data, parts: [...movePick.i] })
+  if (!r) return
+  const t = r.report
+  const said = [t.providers != null && `${t.providers} provider${t.providers === 1 ? '' : 's'}`, t.models != null && `${t.models} model${t.models === 1 ? '' : 's'} added to the list`, t.mcp != null && `${t.mcp} MCP server${t.mcp === 1 ? '' : 's'}`, t.skills != null && `${t.skills} skill${t.skills === 1 ? '' : 's'}`, t.prompts != null && `${t.prompts} prompt change${t.prompts === 1 ? '' : 's'}`].filter(Boolean)
+  toast(`imported: ${said.join(', ')}${t.cliOff.length ? ` · ${t.cliOff.length} CLI${t.cliOff.length === 1 ? '' : 's'} not installed here, left off` : ''}${t.skipped ? ` · ${t.skipped} model${t.skipped === 1 ? '' : 's'} skipped (no provider)` : ''}`, false, 8000)
+  importing = null
+  $('i-name').textContent = ''
+  drawMove()
+}
+
 // --- Providers & models ---
 const PRESETS = [
   ['openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', 'hundreds of models'],
@@ -1671,6 +1763,7 @@ $('p-url').oninput = () => (drawPresets(), drawCliNote())
 // adds each as a provider at cli://<its name>; one that isn't installed installs from here (its log shown
 // as it goes, ticked once it's in), then is signed in to in a terminal
 let CLIS = null
+let clisAsked = false
 let cliPoll = null
 const CLI_PICKS = new Set()
 let cliTouched = false // ticks changed by hand: installed ones aren't ticked again by themselves
@@ -1682,6 +1775,8 @@ function loadClis() {
     for (const k of list) if (k.installed && !cliAdded(k.id) && (!cliTouched || was.get(k.id) === false)) CLI_PICKS.add(k.id) // ticked: what's here, and one just installed
     drawClis()
     if ($('p-form').open) drawCliNote()
+    drawMove() // an import's CLIs: installed here or not
+    redraw() // Providers: which CLIs aren't installed
     clearTimeout(cliPoll)
     if (list.some((k) => k.installing || k.pending) && $('cli-form').open) cliPoll = setTimeout(loadClis, list.some((k) => k.installing) ? 1500 : 700) // an install's log; versions still being asked
   }, (e) => toast(e.message, true))
@@ -1877,7 +1972,35 @@ const redraw = () => S && !redrawing && (redrawing = requestAnimationFrame(() =>
 // the providers ticked: those with a model ticked (a provider's own box ticks all of its models shown)
 const selProviders = () => [...new Set([...TICKED].map((k) => splitKey(k).provider))].filter((n) => S?.providers.some((p) => p.name === n))
 const offOf = (names) => S.providers.filter((p) => names.includes(p.name))
-const switchProviders = (names, on) => act('/api/provider/on', { names, on }, `${names.length === 1 ? names[0] : `${names.length} providers`} ${on ? 'on' : 'off'}${on ? '' : ': HeartCode skips their models'}`)
+// a coding CLI provider's CLI ('claude'…), and whether it's installed here (unknown until loadClis: yes)
+const cliIdOf = (p) => /^cli:\/\/([^/]+)/i.exec(p?.baseUrl ?? '')?.[1]
+const notInstalled = (p) => Boolean(cliIdOf(p) && CLIS && !CLIS.find((k) => k.id === cliIdOf(p))?.installed)
+// on, except the CLIs not installed here: those are said, and left off
+const saidLeft = (r) => r?.notInstalled?.length && toast(`${r.notInstalled.join(', ')} ${r.notInstalled.length === 1 ? "isn't" : "aren't"} installed on this computer: left off (switch one on to install it)`, true, 7000)
+const switchProviders = async (names, on) => saidLeft(await act('/api/provider/on', { names, on }, `${names.length === 1 ? names[0] : `${names.length} providers`} ${on ? 'on' : 'off'}${on ? '' : ': HeartCode skips their models'}`))
+// A CLI that isn't installed here (imported from another computer), switched on: installed first, asked;
+// on once it's in
+async function installThenOn(p) {
+  const k = CLIS.find((x) => x.id === cliIdOf(p))
+  if (!k?.install) {
+    toast(`${k?.title ?? p.name} isn't installed, and nothing here can install it${k?.needs ? ` (needs ${k.needs})` : ''}: opening its page`, true, 7000)
+    return k?.page && window.open(k.page, '_blank', 'noopener')
+  }
+  if (!confirm(`${k.title} isn't installed on this computer. Install it now, then switch ${p.name} on?\n\nThis runs: ${k.install}`)) return
+  await api('/api/cli/install', { id: k.id }).catch((e) => toast(e.message, true))
+  job(`install-${k.id}`, { where: ['catalog'], what: `Installing ${k.title}`, detail: 'then it switches on' })
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 2000))
+    const list = await api('/api/clis').catch(() => null)
+    const now = list?.find((x) => x.id === k.id)
+    if (!now || now.installing) continue
+    CLIS = list
+    job(`install-${k.id}`)
+    if (!now.installed) return toast(`${k.title} didn't install: ${now.error || 'see + Add CLIs'}`, true, 9000)
+    toast(`${k.title} installed. Sign in once with "${k.login}" in a terminal if it asks.`, false, 7000)
+    return switchProviders([p.name], true)
+  }
+}
 // the top button: the ticked providers when some are, else all; off while any of them is on
 function onAllLabel() {
   const sel = selProviders()
@@ -1890,7 +2013,7 @@ $('on-all').onclick = () => {
   const sel = selProviders()
   if (sel.length) return switchProviders(sel, !offOf(sel).some((p) => !p.off))
   const on = !S?.providers.some((p) => !p.off)
-  act('/api/provider/on', { on }, on ? 'every provider is on' : 'every provider is off: HeartCode skips their models until you turn one on')
+  act('/api/provider/on', { on }, on ? 'every provider is on' : 'every provider is off: HeartCode skips their models until you turn one on').then(saidLeft)
 }
 // the folds, on the sections there (nothing built again); a search shows them all open
 function applyFolds() {
@@ -2223,9 +2346,10 @@ function drawProviders(s) {
     else loadModels(p.name, MODELS[p.name]?.off)
   }
   for (const k of [...TICKED]) if (!s.providers.some((p) => p.name === splitKey(k).provider)) TICKED.delete(k) // a provider deleted: its ticks go
+  if (!CLIS && !clisAsked && s.providers.some(cliIdOf)) (clisAsked = true), loadClis() // which CLIs are installed here (tagged, asked to install)
   const view = catView(s)
   // built again only when what's shown changed; the rest is marked on the rows there
-  const stamp = JSON.stringify([view.map((x) => [x.p.name, x.p.off, x.p.baseUrl, x.p.key, x.p.added, x.m.loading ?? false, x.m.error ?? '', x.m.off ?? false, x.m.list?.length ?? 0, x.ids.join('\n')]), catKind, onOnly, freeOnly])
+  const stamp = JSON.stringify([view.map((x) => [x.p.name, x.p.off, x.p.baseUrl, x.p.key, x.p.added, x.m.loading ?? false, x.m.error ?? '', x.m.off ?? false, x.m.list?.length ?? 0, x.ids.join('\n'), notInstalled(x.p)]), catKind, onOnly, freeOnly])
   if (stamp !== catStamp) buildCatalog(view, s)
   catStamp = stamp
   markCatalog(s)
@@ -2473,6 +2597,7 @@ function buildCatalog(view, s) {
       h('div', { className: 'who' },
         h('span', { className: 'name' }, provIcon(p.name), p.name),
         p.off ? h('span', { className: 'tag', textContent: 'off' }) : null,
+        notInstalled(p) ? h('span', { className: 'tag err', textContent: 'not installed', title: `${p.name}'s CLI isn't installed on this computer: switch it on to install it` }) : null,
         m.off ? h('span', { className: 'tag', textContent: 'list off', title: "its list isn't loaded: add a model by its name, in the box on the right" }) : m.loading ? h('span', { className: 'tag', textContent: 'loading…' }) : m.error ? h('span', { className: 'tag err', textContent: "can't list its models", title: m.error }) : h('span', { className: 'tag', textContent: `${m.list.length} model${m.list.length === 1 ? '' : 's'}` }),
         h('span', { className: 'tag inlist', hidden: true }),
         h('span', { className: 'meta mono', textContent: p.baseUrl, title: `${p.baseUrl} · key ${p.key || 'none'}` })),
@@ -2584,7 +2709,11 @@ function drawPicks(view = catView()) {
     } else if (e.target.matches('.pick-all')) {
       for (const r of sec.querySelectorAll('.mwrap')) e.target.checked ? TICKED.add(`${name}/${r.dataset.model}`) : TICKED.delete(`${name}/${r.dataset.model}`)
       drawPicks()
-    } else if (e.target.matches('.p-on')) act('/api/provider/on', { name, on: e.target.checked }, e.target.checked ? `${name} is on` : `${name} is off: HeartCode skips its models`)
+    } else if (e.target.matches('.p-on')) {
+      const p = provOf(sec)
+      if (e.target.checked && notInstalled(p)) return (e.target.checked = false), installThenOn(p) // installed first
+      act('/api/provider/on', { name, on: e.target.checked }, e.target.checked ? `${name} is on` : `${name} is off: HeartCode skips its models`).then((r) => !r && redraw()) // refused: the switch as it was
+    }
   })
   list.addEventListener('click', async (e) => {
     const { sec, w } = where(e.target)
@@ -4000,6 +4129,7 @@ function render(s) {
   for (const [key, r] of Object.entries(TRIES)) if (!r.going && placeOf(...key.split(/\/(.*)/s)) === undefined) delete TRIES[key] // off your list: its result too
   drawProviders(s)
   applyFolds()
+  drawMove()
   drawMine(s)
   drawUsing(s)
   drawGeneral(s)

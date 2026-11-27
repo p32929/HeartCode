@@ -14,6 +14,7 @@ import { DEFAULT_SERVERS, mcpAuth, serverName } from './mcp.js'
 import { sections, BUILTIN_PROMPTS, prompt, reloadPrompts } from './prompts.js'
 import { Client } from './client.js'
 import { clisInfo, installCli, cliOf, cliUrl, CLIS } from './clis.js'
+import { onPath } from './spawn.js'
 import { clip, TOOL_DEFS } from './tools.js'
 import { loadProfile, strategy, profilePath, profileFrom } from './probe.js'
 import { loadPrices, priceOf, limitsOf } from './usage.js'
@@ -583,6 +584,17 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       autoPick()
       return state()
     },
+    // Settings to take to another machine (Advanced → Import & export): the parts asked for, keys only
+    // when asked; and a file like it taken in, merged (nothing of yours is removed)
+    'POST /api/export': ({ parts = [], keys = false } = {}) => exportSettings(cfg, parts, keys),
+    'POST /api/import': ({ data, parts = [] } = {}) => {
+      const report = importSettings(cfg, data, parts)
+      save('model')
+      reloadPrompts()
+      forgetTests()
+      autoPick()
+      return { ...state(), report }
+    },
     // the coding CLIs (clis.js): which are installed, how to install the rest, an install going on
     'GET /api/clis': () => clisInfo(),
     // several CLIs added at once (Add CLIs): each a provider named after it; one added already is skipped
@@ -636,13 +648,16 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     'POST /api/provider/on': ({ name, names, on }) => {
       const list = names ?? (name !== undefined ? [name] : Object.keys(cfg.providers))
       for (const n of list) if (!cfg.providers[n]) throw new Error(`no provider "${n}"`)
-      for (const p of list.map((n) => cfg.providers[n])) {
+      // a coding CLI not installed here (one imported from another machine) stays off until it is
+      const missing = on ? list.filter((n) => { const id = cliOf(cfg.providers[n].baseUrl); return id && !onPath(CLIS[id].bin) }) : []
+      if (missing.length && list.length === 1) throw Object.assign(new Error(`${CLIS[cliOf(cfg.providers[missing[0]].baseUrl)].title} isn't installed on this computer: install it first (+ Add CLIs)`), { notInstalled: missing[0] })
+      for (const p of list.filter((n) => !missing.includes(n)).map((n) => cfg.providers[n])) {
         if (on) delete p.off
         else p.off = true
       }
       save('model') // the running sessions' model lists follow at once
       autoPick()
-      return state()
+      return { ...state(), ...(missing.length && { notInstalled: missing }) }
     },
     // A model added by its name (one the provider doesn't list, or its list is off): remembered under
     // the provider, not put in the list (clicked there, it is). models: several at once.
@@ -1240,7 +1255,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       let raw = ''
       for await (const ch of req) {
         raw += ch
-        if (raw.length > 1_000_000) return send(413, { error: 'too big' })
+        if (raw.length > (url.pathname === '/api/import' ? 50_000_000 : 1_000_000)) return send(413, { error: 'too big' }) // an import may carry skills
       }
       if (req.method === 'POST' && !/^application\/json/.test(req.headers['content-type'] ?? '')) return send(415, { error: 'JSON only' })
       send(200, await route(raw ? JSON.parse(raw) : {}))
@@ -1283,6 +1298,150 @@ function warm() {
     if (i + 300 < all.length) setImmediate(() => step(i + 300))
   }
   step(0)
+}
+
+// --- Import & export: settings taken to another machine ---
+// A file: { heartcode: 'settings', version: 1, from (HeartCode's version), at, parts…, keys (whether
+// keys are in it) }. Parts: providers (CLIs too), models (the list in order, when one fails, the
+// helpers, models' abilities set by hand), mcp (servers), skills (your own, their files), prompts
+// (your changes to HeartCode's prompts). Without keys: no provider key, no MCP server's env or headers.
+export const EXPORT_PARTS = ['providers', 'models', 'mcp', 'skills', 'prompts']
+const listOf = (cfg) => [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then]
+const profileClient = (cfg, t) => cfg.providers[t.provider] && new Client({ baseUrl: cfg.providers[t.provider].baseUrl, model: t.model })
+// a folder's text files, by their path in it (a skill's); nothing big or binary
+function filesOf(dir, base = dir, out = {}) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const f = path.join(dir, e.name)
+    if (e.isDirectory()) filesOf(f, base, out)
+    else if (e.isFile() && fs.statSync(f).size < 2_000_000) {
+      const text = fs.readFileSync(f, 'utf8')
+      if (!text.includes('\u0000')) out[path.relative(base, f).split(path.sep).join('/')] = text
+    }
+  }
+  return out
+}
+export function exportSettings(cfg, parts, keys) {
+  const want = new Set(parts.filter((p) => EXPORT_PARTS.includes(p)))
+  if (!want.size) throw new Error('pick at least one part to export')
+  const out = { heartcode: 'settings', version: 1, from: VERSION, at: new Date().toISOString(), keys: Boolean(keys) }
+  if (want.has('providers')) out.providers = Object.fromEntries(Object.entries(cfg.providers).filter(([n]) => n !== cfg.adhoc).map(([n, p]) => [n, { baseUrl: p.baseUrl, ...(keys && p.apiKey && { apiKey: p.apiKey }), ...(p.off && { off: true }), ...(p.list === false && { list: false }), ...(p.models?.length && { models: p.models }) }]))
+  if (want.has('models')) {
+    const list = listOf(cfg)
+    const { then, ...rotation } = rotationOf(cfg)
+    const profiles = {}
+    for (const t of list) {
+      const c = profileClient(cfg, t)
+      const p = c && loadProfile(c)
+      if (p?.source === 'you' && p.set && Object.keys(p.set).length) profiles[`${t.provider}/${t.model}`] = p.set // set by hand (not a CLI's own)
+    }
+    out.models = { list, rotation, ...(cfg.helpers && { helpers: cfg.helpers }), ...(cfg.helpersAuto && { helpersAuto: true }), ...(Object.keys(profiles).length && { profiles }) }
+  }
+  if (want.has('mcp')) {
+    const servers = readJson(path.join(HOME, 'mcp.json'), {})?.mcpServers ?? {}
+    out.mcp = Object.fromEntries(Object.entries(servers).map(([n, sv]) => { const { env, headers, ...rest } = sv; return [n, keys ? sv : rest] }))
+  }
+  if (want.has('skills')) {
+    const dir = skillsDir()
+    out.skills = {}
+    for (const e of fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }) : []) {
+      if (e.isDirectory()) out.skills[e.name] = filesOf(path.join(dir, e.name))
+      else if (e.name.endsWith('.md')) out.skills[e.name.slice(0, -3)] = { 'SKILL.md': fs.readFileSync(path.join(dir, e.name), 'utf8'), single: true }
+    }
+  }
+  if (want.has('prompts')) {
+    out.prompts = {}
+    for (const file of PROMPT_FILES) if (fs.existsSync(ownPrompts(file))) out.prompts[file] = Object.fromEntries(sections(fs.readFileSync(ownPrompts(file), 'utf8')))
+  }
+  return out
+}
+// Merged in: what the file has is added, or updates the one of the same name; nothing of yours goes.
+// A coding CLI not installed here comes in switched off (switching it on asks to install it first).
+// { providers, models, skipped, cliOff: [names], mcp, skills, prompts }: what was taken in.
+export function importSettings(cfg, data, parts) {
+  if (data?.heartcode !== 'settings') throw new Error("that isn't a HeartCode settings file")
+  const want = new Set(parts.filter((p) => EXPORT_PARTS.includes(p) && data[p]))
+  if (!want.size) throw new Error('pick at least one part that the file has')
+  const report = { cliOff: [] }
+  if (want.has('providers')) {
+    report.providers = 0
+    for (const [raw, p] of Object.entries(data.providers ?? {})) {
+      const name = safeName(raw)
+      if (!name || typeof p?.baseUrl !== 'string') continue
+      const id = cliOf(p.baseUrl)
+      if (/^cli:/i.test(p.baseUrl) && !id) continue // a CLI this HeartCode doesn't know
+      const had = cfg.providers[name] ?? {}
+      const next = { ...had, baseUrl: p.baseUrl.replace(/\/+$/, ''), ...(p.apiKey && { apiKey: String(p.apiKey) }) }
+      const models = [...new Set([...(had.models ?? []), ...(Array.isArray(p.models) ? p.models.map(String) : [])])]
+      if (models.length) next.models = models
+      if (p.list === false) next.list = false
+      if (p.off) next.off = true
+      if (id && !onPath(CLIS[id].bin)) (next.off = true), report.cliOff.push(name)
+      cfg.providers[name] = next
+      forgetList(name)
+      report.providers++
+    }
+  }
+  if (want.has('models')) {
+    const m = data.models
+    const mine = listOf(cfg)
+    const had = new Set(mine.map((t) => `${t.provider}/${t.model}`))
+    const add = (Array.isArray(m.list) ? m.list : []).map((t) => ({ provider: safeName(t?.provider), model: String(t?.model ?? '').trim() })).filter((t) => t.model && cfg.providers[t.provider] && !had.has(`${t.provider}/${t.model}`) && had.add(`${t.provider}/${t.model}`))
+    report.skipped = (Array.isArray(m.list) ? m.list : []).filter((t) => !cfg.providers[safeName(t?.provider)]).length // their provider isn't here (not in the file, or not imported)
+    const all = [...mine, ...add]
+    if (all.length) {
+      const opts = mine.length ? rotationOf(cfg) : { ...rotationOf(cfg), ...Object.fromEntries(Object.entries(m.rotation ?? {}).filter(([k, v]) => (k === 'retries' ? Number.isInteger(v) && v >= 1 && v <= 20 : ROTATION[k]?.includes(v)))) } // yours kept when you had a list
+      Object.assign(cfg, { provider: all[0].provider, model: all[0].model, rotation: { on: opts.on, retries: opts.retries, next: opts.next, then: all.slice(1) } })
+    }
+    report.models = add.length
+    if (m.helpers && typeof m.helpers === 'object') cfg.helpers = helpersOf({ ...m.helpers, ...cfg.helpers })
+    if (m.helpersAuto && !cfg.helpers) cfg.helpersAuto = true
+    for (const [k, set] of Object.entries(m.profiles ?? {})) {
+      const t = { provider: k.slice(0, k.indexOf('/')), model: k.slice(k.indexOf('/') + 1) }
+      const c = profileClient(cfg, t)
+      if (!c || !set || typeof set !== 'object') continue
+      const p = loadProfile(c) ?? profileFrom(c, limitsOf(t.provider, c.baseUrl, t.model))
+      if (p.source !== 'you' && p.source !== 'cli') writeJson(profilePath(c), { ...p, set, source: 'you' }), (report.set = (report.set ?? 0) + 1) // yours set by hand stay; a CLI's are its own
+    }
+  }
+  if (want.has('mcp')) {
+    const file = path.join(HOME, 'mcp.json')
+    const now = readJson(file, {}) ?? {}
+    const servers = { ...now.mcpServers }
+    report.mcp = 0
+    for (const [n, sv] of Object.entries(data.mcp ?? {})) if (sv && typeof sv === 'object' && (sv.command || sv.url)) (servers[n] = { ...servers[n], ...sv }), report.mcp++
+    writeJson(file, { ...now, mcpServers: servers })
+  }
+  if (want.has('skills')) {
+    report.skills = 0
+    for (const [raw, files] of Object.entries(data.skills ?? {})) {
+      const name = safeName(raw)
+      if (!name || !files || typeof files !== 'object') continue
+      let wrote = 0
+      if (files.single) {
+        fs.mkdirSync(skillsDir(), { recursive: true })
+        fs.writeFileSync(path.join(skillsDir(), `${name}.md`), String(files['SKILL.md'] ?? ''))
+        wrote++
+      } else {
+        const dir = path.join(skillsDir(), name)
+        for (const [rel, text] of Object.entries(files)) {
+          const to = path.resolve(dir, rel)
+          if (!to.startsWith(dir + path.sep) || typeof text !== 'string') continue // nothing outside its folder
+          fs.mkdirSync(path.dirname(to), { recursive: true })
+          fs.writeFileSync(to, text)
+          wrote++
+        }
+      }
+      if (wrote) report.skills++
+    }
+  }
+  if (want.has('prompts')) {
+    report.prompts = 0
+    for (const [file, secs] of Object.entries(data.prompts ?? {})) {
+      if (!PROMPT_FILES.includes(file) || !secs || typeof secs !== 'object') continue
+      for (const [name, text] of Object.entries(secs)) if (typeof text === 'string') setPrompt(file, name, text), report.prompts++
+    }
+  }
+  return report
 }
 
 // A test's answer, judged: asked to reply with just "OK", a model that answered with an error as its
