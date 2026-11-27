@@ -135,9 +135,9 @@ heart
 
 ### 3. Open the settings page
 
-Type `/settings`. The page opens in your browser. Its link also works from another device on your
-network (handy when HeartCode runs on a server over SSH). Only that link works: it has a secret
-key. A running HeartCode picks up your changes right away.
+Type `/settings`. The page opens in your browser. It's served to this machine only; when HeartCode
+runs over SSH, its link uses the address you reached the server at, so it opens on your own
+computer. Only that link works: it has a secret key. A running HeartCode picks up your changes right away.
 
 <img width="1920" height="1083" alt="Image" src="https://github.com/user-attachments/assets/b51c5884-1da3-4fc9-9a0c-de119d8bb15e" />
 
@@ -146,6 +146,10 @@ key. A running HeartCode picks up your changes right away.
 On **Models → Providers**:
 
 1. **+ Add a provider**: its name, base URL and API key. A preset fills in the URL.
+   Coding CLIs on this machine (Claude Code, Codex, opencode, Junie, Kilo Code, Cline, GitHub
+   Copilot, Cursor, Qwen Code and more): **+ Add CLIs**, tick the ones you want, **Add**. One that
+   isn't installed installs from there; no key, each uses its own sign-in. Its models are listed and tested like any provider's, and a message
+   answered by one is worked on by that CLI with its own tools, its steps shown in HeartCode.
 2. **Pick models.** I take all of them: tick the box at the top (*select every model shown*), then
    **Add N to the list**. Or click a model to add just that one.
 3. Do the same for every provider you have.
@@ -209,15 +213,23 @@ Ask it to read, change, run and fix things in your project, like any coding agen
 1. `/` shows every command; `heart --help` lists the rest.
 2. `Shift+Tab` changes what it may do without asking.
 3. `Esc` twice (or `Ctrl+C` twice) stops it; `Esc` also closes a dialog.
-4. While it works, `Enter` queues a message. `Esc` (or `↑`) takes queued messages back into the box
-  to change or drop, without stopping the work.
-5. `Shift+Enter` (or `Option+Enter`) adds a new line. `Alt+O` shows all of the model's thinking (two lines
-  of it show otherwise), `Alt+L` the whole plan (three of its steps show while it works). The same
-  call made again and again shows once, with a count (×4).
+4. While it works, `Enter` queues a message; `↑` takes the last one back into the box to change or
+  drop, without stopping the work.
+5. `Shift+Enter` (or `Option+Enter`) adds a new line. The model's thinking shows in full in the
+  conversation, as it comes. `Alt+L` shows the whole plan (one line of it shows while it works). Each step is one
+  line that says how it went (✓ worked, ✗ failed), and reads or searches in a row are one entry. The
+  same call made again and again shows once, with a count (×4).
 6. While it works, commands that don't change the conversation (`/help`, `/cost`, `/diff`,
   `/settings`…) run at once; the ones that do (`/compact`, `/rewind`…) wait until it's done.
 
 <img width="972" height="611" alt="Image" src="https://github.com/user-attachments/assets/dcf9488a-7cee-4a24-8e3e-c86876d379c9" />
+
+## Taking your setup to another computer
+
+`/settings` → Advanced → **Import & export**: export your providers, model list, MCP servers, skills and
+prompt changes to a file (API keys only if you tick them), and import it on the other computer. It
+merges into what's there. CLIs that computer doesn't have come in switched off; switching one on
+installs it first.
 
 ## More on the settings page
 

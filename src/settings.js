@@ -13,12 +13,15 @@ import { newer } from './update.js'
 import { DEFAULT_SERVERS, mcpAuth, serverName } from './mcp.js'
 import { sections, BUILTIN_PROMPTS, prompt, reloadPrompts } from './prompts.js'
 import { Client } from './client.js'
+import { clisInfo, installCli, cliOf, cliUrl, CLIS } from './clis.js'
+import { onPath } from './spawn.js'
 import { clip, TOOL_DEFS } from './tools.js'
 import { loadProfile, strategy, profilePath, profileFrom } from './probe.js'
 import { loadPrices, priceOf, limitsOf } from './usage.js'
 import { THEMES, PERMISSIONS } from './ui.js'
 import { loadSkills, frontMatter, skillFiles } from './skills.js'
 import { loadRankings, rankings, rankIn } from './rankings.js'
+import { renameRecords } from './record.js'
 // a model's places in LMArena's public rankings, shown on Your models: { coding, web, vision } as { rank, of, score }
 const RANKED_ON = { coding: 'text:coding', web: 'webdev:webdev', vision: 'vision:overall' }
 const ranksOf = (model, data) => (data ? Object.fromEntries(Object.entries(RANKED_ON).map(([k, list]) => [k, rankIn(model, list, data)])) : null)
@@ -64,7 +67,7 @@ const FILES = [
   ['HEARTCODE.md', 'Instructions for every project (like AGENTS.md, for all of them)', false, '- Answer briefly.\n- Use pnpm, not npm.'],
 ]
 // The prompts the page edits: every section of these files (prompts/*.md); the system prompts first.
-const PROMPT_FILES = ['agent', 'guided', 'compact', 'tests']
+const PROMPT_FILES = ['agent', 'guides', 'guided', 'compact', 'tests']
 const FIRST = { 'agent/system': 'System prompt (models with tool calls)', 'guided/system': 'System prompt (guided mode: models without tool calls)' }
 const ownPrompts = (file) => path.join(HOME, 'prompts', `${file}.md`)
 const tilde = (p) => (p.startsWith(os.homedir() + path.sep) ? '~' + p.slice(os.homedir().length) : p)
@@ -152,7 +155,7 @@ const LIST_V = 2 // how a saved list was read (2: airforce's cents, Cloudflare's
 // The page's own choices (sorts, folded providers, the provider ranking): kept here, not in the
 // browser, whose storage is per address (a new port each time)
 const PREFS = path.join(HOME, 'settings-page.json')
-const PREF_KEYS = ['catSort', 'freeOnly', 'folded', 'sort', 'sorts', 'rank', 'filters']
+const PREF_KEYS = ['catSort', 'freeOnly', 'onOnly', 'catKind', 'folded', 'sort', 'sorts', 'rank', 'filters']
 // The saved lists (a MB or more): kept in memory, read again only when the file changes
 let lists = null
 const readLists = () => {
@@ -221,7 +224,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     if (!p) return null
     const known = limitsOf(t.provider, c.baseUrl, t.model) ?? p.known
     const st = strategy({ ...p, known, source: p.source === 'assumed' && known ? 'models.dev' : p.source })
-    return { source: p.source === 'assumed' && known ? 'models.dev' : (p.source ?? 'tested'), mode: st.actions, context: st.context, sure: st.contextSure, thinking: st.thinking, vision: st.vision, stream: st.stream, set: p.set ?? {} }
+    return { source: p.source === 'assumed' && known ? 'models.dev' : (p.source ?? 'tested'), mode: st.actions, context: p.source === 'cli' ? 0 : st.context, sure: st.contextSure, thinking: st.thinking, vision: st.vision, stream: st.stream, set: p.set ?? {} }
   }
   const knownOf = (t) => {
     const p = cfg.providers[t.provider]
@@ -262,15 +265,25 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   // doesn't stop them. Each result is kept in ~/.heart/model-tests.json ("provider/model" → { ok, ms,
   // reply | error, status, at }) and sent to the page as it comes.
   const TESTS_FILE = path.join(HOME, 'model-tests.json')
-  const tests = readJson(TESTS_FILE, {})
+  const tests = Object.fromEntries(Object.entries(readJson(TESTS_FILE, {})).map(([k, r]) => [k, judged(r)])) // older results judged the same way
   let saving = null
-  const saveTests = () => (saving ??= setTimeout(() => ((saving = null), writeJson(TESTS_FILE, tests)), 1000)) // at most once a second
+  const gone = new Set() // tests forgotten here since the last write
+  // merged with the file as it is now: another HeartCode's results written meanwhile stay
+  const writeTests = () => {
+    saving = null
+    const disk = readJson(TESTS_FILE, {})
+    for (const k of gone) delete disk[k]
+    gone.clear()
+    for (const [k, v] of Object.entries(disk)) if (!(k in tests)) tests[k] = v
+    writeJson(TESTS_FILE, Object.assign(disk, tests))
+  }
+  const saveTests = () => (saving ??= setTimeout(writeTests, 1000)) // at most once a second
   // a model taken off your list: its test result goes too (added again, it's not tested)
   const forgetTests = () => {
-    const mine = new Set(state().order.map((t) => `${t.provider}/${t.model}`))
-    let gone = 0
-    for (const key of Object.keys(tests)) if (!mine.has(key)) (delete tests[key]), gone++
-    if (gone) saveTests()
+    const mine = new Set(orderOf().map((t) => `${t.provider}/${t.model}`))
+    let n = 0
+    for (const key of Object.keys(tests)) if (!mine.has(key)) (delete tests[key]), gone.add(key), n++
+    if (n) saveTests()
   }
   // How long a model test waits for its answer (cfg.testTimeout, seconds; the settings page sets it).
   const testWait = () => testWaitOf(cfg) * 1000
@@ -295,12 +308,14 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       const signal = stop ? AbortSignal.any([AbortSignal.timeout(testWait()), stop]) : AbortSignal.timeout(testWait())
       const r = await c.chat({ messages: [{ role: 'user', content: prompt('tests/hello') }], stream: true }, { signal })
       const reply = (r.content || '').trim()
-      if (!reply && !r.toolCalls.length) return { ok: false, ms: Date.now() - t0, error: `it answered with nothing${r.usage?.completion_tokens ? ` (${r.usage.completion_tokens} tokens it said it wrote)` : ''}` }
+      if (!reply && !r.toolCalls.length) return { ok: false, kind: 'empty', ms: Date.now() - t0, error: `it answered with nothing${r.usage?.completion_tokens ? ` (${r.usage.completion_tokens} tokens it said it wrote)` : ''}` }
       const ms = Date.now() - t0
-      return { ok: true, ms, reply: reply.slice(0, 80), ...(testedOf({ provider, model })?.mode === 'tools' && (await toolTest(c, stop))) }
+      const verdict = judged({ ok: true, ms, reply: reply.slice(0, 200) })
+      if (!verdict.ok) return verdict // an error said as its answer, or no answer to the question: no tool test
+      return { ...verdict, ...(testedOf({ provider, model })?.mode === 'tools' && !c.cli && (await toolTest(c, stop))) }
     } catch (e) {
       if (stop?.aborted) return { stopped: true }
-      return { ok: false, ms: Date.now() - t0, status: e.status ?? null, error: e.name === 'TimeoutError' ? noAnswer() : whyFailed(e), ...(e.retryAfter > 0 && { retryAfter: Number(e.retryAfter) }) }
+      return { ok: false, ms: Date.now() - t0, status: e.status ?? null, ...(e.name === 'TimeoutError' && { kind: 'timeout' }), error: e.name === 'TimeoutError' ? noAnswer() : whyFailed(e), ...(e.retryAfter > 0 && { retryAfter: Number(e.retryAfter) }) }
     }
   }
   // A model that says it calls tools: can it do work with one? One of HeartCode's own tools and a
@@ -320,7 +335,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       }
       return /notes\.txt$/.test(String(a.path ?? '')) && /hello/i.test(String(a.content ?? '')) ? { toolsOk: true } : { toolsOk: false, toolsWhy: `wrong arguments: ${clip(call.function.arguments, 100)}` }
     } catch (e) {
-      if (stop?.aborted || e.name === 'TimeoutError') return {}
+      if (stop?.aborted) return {}
+      if (e.name === 'TimeoutError') return { toolsOk: false, toolsWhy: `no answer to a request with tools within ${testWait() / 1000} seconds` } // hung: not a pass
       return { toolsOk: false, toolsWhy: `a request with tools failed: ${whyFailed(e)}` }
     }
   }
@@ -333,13 +349,14 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     emit('tested', { key, result })
     return result
   }
-  // The run going now: every provider at once, and from each one model at a time (testOrder: "auto",
+  // The run going now: every provider at once (at most TEST_AT_ONCE tests running), and from each one model at a time (testOrder: "auto",
   // then "free", then the rest). A provider that says it's busy (429)
   // isn't a result about the model: that provider pauses (as long
   // as it asks, else 15s, 30s… up to 2 minutes), and the model is tried again later; it's kept as
   // a 429 only after the provider refused it RATE_TRIES times. A model taken off your list while
   // it runs isn't tested. Stop: each provider finishes the one it's on.
   const RATE_TRIES = 4
+  const TEST_AT_ONCE = 10 // tests at the same time in a run: one per provider, at most this many
   let run = null
   const runState = () => ({
     total: run.total, done: run.done, good: run.good, each: run.each, busy: [...run.busy.keys()], now: [...run.now], stopping: run.stopping, some: run.some, started: run.started,
@@ -349,25 +366,29 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   let mineOf = { then: undefined, model: undefined, keys: null }
   const inMine = (key) => {
     if (mineOf.then !== cfg.rotation?.then || mineOf.model !== cfg.model || mineOf.provider !== cfg.provider)
-      mineOf = { then: cfg.rotation?.then, model: cfg.model, provider: cfg.provider, keys: new Set(state().order.map((t) => `${t.provider}/${t.model}`)) }
+      mineOf = { then: cfg.rotation?.then, model: cfg.model, provider: cfg.provider, keys: new Set(orderOf().map((t) => `${t.provider}/${t.model}`)) }
     return mineOf.keys.has(key)
   }
   const wait = (ms) => new Promise((r) => setTimeout(r, ms))
   async function startRun(list, some) {
-    const each = 1 // one model at a time from each provider; the providers side by side
-    run = { total: list.length, done: 0, good: 0, each, busy: new Map(), now: new Set(), pending: new Set(list.map((t) => `${t.provider}/${t.model}`)), stopping: false, some, started: Date.now(), providers: new Map(), cancel: new AbortController() }
+    // one model at a time from each provider; the providers side by side
+    run = { total: list.length, done: 0, good: 0, each: 1, busy: new Map(), now: new Set(), pending: new Set(list.map((t) => `${t.provider}/${t.model}`)), stopping: false, some, started: Date.now(), providers: new Map(), cancel: new AbortController() }
     emit('testrun', runState())
     for (const t of list) {
-      if (!run.providers.has(t.provider)) run.providers.set(t.provider, { queue: [], cap: each, until: 0, pausedAt: 0, backoff: 15_000, refused: new Map() })
+      if (!run.providers.has(t.provider)) run.providers.set(t.provider, { queue: [], until: 0, pausedAt: 0, backoff: 15_000, refused: new Map() })
       run.providers.get(t.provider).queue.push(t)
     }
     for (const p of run.providers.values()) p.queue.sort(testOrder)
     const ticker = setInterval(() => run && Object.keys(runState().paused).length && emit('testrun', runState()), 1000) // the pauses counting down
-    // a provider's worker n: its next model, while there's one and n is under its cap (a busy
-    // provider's cap goes down to one: the others stop; the last one left never does)
-    const worker = async (provider, n) => {
+    // the slots: a test takes one before it starts (a provider paused for a rate limit holds none)
+    let using = 0
+    const queue = []
+    const slot = () => (using < TEST_AT_ONCE ? (using++, Promise.resolve()) : new Promise((r) => queue.push(r)))
+    const free = () => (queue.length ? queue.shift()() : using--)
+    // a provider's worker: its next model, while there's one
+    const worker = async (provider) => {
       const p = run.providers.get(provider)
-      while (!run.stopping && p.queue.length && (n < p.cap || p.live === 1)) {
+      while (!run.stopping && p.queue.length) {
         if (p.until > Date.now()) {
           await wait(Math.min(200, p.until - Date.now()))
           continue
@@ -380,26 +401,29 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
           emit('testrun', runState())
           continue
         }
-        run.busy.set(provider, (run.busy.get(provider) ?? 0) + 1)
+        await slot() // at most TEST_AT_ONCE tests at a time, whatever the number of providers
+        if (run.stopping) {
+          free()
+          break
+        }
+        run.busy.set(provider, 1)
         const sent = Date.now()
         run.now.add(`${t.provider} ${t.model}`) // the models being tested this moment, for the page
         emit('testrun', runState())
-        const r = await tryOne(t, run.cancel.signal)
+        const r = await tryOne(t, run.cancel.signal).finally(free)
         run.now.delete(`${t.provider} ${t.model}`)
         if (r.stopped) break // Stop: not a result (its last one stays)
-        run.busy.get(provider) > 1 ? run.busy.set(provider, run.busy.get(provider) - 1) : run.busy.delete(provider)
+        run.busy.delete(provider)
         if (r.status === 429) {
           const times = (p.refused.get(key) ?? 0) + 1
           p.refused.set(key, times)
-          p.cap = 1
-          // a pause, longer each time; not for refusals of requests sent before the last pause began
-          // (several at once are one burst)
+          // a pause, longer each time; not for a refusal of a request sent before the last pause began
           if (!(sent < p.pausedAt)) {
             p.pausedAt = Date.now()
             p.until = Date.now() + Math.min(120_000, r.retryAfter > 0 ? r.retryAfter * 1000 : p.backoff)
             p.backoff = Math.min(120_000, p.backoff * 2)
           }
-          log('test', `${provider} is busy (429): one at a time, pausing ${Math.round((p.until - Date.now()) / 1000)}s${times < RATE_TRIES ? `; ${t.model} again later` : ''}`)
+          log('test', `${provider} is busy (429): pausing ${Math.round((p.until - Date.now()) / 1000)}s${times < RATE_TRIES ? `; ${t.model} again later` : ''}`)
           if (times < RATE_TRIES) {
             p.queue.push(t)
             emit('testrun', runState())
@@ -413,11 +437,9 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
         if (r.ok) run.good++
         emit('testrun', runState())
       }
-      p.live--
     }
-    for (const p of run.providers.values()) p.live = Math.min(each, p.queue.length)
     try {
-      await Promise.all([...run.providers].flatMap(([provider, p]) => Array.from({ length: p.live }, (_, n) => worker(provider, n))))
+      await Promise.all([...run.providers.keys()].map((provider) => worker(provider)))
     } finally {
       clearInterval(ticker)
       const over = { ...runState(), over: true }
@@ -445,7 +467,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     const times = pool.filter(ran).map((t) => t.test.ms).sort((x, y) => x - y)
     const fast = times[Math.floor((times.length - 1) / 2)] // the middle time: faster than that is quick
     const picks = Object.fromEntries(pool.flatMap((t) => {
-      const jobs = [top(t, 'webdev:webdev') && 'ui', top(t, 'text:coding') && 'code', ((t.can?.thinking && t.can.context >= 128_000) || top(t, 'agent:overall') || top(t, 'text:hard_prompts')) && 'hard', ran(t) && t.test.ms <= fast && 'quick'].filter(Boolean)
+      const tools = t.test?.toolsOk !== false // its tool test failed: the bigger jobs aren't for it
+      const jobs = [tools && top(t, 'webdev:webdev') && 'ui', tools && top(t, 'text:coding') && 'code', tools && ((t.can?.thinking && t.can.context >= 128_000) || top(t, 'agent:overall') || top(t, 'text:hard_prompts')) && 'hard', ran(t) && t.test.ms <= fast && 'quick'].filter(Boolean)
       return jobs.length ? [[keyOf(t), jobs]] : ran(t) ? [[keyOf(t), ['quick']]] : []
     }))
     const out = {}
@@ -471,6 +494,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     const r = recordOf(t)
     return r && { done: Math.round(r.good), failed: Math.round(r.bad), poor: unreliable(t) }
   }
+  // your models in order (#1, then the list): what most routes need, without building the whole state
+  const orderOf = () => [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then]
   const state = (ranked = loadRankings()) => ({
     providers: Object.entries(byName(cfg.providers))
       .filter(([n]) => n !== cfg.adhoc)
@@ -479,7 +504,8 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     model: cfg.model ?? null,
     version: VERSION,
     update: (({ latest } = {}) => (cfg.updateCheck !== false && latest && newer(latest, VERSION) ? latest : null))(readJson(path.join(HOME, 'update-check.json'), {})), // the day's answer from npm: no request here
-    order: [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then].map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t), ranks: ranksOf(t.model, ranked), record: records.on ? recordView(t) : null })),
+    limits: SPEED_LIMITS, // the seconds settings' bounds, for the page's boxes
+    order: orderOf().map((t) => ({ ...t, tested: testedOf(t), known: knownOf(t), price: priceFor(t), ranks: ranksOf(t.model, ranked), record: records.on ? recordView(t) : null })),
     rankings: ranked && { fetched: ranked.fetched, source: ranked.source },
     rotation: (({ then, ...opts }) => opts)(rotationOf(cfg)),
     helpers: helpersOf(cfg.helpers), // { 'provider/model': [jobs] }
@@ -524,9 +550,10 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       name = safeName(name)
       if (!name) throw new Error('a name is needed')
       baseUrl = String(baseUrl ?? '').trim()
+      if (/^cli:/i.test(baseUrl) && !cliOf(baseUrl)) throw new Error(`"${baseUrl}": no such CLI`)
       // an address without http(s)://: whichever of the two the server answers on (any answer, even
       // a 401, means it's there), https first
-      if (!/^https?:\/\//i.test(baseUrl)) baseUrl = await schemeFor(baseUrl)
+      if (!/^(https?|cli):\/\//i.test(baseUrl)) baseUrl = await schemeFor(baseUrl) // cli://claude: a coding CLI (clis.js)
       try {
         if (!new URL(baseUrl).hostname) throw new Error()
       } catch {
@@ -536,17 +563,55 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       const old = cfg.providers[was ?? name]
       const key = keepKey ? old?.apiKey : String(apiKey ?? '').trim() || undefined
       if (was && was !== name) {
+        if (cfg.providers[name]) throw new Error(`there's a provider named "${name}" already`)
         delete cfg.providers[was]
         if (cfg.provider === was) cfg.provider = name
         for (const t of cfg.rotation?.then ?? []) if (t.provider === was) t.provider = name
+        // what's kept per model goes with it: the helpers, the tests, the track record
+        const rekey = (o) => {
+          for (const k of Object.keys(o ?? {})) if (k.startsWith(`${was}/`)) (o[`${name}/${k.slice(was.length + 1)}`] = o[k]), delete o[k]
+        }
+        rekey(cfg.helpers)
+        rekey(tests)
+        saveTests()
+        renameRecords(was, name)
       }
       cfg.providers[name] = { ...old, baseUrl, apiKey: key } // its list switch and added models stay
       if (!key) delete cfg.providers[name].apiKey
       forgetList(name, ...(was ? [was] : [])) // a new URL or key: its models asked for again
       save('model')
       forgetTests()
+      autoPick()
       return state()
     },
+    // Settings to take to another machine (Advanced → Import & export): the parts asked for, keys only
+    // when asked; and a file like it taken in, merged (nothing of yours is removed)
+    'POST /api/export': ({ parts = [], keys = false } = {}) => exportSettings(cfg, parts, keys),
+    'POST /api/import': ({ data, parts = [] } = {}) => {
+      const report = importSettings(cfg, data, parts)
+      save('model')
+      reloadPrompts()
+      forgetTests()
+      autoPick()
+      return { ...state(), report }
+    },
+    // the coding CLIs (clis.js): which are installed, how to install the rest, an install going on
+    'GET /api/clis': () => clisInfo(),
+    // several CLIs added at once (Add CLIs): each a provider named after it; one added already is skipped
+    'POST /api/clis/add': ({ ids }) => {
+      if (!Array.isArray(ids) || !ids.length) throw new Error('no CLI picked')
+      for (const id of ids) {
+        if (!CLIS[id]) throw new Error(`no CLI "${id}"`)
+        if (Object.values(cfg.providers).some((p) => cliOf(p.baseUrl) === id)) continue
+        const name = cfg.providers[id] ? `${id}-cli` : id
+        cfg.providers[name] = { baseUrl: cliUrl(id) }
+        forgetList(name)
+      }
+      save('model')
+      autoPick()
+      return state()
+    },
+    'POST /api/cli/install': ({ id }) => (installCli(id, () => emit('clis', {})), clisInfo()),
     'POST /api/provider/delete': ({ name }) => {
       if (!cfg.providers[name]) throw new Error(`no provider "${name}"`)
       delete cfg.providers[name]
@@ -559,6 +624,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       }
       save('model')
       forgetTests()
+      autoPick()
       return state()
     },
     // a provider's models, and what's known about each (for the page's tooltip): what the provider
@@ -578,12 +644,20 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     },
     // A provider switched off: kept (its key, its models in your list), but HeartCode skips its models
     // until it's on again.
-    'POST /api/provider/on': ({ name, on }) => {
-      if (!cfg.providers[name]) throw new Error(`no provider "${name}"`)
-      if (on) delete cfg.providers[name].off
-      else cfg.providers[name].off = true
-      save('provider')
-      return state()
+    // names: several at once (the ones selected); neither: every provider (Turn all on / off)
+    'POST /api/provider/on': ({ name, names, on }) => {
+      const list = names ?? (name !== undefined ? [name] : Object.keys(cfg.providers))
+      for (const n of list) if (!cfg.providers[n]) throw new Error(`no provider "${n}"`)
+      // a coding CLI not installed here (one imported from another machine) stays off until it is
+      const missing = on ? list.filter((n) => { const id = cliOf(cfg.providers[n].baseUrl); return id && !onPath(CLIS[id].bin) }) : []
+      if (missing.length && list.length === 1) throw Object.assign(new Error(`${CLIS[cliOf(cfg.providers[missing[0]].baseUrl)].title} isn't installed on this computer: install it first (+ Add CLIs)`), { notInstalled: missing[0] })
+      for (const p of list.filter((n) => !missing.includes(n)).map((n) => cfg.providers[n])) {
+        if (on) delete p.off
+        else p.off = true
+      }
+      save('model') // the running sessions' model lists follow at once
+      autoPick()
+      return { ...state(), ...(missing.length && { notInstalled: missing }) }
     },
     // A model added by its name (one the provider doesn't list, or its list is off): remembered under
     // the provider, not put in the list (clicked there, it is). models: several at once.
@@ -678,9 +752,6 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       save('setting:helpers')
       return { helpers: helpersOf(cfg.helpers), helpersAuto: false } // only these: the page saves a click at once, and the whole state of a long list takes seconds
     },
-    // the order helpers are picked in: 'score' (the default: best placed in LMArena's rankings first),
-    // 'own' (your list's) or 'provider' (your provider ranking's, each provider's in your list's order;
-    // rank: the ranking as the page has it, kept for HeartCode to use)
     // the model list, in order (#1 is the model), and when to go on to the next
     'POST /api/order': ({ list, on, retries, next }) => {
       if (!Array.isArray(list)) throw new Error('a list of models is needed')
@@ -752,11 +823,11 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     // a run: all your models, or the ones given (only); one at a time if one is going already
     'POST /api/tests/start': ({ only } = {}) => {
       if (run) throw new Error('a test is running: wait for it, or stop it')
-      const order = state().order
+      const order = orderOf()
       const mine = new Set(order.map((t) => `${t.provider}/${t.model}`))
       const list = Array.isArray(only) ? only.map((t) => ({ provider: String(t?.provider ?? ''), model: String(t?.model ?? '') })).filter((t) => mine.has(`${t.provider}/${t.model}`)) : order.map(({ provider, model }) => ({ provider, model }))
       if (!list.length) throw new Error('no model to test')
-      startRun(list, Array.isArray(only))
+      startRun(list, Array.isArray(only)).catch((e) => log('settings', `test run: ${e.message}`)) // a write that failed: logged, not an unhandled rejection in HeartCode
       return { run: { ...runState(), pending: [...run.pending] } }
     },
     'POST /api/tests/stop': () => {
@@ -765,7 +836,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     },
     'POST /api/models-dev': async ({ provider, model } = {}) => {
       await loadPrices({ force: true })
-      const list = provider && model ? [{ provider, model: String(model) }] : state().order.map(({ provider, model }) => ({ provider, model }))
+      const list = provider && model ? [{ provider, model: String(model) }] : orderOf()
       let found = 0
       for (const t of list) {
         const c = clientFor(t)
@@ -778,6 +849,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
         testNews(`${t.provider}/${t.model}`, t)
       }
       changed('profile')
+      autoPick() // picked for you: what models.dev says each can do counts
       return { ...state(), found, of: list.length }
     },
     // What a model can do, set by you (a model models.dev doesn't know, or to correct it): its
@@ -792,7 +864,12 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       for (const [k, v] of Object.entries({ tools, thinking, images, stream })) if (typeof v !== 'boolean') throw new Error(`${k}: yes or no`)
       await loadPrices()
       const p = loadProfile(c) ?? profileFrom(c, limitsOf(t.provider, c.baseUrl, t.model))
-      p.set = { ...(context ? { context } : {}), tools, thinking, images, stream }
+      // only what differs from models.dev is yours: the rest follows models.dev when it corrects itself
+      const said = p.known ?? {}
+      const as = { tools: said.tools !== false, thinking: Boolean(said.thinking), images: Boolean(said.images), stream: true }
+      p.set = Object.fromEntries(Object.entries({ tools, thinking, images, stream }).filter(([k, v]) => v !== as[k]))
+      if (context) p.set.context = context
+      if (!Object.keys(p.set).length) delete p.set
       if (p.source === 'assumed') p.source = 'you'
       writeJson(profilePath(c), p)
       changed('profile')
@@ -1125,7 +1202,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
 
   // Settings changed by anyone else (another HeartCode or page on this folder, a hand): taken in, and
   // every open page shown them at once (an event: the whole state, when it's different)
-  const SETTINGS_FILES = ['config.json', 'settings-page.json', 'mcp.json', 'hooks.json', 'keybindings.json', 'theme.json', 'format.json', 'HEARTCODE.md', 'prompts', 'skills']
+  const SETTINGS_FILES = ['config.json', 'settings-page.json', 'mcp.json', 'hooks.json', 'keybindings.json', 'theme.json', 'format.json', 'HEARTCODE.md', 'prompts', 'skills', 'records.json', 'rankings.json', 'models', 'model-tests.json'] // and what other runs learn (track records, rankings, models' profiles, tests)
   let shown = ''
   const pushState = () => {
     for (const what of new Set(takeIn(cfg).map(whatOf))) changed(what)
@@ -1139,6 +1216,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
     const w = fs.watch(HOME, { recursive: true }, (_, f) => {
       if (!SETTINGS_FILES.includes(String(f ?? '').split(path.sep)[0])) return
       if (Date.now() - ownWrite < 1000 && ['config.json', 'settings-page.json'].includes(String(f))) return // written here a moment ago: the page has it
+      if (String(f) === 'model-tests.json') for (const [k, v] of Object.entries(readJson(TESTS_FILE, {}))) if (!(k in tests) && !gone.has(k)) tests[k] = v // another HeartCode's tests
       clearTimeout(pending)
       pending = setTimeout(pushState, 150) // a file written in parts, several at once: one look
     })
@@ -1177,7 +1255,7 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
       let raw = ''
       for await (const ch of req) {
         raw += ch
-        if (raw.length > 1_000_000) return send(413, { error: 'too big' })
+        if (raw.length > (url.pathname === '/api/import' ? 50_000_000 : 1_000_000)) return send(413, { error: 'too big' }) // an import may carry skills
       }
       if (req.method === 'POST' && !/^application\/json/.test(req.headers['content-type'] ?? '')) return send(415, { error: 'JSON only' })
       send(200, await route(raw ? JSON.parse(raw) : {}))
@@ -1188,20 +1266,22 @@ export function startSettings({ cfg, apply = () => {}, port = 0, root = process.
   return new Promise((resolve, reject) => {
     server.on('error', reject)
     forgetTests() // results of models no longer yours, left from before
-    server.listen(port, '0.0.0.0', () => {
+    // this machine only; over SSH, the address you reached it at too (the page holds your keys' settings,
+    // over plain HTTP: not offered to everyone on the network)
+    const ssh = process.env.SSH_CONNECTION?.split(' ')[2]
+    server.listen(port, ssh ? '0.0.0.0' : '127.0.0.1', () => {
       const at = (host) => `http://${host}:${server.address().port}/?t=${token}`
       const local = at('127.0.0.1') // for a browser on this machine
-      const ssh = process.env.SSH_CONNECTION?.split(' ')[2] // over SSH: the address you reached this machine at
-      const url = at((ssh?.includes(':') ? `[${ssh}]` : ssh) ?? addresses()[0] ?? '127.0.0.1') // else its network address when it has one: works from another device too
+      const url = ssh ? at(ssh.includes(':') ? `[${ssh}]` : ssh) : local
       log('web', `settings page at ${new URL(url).host}`)
       // models.dev's list (its sizes for your models, whether their providers' lists are on or not):
       // loaded now, and your models' lines brought up to date when it's in
       loadPrices().then(() => {
-        for (const t of state().order) testNews(`${t.provider}/${t.model}`, t)
-      test(state().order) // any without a profile yet
+        for (const t of orderOf()) testNews(`${t.provider}/${t.model}`, t)
+      test(orderOf()) // any without a profile yet
       warm()
       })
-      resolve({ url, local, server, close: () => (watcher?.close(), server.closeAllConnections?.(), server.close()) })
+      resolve({ url, local, server, close: () => (saving && (clearTimeout(saving), writeTests()), watcher?.close(), server.closeAllConnections?.(), server.close()) }) // a test result not written yet: written now
     })
   })
 }
@@ -1218,6 +1298,164 @@ function warm() {
     if (i + 300 < all.length) setImmediate(() => step(i + 300))
   }
   step(0)
+}
+
+// --- Import & export: settings taken to another machine ---
+// A file: { heartcode: 'settings', version: 1, from (HeartCode's version), at, parts…, keys (whether
+// keys are in it) }. Parts: providers (CLIs too), models (the list in order, when one fails, the
+// helpers, models' abilities set by hand), mcp (servers), skills (your own, their files), prompts
+// (your changes to HeartCode's prompts). Without keys: no provider key, no MCP server's env or headers.
+export const EXPORT_PARTS = ['providers', 'models', 'mcp', 'skills', 'prompts']
+const listOf = (cfg) => [...(cfg.providers[cfg.provider] && cfg.model ? [{ provider: cfg.provider, model: cfg.model }] : []), ...rotationOf(cfg).then]
+const profileClient = (cfg, t) => cfg.providers[t.provider] && new Client({ baseUrl: cfg.providers[t.provider].baseUrl, model: t.model })
+// a folder's text files, by their path in it (a skill's); nothing big or binary
+function filesOf(dir, base = dir, out = {}) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const f = path.join(dir, e.name)
+    if (e.isDirectory()) filesOf(f, base, out)
+    else if (e.isFile() && fs.statSync(f).size < 2_000_000) {
+      const text = fs.readFileSync(f, 'utf8')
+      if (!text.includes('\u0000')) out[path.relative(base, f).split(path.sep).join('/')] = text
+    }
+  }
+  return out
+}
+export function exportSettings(cfg, parts, keys) {
+  const want = new Set(parts.filter((p) => EXPORT_PARTS.includes(p)))
+  if (!want.size) throw new Error('pick at least one part to export')
+  const out = { heartcode: 'settings', version: 1, from: VERSION, at: new Date().toISOString(), keys: Boolean(keys) }
+  if (want.has('providers')) out.providers = Object.fromEntries(Object.entries(cfg.providers).filter(([n]) => n !== cfg.adhoc).map(([n, p]) => [n, { baseUrl: p.baseUrl, ...(keys && p.apiKey && { apiKey: p.apiKey }), ...(p.off && { off: true }), ...(p.list === false && { list: false }), ...(p.models?.length && { models: p.models }) }]))
+  if (want.has('models')) {
+    const list = listOf(cfg)
+    const { then, ...rotation } = rotationOf(cfg)
+    const profiles = {}
+    for (const t of list) {
+      const c = profileClient(cfg, t)
+      const p = c && loadProfile(c)
+      if (p?.source === 'you' && p.set && Object.keys(p.set).length) profiles[`${t.provider}/${t.model}`] = p.set // set by hand (not a CLI's own)
+    }
+    out.models = { list, rotation, ...(cfg.helpers && { helpers: cfg.helpers }), ...(cfg.helpersAuto && { helpersAuto: true }), ...(Object.keys(profiles).length && { profiles }) }
+  }
+  if (want.has('mcp')) {
+    const servers = readJson(path.join(HOME, 'mcp.json'), {})?.mcpServers ?? {}
+    out.mcp = Object.fromEntries(Object.entries(servers).map(([n, sv]) => { const { env, headers, ...rest } = sv; return [n, keys ? sv : rest] }))
+  }
+  if (want.has('skills')) {
+    const dir = skillsDir()
+    out.skills = {}
+    for (const e of fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }) : []) {
+      if (e.isDirectory()) out.skills[e.name] = filesOf(path.join(dir, e.name))
+      else if (e.name.endsWith('.md')) out.skills[e.name.slice(0, -3)] = { 'SKILL.md': fs.readFileSync(path.join(dir, e.name), 'utf8'), single: true }
+    }
+  }
+  if (want.has('prompts')) {
+    out.prompts = {}
+    for (const file of PROMPT_FILES) if (fs.existsSync(ownPrompts(file))) out.prompts[file] = Object.fromEntries(sections(fs.readFileSync(ownPrompts(file), 'utf8')))
+  }
+  return out
+}
+// Merged in: what the file has is added, or updates the one of the same name; nothing of yours goes.
+// A coding CLI not installed here comes in switched off (switching it on asks to install it first).
+// { providers, models, skipped, cliOff: [names], mcp, skills, prompts }: what was taken in.
+export function importSettings(cfg, data, parts) {
+  if (data?.heartcode !== 'settings') throw new Error("that isn't a HeartCode settings file")
+  const want = new Set(parts.filter((p) => EXPORT_PARTS.includes(p) && data[p]))
+  if (!want.size) throw new Error('pick at least one part that the file has')
+  const report = { cliOff: [] }
+  if (want.has('providers')) {
+    report.providers = 0
+    for (const [raw, p] of Object.entries(data.providers ?? {})) {
+      const name = safeName(raw)
+      if (!name || typeof p?.baseUrl !== 'string') continue
+      const id = cliOf(p.baseUrl)
+      if (/^cli:/i.test(p.baseUrl) && !id) continue // a CLI this HeartCode doesn't know
+      const had = cfg.providers[name] ?? {}
+      const next = { ...had, baseUrl: p.baseUrl.replace(/\/+$/, ''), ...(p.apiKey && { apiKey: String(p.apiKey) }) }
+      const models = [...new Set([...(had.models ?? []), ...(Array.isArray(p.models) ? p.models.map(String) : [])])]
+      if (models.length) next.models = models
+      if (p.list === false) next.list = false
+      if (p.off) next.off = true
+      if (id && !onPath(CLIS[id].bin)) (next.off = true), report.cliOff.push(name)
+      cfg.providers[name] = next
+      forgetList(name)
+      report.providers++
+    }
+  }
+  if (want.has('models')) {
+    const m = data.models
+    const mine = listOf(cfg)
+    const had = new Set(mine.map((t) => `${t.provider}/${t.model}`))
+    const add = (Array.isArray(m.list) ? m.list : []).map((t) => ({ provider: safeName(t?.provider), model: String(t?.model ?? '').trim() })).filter((t) => t.model && cfg.providers[t.provider] && !had.has(`${t.provider}/${t.model}`) && had.add(`${t.provider}/${t.model}`))
+    report.skipped = (Array.isArray(m.list) ? m.list : []).filter((t) => !cfg.providers[safeName(t?.provider)]).length // their provider isn't here (not in the file, or not imported)
+    const all = [...mine, ...add]
+    if (all.length) {
+      const opts = mine.length ? rotationOf(cfg) : { ...rotationOf(cfg), ...Object.fromEntries(Object.entries(m.rotation ?? {}).filter(([k, v]) => (k === 'retries' ? Number.isInteger(v) && v >= 1 && v <= 20 : ROTATION[k]?.includes(v)))) } // yours kept when you had a list
+      Object.assign(cfg, { provider: all[0].provider, model: all[0].model, rotation: { on: opts.on, retries: opts.retries, next: opts.next, then: all.slice(1) } })
+    }
+    report.models = add.length
+    if (m.helpers && typeof m.helpers === 'object') cfg.helpers = helpersOf({ ...m.helpers, ...cfg.helpers })
+    if (m.helpersAuto && !cfg.helpers) cfg.helpersAuto = true
+    for (const [k, set] of Object.entries(m.profiles ?? {})) {
+      const t = { provider: k.slice(0, k.indexOf('/')), model: k.slice(k.indexOf('/') + 1) }
+      const c = profileClient(cfg, t)
+      if (!c || !set || typeof set !== 'object') continue
+      const p = loadProfile(c) ?? profileFrom(c, limitsOf(t.provider, c.baseUrl, t.model))
+      if (p.source !== 'you' && p.source !== 'cli') writeJson(profilePath(c), { ...p, set, source: 'you' }), (report.set = (report.set ?? 0) + 1) // yours set by hand stay; a CLI's are its own
+    }
+  }
+  if (want.has('mcp')) {
+    const file = path.join(HOME, 'mcp.json')
+    const now = readJson(file, {}) ?? {}
+    const servers = { ...now.mcpServers }
+    report.mcp = 0
+    for (const [n, sv] of Object.entries(data.mcp ?? {})) if (sv && typeof sv === 'object' && (sv.command || sv.url)) (servers[n] = { ...servers[n], ...sv }), report.mcp++
+    writeJson(file, { ...now, mcpServers: servers })
+  }
+  if (want.has('skills')) {
+    report.skills = 0
+    for (const [raw, files] of Object.entries(data.skills ?? {})) {
+      const name = safeName(raw)
+      if (!name || !files || typeof files !== 'object') continue
+      let wrote = 0
+      if (files.single) {
+        fs.mkdirSync(skillsDir(), { recursive: true })
+        fs.writeFileSync(path.join(skillsDir(), `${name}.md`), String(files['SKILL.md'] ?? ''))
+        wrote++
+      } else {
+        const dir = path.join(skillsDir(), name)
+        for (const [rel, text] of Object.entries(files)) {
+          const to = path.resolve(dir, rel)
+          if (!to.startsWith(dir + path.sep) || typeof text !== 'string') continue // nothing outside its folder
+          fs.mkdirSync(path.dirname(to), { recursive: true })
+          fs.writeFileSync(to, text)
+          wrote++
+        }
+      }
+      if (wrote) report.skills++
+    }
+  }
+  if (want.has('prompts')) {
+    report.prompts = 0
+    for (const [file, secs] of Object.entries(data.prompts ?? {})) {
+      if (!PROMPT_FILES.includes(file) || !secs || typeof secs !== 'object') continue
+      for (const [name, text] of Object.entries(secs)) if (typeof text === 'string') setPrompt(file, name, text), report.prompts++
+    }
+  }
+  return report
+}
+
+// A test's answer, judged: asked to reply with just "OK", a model that answered with an error as its
+// text (a provider's "not enough credits", a CLI's "Model … is not available") or with something else
+// altogether (an image link, a safety verdict, a persona's greeting) doesn't work for HeartCode,
+// though the request went through. OK with more around it (thinking written into the answer) works.
+const SAID_ERROR = /\b(error|exception|execution failed|not available|unavailable|not supported|insufficient|not enough credits|enough credits|top ?up|upgrade your plan|recharg\w*|quota|rate.?limit\w*|unauthori[sz]ed|forbidden|invalid (api )?key|access denied|not allowed|exceeded|billing|payment required)\b/i
+export function judged(r) {
+  if (!r?.ok || typeof r.reply !== 'string') return r
+  const text = r.reply.trim()
+  if (/^\W*ok(ay)?\W*$/i.test(text)) return r
+  if (SAID_ERROR.test(text)) return { ...r, ok: false, kind: 'said-error', error: `it answered with an error: "${clip(text.replace(/\s+/g, ' '), 160)}"` }
+  if (!/\bok(ay)?\b/i.test(text)) return { ...r, ok: false, kind: 'off-task', error: `it didn't answer the question (asked to reply "OK"): "${clip(text.replace(/\s+/g, ' '), 160)}"` }
+  return r
 }
 
 // This machine's IPv4 addresses on its networks (Wi-Fi, Ethernet, a VPN), not the loopback one

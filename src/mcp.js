@@ -9,6 +9,7 @@
 // list it gave the last time it ran (kept in ~/.heart/mcp-tools.json, with its instructions): so a
 // server starts the first time the model uses it, or once to say its tools; it stops when
 // HeartCode exits.
+import { trusted } from './trust.js'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -56,7 +57,7 @@ export function serverName(given, taken = []) {
 // (no built-in or configured servers), like Claude Code's --strict-mcp-config.
 export function loadServers(root, { extra = [], strict = false, includeDisabled = false } = {}) {
   const merged = strict ? {} : structuredClone(DEFAULT_SERVERS) // yours (below) win on a name
-  const own = strict ? [] : [path.join(HOME, 'mcp.json'), root && path.join(root, '.heartcode', 'mcp.json')].filter(Boolean).map((f) => readConfig(f, {}))
+  const own = strict ? [] : [path.join(HOME, 'mcp.json'), root && trusted(root) && path.join(root, '.heartcode', 'mcp.json')].filter(Boolean).map((f) => readConfig(f, {})) // the folder's own: once you said yes to it (trust.js)
   const given = extra.map((c) => {
     const data = /^\s*\{/.test(c) ? JSON.parse(c) : readJson(path.resolve(c), null)
     if (!data) throw new Error(`can't read the MCP config ${c}`)
@@ -167,6 +168,7 @@ class Server {
       }
     })
     child.stderr.on('data', (d) => log('mcp', `${this.name} stderr: ${String(d).trim()}`))
+    child.stdin.on('error', (e) => log('mcp', `${this.name} stdin: ${e.message}`)) // it quit while being written to (EPIPE): its exit says so, not a crash
     const gone = new Promise((_, reject) => {
       child.on('error', (e) => reject(new Error(`${this.name} could not start: ${e.message}`)))
       child.on('exit', (code) => {
@@ -257,7 +259,15 @@ class Server {
   }
 
   #send(msg) {
-    if (!this.url) return this.child.stdin.write(JSON.stringify(msg) + '\n')
+    if (!this.url) {
+      if (!this.child?.stdin.writable) {
+        log('mcp', `${this.name}: not running, ${msg.method ?? 'reply'} not sent`) // stopped, or gone
+        const p = this.pending.get(msg.id)
+        if (p) this.pending.delete(msg.id), p.reject(new Error(`${this.name} isn't running`)) // not left waiting
+        return
+      }
+      return this.child.stdin.write(JSON.stringify(msg) + '\n')
+    }
     this.#post(msg).catch((e) => {
       const p = this.pending.get(msg.id)
       if (!p) return log('mcp', `${this.name}: ${e.message}`)

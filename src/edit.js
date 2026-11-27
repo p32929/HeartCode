@@ -15,6 +15,8 @@ export function trimBlank(lines) {
 // whitespace-insensitive line match (re-indenting the replacement).
 export function applyEdit(text, search, replace) {
   if (!search.trim()) return { error: 'the SEARCH text is empty' }
+  const crlf = text.includes('\r\n') // a Windows file: its new lines end the same way (\r\n), not mixed
+  if (crlf) replace = replace.replace(/\r?\n/g, '\r\n')
   const exact = text.split(search).length - 1
   if (exact === 1) return { text: text.replace(search, () => replace) }
   if (exact > 1) return { error: `the SEARCH text matches ${exact} places; include more surrounding lines so it matches only one` }
@@ -30,7 +32,8 @@ export function applyEdit(text, search, replace) {
   if (!hits.length) return { error: notFound(lines, s) }
 
   const i = hits[0]
-  lines.splice(i, s.length, ...reindent(s, trimBlank(replace.split('\n')), lines.slice(i, i + s.length)))
+  const repl = reindent(s, trimBlank(replace.replace(/\r\n/g, '\n').split('\n')), lines.slice(i, i + s.length))
+  lines.splice(i, s.length, ...(crlf ? repl.map((l) => `${l.replace(/\r$/, '')}\r`) : repl))
   return { text: lines.join('\n') }
 }
 

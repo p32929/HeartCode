@@ -43,15 +43,19 @@ export function installKind() {
 export const UPDATE_COMMANDS = { npm: 'npm install -g heartcode@latest', pnpm: 'pnpm add -g heartcode@latest', yarn: 'yarn global add heartcode@latest', bun: 'bun add -g heartcode@latest' }
 export const packageDir = PKG
 
-// The changelog's sections from the newest down to (not including) the one running, or ''.
+// The whole changelog of the version on offer, newest first (scrolled in the dialog): from its npm
+// package (the version you'd get; GitHub's main branch can be behind npm), else GitHub. '' if none.
+// The versions since the one running are marked new.
 export async function whatsNew(current, latest) {
-  try {
-    const r = await fetch('https://raw.githubusercontent.com/p32929/HeartCode/main/CHANGELOG.md', { signal: AbortSignal.timeout(8000) })
-    const text = await r.text()
-    const start = text.indexOf(`## ${latest}`)
-    const end = text.indexOf(`## ${current}`)
-    return start >= 0 ? text.slice(start, end > start ? end : undefined).trim().replace(/\n {2,}(?=\S)/g, ' ') : '' // a list item's wrapped lines joined: the box wraps it to its width
-  } catch {
-    return ''
+  for (const url of [`https://cdn.jsdelivr.net/npm/heartcode@${latest}/CHANGELOG.md`, `https://unpkg.com/heartcode@${latest}/CHANGELOG.md`, 'https://raw.githubusercontent.com/p32929/HeartCode/main/CHANGELOG.md']) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(8000) })
+      const text = r.ok ? await r.text() : ''
+      const start = text.indexOf('\n## ')
+      if (start < 0) continue
+      const body = text.slice(start + 1).trim().replace(/\n {2,}(?![-*] )(?=\S)/g, ' ') // a list item's wrapped lines joined (the box wraps it to its width); a sub-item stays its own
+      return body.replace(/^## (\d+\.\d+\.\d+)(.*)$/gm, (line, v, rest) => (newer(v, current) ? `## ${v}${rest} · new` : line))
+    } catch {}
   }
+  return ''
 }

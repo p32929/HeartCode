@@ -5,6 +5,8 @@
 // (Brave refuses Node's connections), or junk results for scripts. When none can be reached, the
 // model is told "search is unreachable", so it stops searching instead of trying other words.
 import path from 'node:path'
+import dns from 'node:dns/promises'
+import net from 'node:net'
 import { HOME, CONFIG_FILE, readJson, writeJson } from './config.js'
 import { keywords } from './memory.js'
 import { fetch } from './http.js' // not the built-in one: see http.js
@@ -74,8 +76,22 @@ function tableToMarkdown(inner) {
 
 const MAX = 10_000 // what one web_fetch result shows (agent.js keeps about that much of one)
 
+// The local network and a cloud machine's metadata service: not fetched for the model unless you
+// named that host (allowed: the hosts in your message). A page or file telling it to fetch
+// http://169.254.169.254/… would hand over what's there. This computer (localhost: the project's
+// own dev server) is fine.
+const PRIVATE = (ip) => /^(?:10\.|192\.168\.|169\.254\.|0\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip) || /^(?:::$|f[cd]|fe[89ab]|::ffff:(?:10|0|192\.168|169\.254)\.)/i.test(ip)
+export const hostsIn = (text) => new Set([...String(text ?? '').matchAll(/\b(?:https?:\/\/)?((?:[a-z0-9-]+\.)*[a-z0-9-]+|\[[0-9a-f:]+\])(?::\d+)?(?=[/\s'"),]|$)/gi)].map((m) => m[1].toLowerCase()))
+const notPrivate = (allowed) => async (u) => {
+  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  if (allowed?.has(host)) return
+  const ips = net.isIP(host) ? [host] : (await dns.lookup(host, { all: true }).catch(() => [])).map((a) => a.address)
+  if (ips.some(PRIVATE)) throw Object.assign(new Error(`${host} is on a private network: not fetched (name it in your message to allow it)`), { refused: true })
+}
+
 // A page, fetched and turned into Markdown: { url (after redirects), title, text, status, ok } or { error }.
-export async function fetchPage(url, { signal } = {}) {
+// allowed: hosts the user named (a local or private one among them may be fetched)
+export async function fetchPage(url, { signal, allowed } = {}) {
   let u
   try {
     u = new URL(/^\w+:\/\//.test(url) ? url : `https://${url}`)
@@ -83,7 +99,13 @@ export async function fetchPage(url, { signal } = {}) {
     return { error: `"${url}" is not a URL` }
   }
   if (!/^https?:$/.test(u.protocol)) return { error: 'only http and https URLs can be fetched' }
-  const res = await fetch(u, { headers: HEADERS, redirect: 'follow', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000) })
+  let res
+  try {
+    res = await fetch(u, { headers: HEADERS, redirect: 'follow', guard: notPrivate(allowed), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000) })
+  } catch (e) {
+    if (e.refused) return { error: e.message }
+    throw e
+  }
   const type = res.headers.get('content-type') ?? ''
   if (!/text|json|xml|javascript|markdown/.test(type) && type) return { error: `${u.href} is ${type.split(';')[0]}, not text (${res.status})` }
   const body = await res.text()
@@ -94,8 +116,8 @@ export async function fetchPage(url, { signal } = {}) {
 }
 
 // A page's text, from `start` (characters), for the model (no file to point at).
-export async function webFetch(url, { start = 0, signal } = {}) {
-  const p = await fetchPage(url, { signal })
+export async function webFetch(url, { start = 0, signal, allowed } = {}) {
+  const p = await fetchPage(url, { signal, allowed })
   if (p.error) return `error: ${p.error}`
   const from = Math.max(0, Number(start) || 0)
   const part = p.text.slice(from, from + MAX)

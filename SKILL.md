@@ -192,8 +192,8 @@ record in HeartCode, and picks with that. It
 asks a model that can for what it
 can't do itself (a model that can't see asks one that can about a screenshot: "which tiles show a
 chair?"), several at once when there are many images or parts, and a helper that fails is handed to
-the next capable model in the user's order (with helpers picked: the next helper, then the model in
-use) until one does the job; the next one is told what the one before it found, did and changed,
+the best-ranked capable model not tried yet (rankings and track record; with helpers picked: the
+next helper, then the model in use) until one does the job; the next one is told what the one before it found, did and changed,
 and goes on from there. A helper works until its job is done (no step
 limit; `--max-turns` applies to it too). Their tokens are in `usage`, and each model's in
 `modelUsage`.
@@ -215,8 +215,8 @@ HEART_API_KEY=… heart -u https://api.groq.com/openai/v1 -m openai/gpt-oss-120b
 ```
 
 A model server on this machine (Ollama on :11434, LM Studio on :1234, llama.cpp on :8080) is
-found on its own while no provider is set up yet. The user can also set everything up in a browser: `heart settings` (its link has
-the machine's network address, so it opens from another device too, for HeartCode on a server), where
+found on its own while no provider is set up yet. The user can also set everything up in a browser: `heart settings` (served to this machine
+only; over SSH its link has the address you reached the server at, so it opens on your computer), where
 **Test all** under *Models → List* sends each model a short message to show it really answers, and how fast. A run that fails with a wrong key or an unknown model: ask the user to test it there.
 
 ## More context for the task
@@ -322,7 +322,7 @@ a program that doesn't know a subtype can skip it, as for Claude Code):
 
 | `subtype` | Fields | When |
 |---|---|---|
-| `status` | `status`, `model` | what it's doing now, as the screen's spinner says it ("thinking", "waiting for …", "preparing read_file README.md", a running command's latest output line, read once a second); sent when it changes. A helper's: its model |
+| `status` | `status`, `model` | what it's doing now, as the screen's spinner says it ("thinking", "waiting for …", "reading README.md…", a running command's latest output line, read once a second); sent when it changes. A helper's: its model |
 | `todos` | `todos`: `[{ content, status, why?, by? }]` | the whole plan, each time it changes; `status` is `pending`, `in_progress`, `completed` or `stuck` (`why`: the model's reason); `by`: the model a step was handed to |
 | `stuck` | `step`, `why`, `count`, `model` | the model says it's stuck on a step (`count` this message): the 1st time it's told to change approach, the 2nd another model gives a second opinion, the 3rd the next model takes over (a `warning` says so) |
 | `helper` | `tool_use_id`, `label`, `model`, `status` | a helper at work: `starting`, then what it's doing, then `done`. `tool_use_id` is its `agent` call (several parts of a plan run at once can share one); `label` its job |

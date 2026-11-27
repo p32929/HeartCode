@@ -40,6 +40,8 @@ export function nextActions(st) {
   let first
   if (!st.reads && st.hasFiles) first = ['read', 'search']
   else if (st.wantsChange && !st.edits) first = st.hasFiles ? ['edit', 'create', 'read'] : ['create']
+  else if (st.missing === 'unchecked') first = ['run', 'edit', 'finish'] // "finish" was just held: what's missing goes first
+  else if (st.missing === 'nothing') first = st.hasFiles ? ['edit', 'create', 'read'] : ['create']
   else first = ['finish', 'edit', 'run']
   return [...new Set([...first, ...actions().map(([n]) => n)])].filter((n) => (n !== 'delegate' || st.canDelegate) && (n !== 'ask' || !st.noAsk) && n !== st.avoid) // a step that just repeated with nothing new isn't offered again (a small model picks it over and over)
 }
@@ -173,7 +175,7 @@ class Guided {
     this.notes = []
     this.changed = new Set()
     this.files = listFiles(s.root)
-    this.st = { reads: 0, edits: 0, editsSinceRun: 0, runs: 0, fixes: 0, lastRun: null, hasFiles: this.files.length > 0, canRun: suggestCommands(s.root).length > 0, editTries: 0, noAsk: Boolean(s.ui.noUser || s.isSub) } // ask: not headless, nor a helper (it reports to the main agent, which asks)
+    this.st = { reads: 0, edits: 0, editsSinceRun: 0, runs: 0, fixes: 0, lastRun: null, hasFiles: this.files.length > 0, editTries: 0, noAsk: Boolean(s.ui.noUser || s.isSub) } // ask: not headless, nor a helper (it reports to the main agent, which asks)
     this.calls = 0
     this.stops = 0
   }
@@ -296,13 +298,14 @@ class Guided {
             const gone = { provider: this.s.client.provider, model: was } // before moveOn changes them
             if (this.s.client.moveOn?.(`${was} said it was done, but ${missing === 'nothing' ? 'changed nothing' : "didn't run its change"}`)) {
               record(gone, 'handover') // its track record (record.js)
-              this.ui.warn(`${was} said it was done, but ${missing === 'nothing' ? 'changed nothing' : "didn't run its change"}; handing over to ${this.s.client.model}`)
+              this.ui.handover(this.s.client.model, `${was} said it was done, but ${missing === 'nothing' ? 'changed nothing' : "didn't run its change"}`)
               this.held = 0
             }
           }
           log('guided', `finish held: ${missing}`)
           this.note('not-done', 'not done yet', prompt(`guided/not-done-${missing}`))
           this.st.held = true
+          this.st.missing = missing
           continue
         }
         this.unproven = missing
@@ -318,7 +321,7 @@ class Guided {
         sig = await this[action]()
       } catch (e) {
         if (e.name === 'AbortError' || e.name === 'TimeoutError' || e.status || /cannot reach/.test(e.message)) throw e
-        this.ui.result(c.red(e.message))
+        this.ui.result(e.message, { ok: false })
         this.note(null, `${action} failed`, e.message)
         sig = `${action}:error`
       }
@@ -336,7 +339,7 @@ class Guided {
         const gone = { provider: this.s.client.provider, model: was } // before moveOn changes them
         const why = repeats >= 2 ? 'did the same thing three times in a row' : 'kept doing the same thing (three times)'
         record(gone, 'handover') // its track record (record.js)
-        if (this.s.client.moveOn?.(`${was} ${why}`)) this.ui.warn(`${was} ${why}; handing over to ${this.s.client.model}`)
+        if (this.s.client.moveOn?.(`${was} ${why}`)) this.ui.handover(this.s.client.model, `${was} ${why}`)
         else this.ui.warn(`${was} ${why} — it carries on, told so; Esc stops it`)
         this.note(null, 'warning', prompt('guided/note-repeated'))
         repeats = 0
@@ -371,7 +374,7 @@ class Guided {
       const post = await runHooks(s, 'PostToolUse', { tool_name: name, tool_input: args, tool_response: out }, this.signal)
       if (post.block) out += `\n\n${prompt('agent/hook', { reason: post.block, after: true })}`
     }
-    if (!pre || pre.block || notMine) this.ui.result(c.red(clip(out, 120)))
+    if (!pre || pre.block || notMine) this.ui.result(clip(out, 120), { ok: false })
     s.onEvent?.({ type: 'tool', id, name, output: out, model: `${s.client.provider}/${s.client.model}` })
     return out
   }
@@ -471,7 +474,7 @@ class Guided {
     if (next === null) return `edit:${f}`
     const lost = lostNames(old, next, this.task)
     if (lost.length) {
-      this.ui.result(c.yellow(`that edit deleted ${lost.join(', ')}; retrying`))
+      this.ui.result(`that edit deleted ${lost.join(', ')}; retrying`, { refused: true })
       const again = await this.editRewrite(f, old, prompt('guided/keep-names', { names: lost.join(', '), them: lost.length > 1 ? 'them' : 'it' }))
       const still = again === null ? lost : lostNames(old, again, this.task)
       if (again !== null && !still.length) next = again
@@ -557,7 +560,7 @@ class Guided {
   }
 
   failed(f, why) {
-    this.ui.result(c.red(`edit failed: ${why}`))
+    this.ui.result(`edit failed: ${why}`, { ok: false })
     this.note(null, `editing ${f} failed`, why)
     return null
   }
@@ -572,6 +575,7 @@ class Guided {
     this.note(null, `${old ? 'edit' : 'create'} ${f}`, out + (r?.diff ? '\n' + r.diff : ''))
     if (r?.status === 'applied') {
       this.st.edits++
+      if (this.st.missing === 'nothing') this.st.missing = null // what finish was held for is done (a change still to be run: still missing)
       this.changed.add(f)
       this.st.editsSinceRun++
       this.st.hasFiles = true
@@ -613,6 +617,7 @@ class Guided {
     this.s.ran?.push({ command: cmd, result: clip(out.split('\n').filter((l) => l.trim()).slice(0, 2).join(' · '), 160) }) // for the wrap-up, as native mode's
     const code = /^exit code (\S+)/.exec(out)?.[1]
     this.st.runs++
+    this.st.missing = null // what finish was held for is done
     this.st.editsSinceRun = 0
     this.st.lastRun = code === undefined ? null : code === '0' ? 0 : code
     this.note(null, `ran: ${cmd}`, out)

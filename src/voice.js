@@ -1,12 +1,14 @@
 // Voice input: /voice, then Space to talk (and again to pause), Enter to finish, Esc to
 // cancel. What's said shows in the input box as it's said, and stays there to read over and send.
-// Recording: ffmpeg (macOS: the default microphone; Linux: PulseAudio, else ALSA). Speech to text:
-//   - on this machine with whisper.cpp's whisper-cli and a model already on disk (~/.whisper-models,
-//     ~/.heart/whisper, or "voice": { "model": "/path/ggml-….bin" } in config.json); nothing is
-//     downloaded;
-//   - or a provider's OpenAI-compatible /audio/transcriptions: "voice": { "provider": "groq",
-//     "model": "whisper-large-v3" }.
-// "voice": { "language": "auto" } for languages other than English (with a multilingual model).
+// Recording: ffmpeg (macOS: the default microphone; Linux: PulseAudio, else ALSA). Speech to text,
+// one of three ("voice": { "engine": … } in config.json; none set: Hex when it's ready, else whisper-cli):
+//   - hex: the Hex app's `hex transcribe` (its Labs › Transcribe files on), with your Hex dictation
+//     model ("model": an id from `hex model list`); on this computer, fast;
+//   - whisper: whisper.cpp's whisper-cli and a model already on disk (~/.whisper-models,
+//     ~/.heart/whisper, or "model": "/path/ggml-….bin"); nothing is downloaded;
+//   - openai: OpenAI's /audio/transcriptions, with your OpenAI provider's key ("model": whisper-1 or
+//     gpt-4o-transcribe); only when chosen (it's paid).
+// "language": "bn", "auto"… for languages other than English.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -47,11 +49,41 @@ function micInput() {
   return ['-f', 'dshow', '-i', `audio=${winMic || 'default'}`]
 }
 
+// Hex's command: on the PATH, else inside the app (macOS)
+const HEX_APP = '/Applications/Hex.app/Contents/MacOS/hex'
+export const hexPath = () => onPath('hex') || (process.platform === 'darwin' && fs.existsSync(HEX_APP) ? HEX_APP : '')
+// Hex can transcribe a file: its Labs › Transcribe files is on (asked again after a while when it was off)
+let hexOn = { ok: false, at: 0 }
+export function hexReady() {
+  const hex = hexPath()
+  if (!hex) return false
+  if (!hexOn.ok && Date.now() - hexOn.at > 30_000) hexOn = { ok: /^transcribe-files\s+on\b/m.test(spawnSync(hex, ['labs', 'list'], { encoding: 'utf8', timeout: 5000 }).stdout ?? ''), at: Date.now() }
+  return hexOn.ok
+}
+// your provider that is OpenAI's own API (its key), the one named first
+const isOpenAI = (p) => {
+  try {
+    return /(^|\.)openai\.com$/.test(new URL(p?.baseUrl).hostname)
+  } catch {
+    return false
+  }
+}
+const openaiOf = (cfg, providers) => (isOpenAI(providers[cfg.provider]) ? cfg.provider : Object.keys(providers).find((n) => isOpenAI(providers[n])))
+export const ENGINES = ['hex', 'whisper', 'openai']
+// the engine in use: the one chosen; else Hex when it can, else whisper-cli
+export function engineOf(cfg = {}, providers = {}) {
+  if (ENGINES.includes(cfg.engine)) return cfg.engine
+  if (cfg.provider && openaiOf(cfg, providers)) return 'openai' // set before engines: an OpenAI provider
+  return hexReady() ? 'hex' : 'whisper'
+}
+
 // Why voice can't work here, or null when it can.
 export function voiceProblem(cfg = {}, providers = {}) {
   if (!onPath('ffmpeg')) return `voice input needs ffmpeg to record (${install('ffmpeg', 'ffmpeg', 'install ffmpeg with your package manager')})`
-  if (cfg.provider) return providers[cfg.provider] ? null : `voice.provider "${cfg.provider}" isn't one of the providers`
-  if (!onPath('whisper-cli')) return `voice input needs whisper-cli (${process.platform === 'darwin' ? 'brew install whisper-cpp' : 'whisper.cpp, from github.com/ggml-org/whisper.cpp'}) and a model, or "voice": { "provider": …, "model": … } in ~/.heart/config.json`
+  const engine = engineOf(cfg, providers)
+  if (engine === 'hex') return !hexPath() ? 'voice with Hex: Hex isn\'t installed here' : hexReady() ? null : 'voice with Hex needs its Labs › Transcribe files: run hex labs on transcribe-files'
+  if (engine === 'openai') return openaiOf(cfg, providers) ? null : 'voice with OpenAI needs an OpenAI provider (api.openai.com, with its key): add it on /settings → Providers'
+  if (!onPath('whisper-cli')) return `voice input needs whisper-cli (${process.platform === 'darwin' ? 'brew install whisper-cpp' : 'whisper.cpp, from github.com/ggml-org/whisper.cpp'}) and a model, or Hex (its Labs › Transcribe files on)`
   return localModel(cfg) ? null : 'voice input needs a whisper model: put a ggml-*.bin in ~/.whisper-models, or set "voice": { "model": "/path/to/ggml-….bin" }'
 }
 
@@ -114,7 +146,8 @@ export function wavOf(pcm) {
 export async function transcribePcm(pcm, cfg = {}, providers = {}, { fast = false, signal } = {}) {
   const file = path.join(os.tmpdir(), `heartcode-voice-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.wav`)
   fs.writeFileSync(file, wavOf(pcm))
-  return transcribe(file, fast ? { ...cfg, model: localModel(cfg, { fast: true }) } : cfg, providers, signal)
+  const quick = fast && engineOf(cfg, providers) === 'whisper' // whisper: the quickest model while you speak
+  return transcribe(file, quick ? { ...cfg, model: localModel(cfg, { fast: true }) } : cfg, providers, signal)
 }
 
 // Starts recording to a 16 kHz mono WAV. Returns { stop() → the file, cancel() }.
@@ -150,14 +183,29 @@ export function record() {
 // The words in the recording (and the file is deleted).
 export async function transcribe(file, cfg = {}, providers = {}, signal) {
   try {
-    if (cfg.provider) {
-      const p = providers[cfg.provider]
+    const engine = engineOf(cfg, providers)
+    if (engine === 'hex') {
+      const args = ['transcribe', '--json', ...(cfg.model ? ['--model', String(cfg.model)] : []), ...(cfg.language && cfg.language !== 'auto' ? ['--language', String(cfg.language)] : []), file]
+      const q = (a) => `'${String(a).replace(/'/g, "'\\''")}'`
+      const { code, output, stderr } = await runCommand(os.tmpdir(), [hexPath(), ...args].map(q).join(' '), { signal, timeout: 120_000, split: true })
+      log('voice', `hex transcribe → exit ${code}`, output.slice(0, 2000))
+      let said
+      try {
+        said = JSON.parse(output)
+      } catch {}
+      if (code !== 0 || !said || said.status === 'error') throw new Error(`Hex couldn't transcribe it: ${(said?.message ?? stderr ?? output).trim().split('\n').pop()}`)
+      return clean(said.text)
+    }
+    if (engine === 'openai') {
+      const name = openaiOf(cfg, providers)
+      if (!name) throw new Error(voiceProblem(cfg, providers) ?? 'no OpenAI provider')
+      const p = providers[name]
       const form = new FormData()
       form.append('file', new Blob([fs.readFileSync(file)], { type: 'audio/wav' }), 'speech.wav')
       form.append('model', cfg.model ?? 'whisper-1')
       if (cfg.language && cfg.language !== 'auto') form.append('language', cfg.language)
       const res = await fetch(`${p.baseUrl.replace(/\/+$/, '')}/audio/transcriptions`, { method: 'POST', body: form, headers: p.apiKey ? { authorization: `Bearer ${p.apiKey}` } : {}, signal })
-      if (!res.ok) throw new Error(`${cfg.provider} said ${res.status}: ${(await res.text()).slice(0, 200)}`)
+      if (!res.ok) throw new Error(`${name} said ${res.status}: ${(await res.text()).slice(0, 200)}`)
       return clean((await res.json()).text)
     }
     const model = localModel(cfg)

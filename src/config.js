@@ -31,28 +31,19 @@ export function speedOf(cfg) {
 // would call a model broken that a task still waits for)
 export const testWaitOf = (cfg) => (Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : Math.max(60, speedOf(cfg).replyStart))
 
-// The time limits that depend on one another, kept from contradicting: a test waits at least as long as
-// a model gets to start answering (Tests wait ≥ Give up), and a reply that has started may go quiet at
-// least that long too (Stalled ≥ Give up: a pause mid-reply has the same causes as a slow start, a
-// queue or thinking that isn't sent). The one just set (changed) stays; the other moves to fit. Returns
+// The time limits that depend on one another, kept from contradicting: a reply that has started may go
+// quiet at least as long as a model gets to start answering (Stalled ≥ Give up: a pause mid-reply has
+// the same causes as a slow start, a queue or thinking that isn't sent). Tests wait is the tests' own. The one just set (changed) stays; the other moves to fit. Returns
 // what moved and why, for the page to say.
 export function fitTimes(cfg, changed) {
   const notes = []
   const { replyStart: start, replyIdle: idle } = speedOf(cfg)
-  const test = Number(cfg.testTimeout) > 0 ? Number(cfg.testTimeout) : null
   const [sLo] = SPEED_LIMITS.replyStart
   if (changed === 'replyStart') {
-    if (test !== null && test < start) (cfg.testTimeout = start), notes.push({ name: 'testTimeout', text: `Tests wait raised to ${start} s too: a test should wait at least as long as Give up, or it calls a model broken that real work would still wait for` })
     if (idle < start) (cfg.replyIdle = start), notes.push({ name: 'replyIdle', text: `Stalled raised to ${start} s too: a reply that has started may go quiet at least as long as a model gets to start` })
   } else if (changed === 'replyIdle') {
     if (start > idle) (cfg.replyStart = Math.max(sLo, idle)), notes.push({ name: 'replyStart', text: `Give up lowered to ${cfg.replyStart} s too: a model can't get longer to start than a started reply may go quiet` })
-  } else if (changed === 'testTimeout' && test !== null && test < start) {
-    if (test >= sLo) (cfg.replyStart = test), notes.push({ name: 'replyStart', text: `Give up lowered to ${test} s too: real work shouldn't wait longer for a model than its test does` })
-    else {
-      Object.assign(cfg, { testTimeout: sLo, replyStart: sLo })
-      notes.push({ name: 'testTimeout', text: `Tests wait set to ${sLo} s: the shortest Give up can be, and a test must wait at least as long` }, { name: 'replyStart', text: `Give up lowered to ${sLo} s too: real work shouldn't wait longer for a model than its test does` })
-    }
-  }
+  } // Tests wait is the tests' own: a short one doesn't shorten how long real work waits for a model
   return notes
 }
 
@@ -66,7 +57,8 @@ export const HELPER_JOBS = {
 }
 // a helper's jobs as saved, in today's names (picks from before the four: search, research → quick, review → code)
 const WAS = { search: 'quick', research: 'quick', review: 'code' }
-export const jobsOf = (jobs) => (Array.isArray(jobs) ? [...new Set(jobs.map((j) => WAS[j] ?? j).filter((j) => HELPER_JOBS[j]))] : undefined)
+// none left (only names it doesn't know): not a helper
+export const jobsOf = (jobs) => (Array.isArray(jobs) ? ((l) => (l.length ? l : undefined))([...new Set(jobs.map((j) => WAS[j] ?? j).filter((j) => HELPER_JOBS[j]))]) : undefined)
 export const helpersOf = (map) => Object.fromEntries(Object.entries(map ?? {}).map(([k, jobs]) => [k, jobsOf(jobs)]).filter(([, jobs]) => jobs))
 export const SPEED_LIMITS = { replyStart: [5, 600], replyIdle: [10, 1800] }
 
@@ -209,17 +201,20 @@ function saved(cfg) {
 // Several HeartCodes (and the settings page in each) keep a copy of the settings. A save writes only
 // what this one changed since it last read or wrote the file, onto the file as it is now, and
 // takeIn brings in what the others changed: no copy undoes another's change with an old value.
-// file: config.json as last read or written here; mine: what this run's cfg stood for then (a -m
-// model for this run is no change of its own, so a save doesn't write it as #1).
+// file: config.json as last read or written here; mine: what each cfg (a tab's own copy too) stood
+// for then (a -m model for this run is no change of its own, so a save doesn't write it as #1).
 let file = null
-let mine = null
+const mine = new WeakMap()
+// A tab's copy of the settings: it starts from what the one it was copied from stood for, so its
+// saves write only its own changes (not its old values over another tab's)
+export const track = (copy, from) => (mine.set(copy, mine.get(from) ?? saved(copy)), copy)
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const keysOf = (...objs) => [...new Set(objs.flatMap((o) => Object.keys(o ?? {})))]
-const synced = (cfg, disk) => ((file = disk), (mine = saved(cfg)))
+const synced = (cfg, disk) => ((file = disk), mine.set(cfg, saved(cfg)))
 
 export function saveConfig(cfg) {
   const out = saved(cfg)
-  const was = mine ?? {}
+  const was = mine.get(cfg) ?? {}
   const disk = readJson(CONFIG_FILE, {})
   for (const k of keysOf(out, was)) {
     if (k === 'providers') {
@@ -250,6 +245,6 @@ export function takeIn(cfg) {
   }
   oneEach(cfg)
   file = disk
-  mine = saved(cfg)
+  mine.set(cfg, saved(cfg))
   return keys
 }

@@ -2,6 +2,330 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.102 (2026-11-27)
+
+- **Import & export your settings** (`/settings` → Advanced → Import & export): tick what goes in the
+  file — providers and CLIs, the model list and helpers (with abilities set by hand), MCP servers,
+  skills, prompt changes — and whether API keys go too (off by default; without them, MCP servers'
+  env and headers stay out as well). Importing shows what the file has, with the same tickboxes, and
+  merges: it adds and updates what has the same name, and removes nothing of yours.
+- **A CLI that isn't installed on this computer comes in switched off** (tagged "not installed" on
+  Providers). Switching it on asks to install it first, then switches it on once it's in; Turn all on
+  and Turn on N providers leave those off and say so.
+
+## 0.1.101 (2026-11-24)
+
+- **Room above the status line**: three empty rows between the conversation and "thinking · 27s"
+  while it works (one on a short terminal), so the two don't run together.
+
+## 0.1.100 (2026-11-24)
+
+- The 0.1.99 note named the wrong key for the whole plan: it's Alt+L.
+
+## 0.1.99 (2026-11-24)
+
+- **One quiet row under the conversation while it works**: what's happening in a few words
+  ("thinking", "running a command", "searching the web"), the plan's progress and helpers as a
+  count ("plan 2/5 · 2 helpers"), the time, and Esc. The command, its output, the helpers' doings
+  and the plan's steps are no longer listed there: what's being done is in the conversation above
+  (each step as it runs). The whole plan: Alt+L (`show_plan`) as before.
+- **The ♥ by the input beats while HeartCode works on your message** (lub-dub, then a rest).
+
+## 0.1.98 (2026-11-24)
+
+- **No more stray lines under the spinner.** A multi-line command (a script run with `node -e "…"`,
+  a heredoc) put its line breaks into the spinner ("running … › its last output line") and into its
+  step ("✓ Run …"); the terminal wrote them on rows the screen didn't track, which stayed there
+  ("s = s… › ok · 8m 53s") or scrambled the lines around them. Both are one line now, and nothing
+  drawn under the conversation can carry a line break or a tab.
+
+## 0.1.97 (2026-11-24)
+
+- **`/update` shows the whole changelog**, newest first, with the versions since yours marked
+  `· new`; PgUp/PgDn or the mouse wheel scroll it (↑↓ still choose Update now / Not now). It said
+  "no changelog found": it was read from GitHub's main branch, which can be behind npm; now it's
+  the changelog of the version on offer, from its npm package.
+- Any question with a long text above its choices scrolls the same way.
+
+## 0.1.96 (2026-11-24)
+
+- **A test no longer passes a model that only seemed to answer.** Asked to reply "OK":
+  - **Answered with an error** (`✗ error reply`): its answer is an error as text ("doesn't have enough
+    credits", "Upgrade your plan", `Model "…" is not available`): the request went through, the
+    model doesn't work.
+  - **Didn't answer** (`✗ off-topic`): something else altogether (an image or audio link, a safety
+    verdict, a persona's greeting): likely not a chat model.
+  Both count as not working (helpers, Doesn't work) and are in the Result filter. Results already
+  saved are judged the same way, without testing again.
+
+## 0.1.95 (2026-11-23)
+
+- **The Providers page, rewritten**: one state (the filters, the folds, the ticked models) and one way
+  to draw it, so what you see always matches what you did.
+  - **Search and Free only filter the models again** (0.1.94 broke them).
+  - Every row is a real row (no more redrawn windows of a long list): ticks, folds and your place in
+    the list stay put while lists load, tests finish or the list changes; scrolling doesn't jump.
+  - Ticks are kept while you search or filter; the bar says how many are ticked but not shown.
+  - A search shows folded providers open while it's typed; your folds come back after.
+  - Collapse all / Expand all and Select all work on what the filters show.
+
+## 0.1.94 (2026-11-23)
+
+- **On Providers, models with "auto", "free" or "default" anywhere in the name come first** under
+  each provider (routers, free models, a CLI's default), then the rest by name or price.
+
+## 0.1.93 (2026-11-23)
+
+- **Turn just the selected providers off or on**: tick providers (their own box, or any of their
+  models) and the bar under the list has **Turn off N providers** / **Turn on N providers** for those
+  only; the button at the top says **Turn N selected off/on** while some are ticked, and **Turn all
+  off/on** when none are.
+
+## 0.1.92 (2026-11-23)
+
+- **Test all runs at most 10 tests at a time**: still one model at a time from each provider, but with
+  more than 10 providers the rest wait for a free place (a provider paused for a rate limit doesn't
+  hold one). Stop still ends it at once.
+
+## 0.1.91 (2026-11-23)
+
+- **Save list works with thousands of models**: it said "too big" (each model went with everything
+  shown about it, over the page's 1 MB limit); now only each model's provider and name are sent.
+
+## 0.1.90 (2026-11-23)
+
+- **No dialog on the settings page is bigger than 80% of the window**, either way; what doesn't fit
+  scrolls inside it, and its buttons (Cancel, Add, Save…) stay in view at the bottom.
+
+## 0.1.89 (2026-11-23)
+
+- **An icon before each provider's name** (Models list, Providers, "HeartCode uses"): a terminal
+  `>_` for a coding CLI, a server for an API provider; hover says which. The list's Provider column
+  is a little wider for it.
+
+## 0.1.88 (2026-11-23)
+
+- **Select all on Providers selects every model shown again**, on or off (0.1.86 left out the
+  providers switched off). To leave those out, tick **On only**: they're hidden, so not selected.
+
+## 0.1.87 (2026-11-23)
+
+- **All / Providers only / CLIs only** on Providers (beside Sort): show every provider, only the API
+  ones, or only the coding CLIs. Select all picks what's shown. Kept for next time; All by default.
+
+## 0.1.86 (2026-11-23)
+
+- **Select all on Providers picks only the providers that are on**: turn off the ones you don't want,
+  tick the box at the top, Add: only the on ones' models are added (a provider's own box still picks
+  its models, on or off). The providers that are on come first; **On only** (beside Free only) hides
+  the ones that are off.
+
+## 0.1.85 (2026-11-23)
+
+- **Turn all off / Turn all on** on Providers (beside Collapse all): every provider's switch in one
+  click. Off keeps each provider and its models in your list; HeartCode skips them until it's on.
+
+## 0.1.84 (2026-11-23)
+
+- **+ Add CLIs** (Providers, beside + Add a provider): every coding CLI on one dialog with a checkbox.
+  The installed ones not added yet come ticked; untick what you don't want (or Tick all / Untick all)
+  and **Add N CLIs** adds them all at once, their models loading side by side. One not installed has
+  its Install button there (ticked once it's in); one added already shows as added. The CLIs left
+  Add a provider, which is for APIs again.
+
+## 0.1.83 (2026-11-23)
+
+- **Guides for kinds of work**, so any model (the smallest too) knows how to do it: web, API, mobile,
+  desktop, command-line tools, automation and scraping, long tasks, games, data, libraries,
+  extensions, Docker/CI/deploying, databases, upgrades and refactors. Each is short and the same
+  shape: when it's done, how to start, run and check it, its traps. Not sent up front: the model
+  reads one with the new **guide** tool (its list says what each is for; the system prompt says to
+  read the one that matches before building), and HeartCode adds the right one itself, once per
+  conversation, with the first plan or change of a message whose words or project files show the
+  kind (a game, `pubspec.yaml`, React in package.json…). Never for a question answered by looking.
+  Editable on `/settings` → System prompt (guides).
+
+## 0.1.82 (2026-11-23)
+
+- **The coding CLIs in Add a provider show at once**: each one's version fills in as it's asked (a
+  shimmer until then), not after the slowest. Installed ones come first, with a ✓; the rest have an
+  **Install** button (or **Get it**, its page, when nothing here can install it), a spinner while
+  installing, and **Failed · try again**.
+
+## 0.1.81 (2026-11-23)
+
+- A coding CLI's model shows "–" for its context on the Models page (it keeps its own; it showed 10M).
+
+## 0.1.80 (2026-11-23)
+
+- **Coding CLIs as providers**: Claude Code, Codex, opencode, Junie, Kilo Code, Cline, Antigravity,
+  Kiro, GitHub Copilot, Cursor, CodeBuddy, Qwen Code, Qoder, Mistral Vibe and AlphaCode, from
+  `/settings` → Providers → + Add a provider. Each shows whether it's installed (its version); one
+  that isn't installs from there, its log shown as it goes. No key: it uses its own sign-in (the
+  dialog says the command, e.g. `codex login`). Its models come from the CLI, and are tested and put
+  in your list like any provider's. A message it answers is worked on by the CLI in your folder, with
+  its own tools: its thinking, steps and answer show in HeartCode, its session goes on with the next
+  message (and hears what another of your models said meanwhile), Esc stops it and everything it
+  started. Your permission mode carries over: CLIs that can ask (Kilo, Cline, Copilot, Cursor, Qwen…)
+  ask you through HeartCode's own dialog; the others can't ask, so their own modes hold them back
+  (read-only; with "ask before commands", Claude Code accepts edits only and Codex works in its
+  workspace sandbox; Junie works only on "do everything"). Anything else asked of
+  one (a summary, a test) is a plain question in a scratch folder, with nothing it may change.
+
+## 0.1.79 (2026-11-23)
+
+- **Voice with Hex, whisper-cli or OpenAI only**: Automatic uses the Hex app when it's installed with
+  its Labs › Transcribe files on (`hex labs on transcribe-files`; about 0.2 s a clip, your Hex
+  dictation model), else whisper-cli and a model; OpenAI's API when you choose it (your OpenAI
+  provider's key). Other providers' transcription APIs are gone. `/settings` → General → Voice input.
+
+## 0.1.78 (2026-11-23)
+
+- **Going back to a message queued while working** keeps the conversation before it on screen (it
+  cut one message too many); queued messages are in ↑'s history and their lines line up.
+- **Tabs don't undo each other's settings**: a save in one tab no longer writes its old values over
+  what another tab changed (notifications, permissions, the queue…).
+- **More notes out of the conversation**: what a rewind, `/resume`, `/tree` and a settings change say,
+  the first-start questions and their answers, and a command's own question all show above the
+  input instead (they were saved into the session too). A command that asks, then says one line,
+  no longer opens a box to close.
+- **`/update`** shows what changed and asks in one dialog (the question closed the notes before).
+- **An MCP server that quits right away** no longer shows "HeartCode hit an error… EPIPE".
+- **Voice**: Ctrl+C stops the recording like Esc, Esc also stops the last part's transcription, and
+  a transcription that hangs is given up on after 30 s (the keyboard was held).
+- **No terminal bell or popup with notifications off** (after a long task); over SSH the terminal's
+  popup comes when you chose notifications.
+- Closing a tab stops its MCP servers and takes its exit hooks off (a 4th tab printed a warning).
+
+## 0.1.77 (2026-11-23)
+
+- **A command run while a task works is yours**: its lists and questions (`/select_model`, Alt+W,
+  `/settings`…) send no "waiting for you" notification, and what it says shows above the input
+  for a moment, not in the conversation.
+- **Ctrl+D while a task works** no longer closes the keyboard (it left HeartCode unusable, and a
+  Ctrl+C after it left the terminal on HeartCode's screen); it says how to stop or quit.
+- A key bound to a command (keybindings.json) runs it at once while a task works, as typing it does.
+- `/help` says what Esc does while working, as it does now.
+
+## 0.1.76 (2026-11-23)
+
+- **A question gets its answer, not a review loop**: looking around to answer (`git log`, `ls`,
+  `grep`) isn't work, so no "is every part done?" and no review. Asked "did you revert anything?",
+  a model answered in seconds, then spent six minutes being sent back to earlier messages' work.
+- **The review judges only your latest message**: earlier messages are background (it no longer asks
+  for their work to be done again), an earlier message's plan isn't sent, and an answer to a
+  question is judged as an answer (right, and as short as asked).
+
+## 0.1.75 (2026-11-23)
+
+- **No "waiting for an answer" notification for your own commands**: Esc Esc (going back to a
+  message), `/select_model`, `/notifications` and the like open a list you're looking at; only a
+  question the model asks while it works notifies you.
+
+## 0.1.74 (2026-11-23)
+
+- **Give up, Stalled and Tests wait show with one model too** (Models → List, above the search):
+  they were hidden unless the list had two or more models, so a short Give up couldn't be changed.
+  With one model they show with their names.
+
+## 0.1.73 (2026-11-23)
+
+- **The settings page loads again**: a help text in 0.1.72 broke its script (nothing showed).
+
+## 0.1.72 (2026-11-23)
+
+- **A command can't stop HeartCode** (macOS, Linux): `kill`, `pkill` and `killall` in the commands it
+  runs (in nested sh, bash and zsh too) leave out HeartCode and the programs it runs in, and refuse
+  "every process" (`kill -1`); everything else is stopped as asked. Freeing a port with
+  `lsof -ti :9880 | xargs kill -9` killed HeartCode itself, as it had a connection to that port.
+  The model is told to stop a server by its own PID, never by broad matches.
+- **An error in HeartCode's own code no longer quits it**: it's said and logged, and it goes on.
+- **Security**:
+  - A folder's own HeartCode setup (`.heartcode/hooks.json`, `mcp.json`, `prompts/`) is used only
+    once you say yes to it for that folder (asked again when those files change); a cloned repo's
+    hooks no longer run at your first message. `-p` and editors (ACP) use it as before.
+  - The model can't write `.heartcode/` or `.git/` files without asking, in any mode (their hooks
+    run commands).
+  - Files are never read or written through a link that points outside the project; search skips
+    such links; installed skills don't keep links out of their folder.
+  - Command output, files, pages and model text can't send escape sequences to your terminal
+    (setting the clipboard, the title, links, cursor moves): colors only.
+  - `web_fetch` doesn't reach the local network or a cloud machine's metadata address unless your
+    message names that host (this computer's own servers still work), checked on every redirect.
+  - Plan mode's "read-only" commands can't run a program (`git grep -O`, `git -c`, `--ext-diff`)
+    or print the environment.
+  - An MCP tool that says it only reads is asked about once a session.
+  - The settings page is served to this machine only (over SSH: at the address you reached it
+    at); a newer version's number can't inject HTML into it; custom headers aren't sent to
+    another site on a redirect.
+- **Tests wait no longer shortens Give up**: lowering how long the Test buttons wait (say to 7 s)
+  pulled down how long real work waits for a model to start answering too. They're separate now.
+- **Only messages in the conversation**: a command's one-line answer (`/cost`…), "settings page
+  turned off", "a newer HeartCode is out", "this folder uses…" show above the input for a moment
+  (any key clears them), not in the conversation.
+- **Outages don't ruin track records**: no connection, a timeout, a server error or a rate limit isn't
+  counted against a model, and a real failure counts once per request (it was every retry, so a
+  minute offline marked every model unreliable for days).
+- **Normal answers aren't taken for problems**: "Let me know if you want me to add tests", "I can't
+  see any errors", "I couldn't find tests, so I added some" no longer send the task back or hand it to
+  another model.
+- **The answer after "is every part done?" is checked like any** (open plan steps, unchecked
+  changes, the review), and the same answer again isn't printed twice.
+- **The system prompt is built once a message** (and again when another model answers), not every
+  step: a provider's cache of the conversation keeps working.
+- **The system prompt says to call done** before the final answer (one round trip less per task);
+  once said, done stands after a send-back.
+- **Rankings match the right version**: `gpt-5` is no longer ranked as GPT-5.1, `qwen3` as Qwen3.5.
+- **Lessons only from real failures** (a non-zero exit), on a client of their own, and none when
+  there's nothing to learn.
+- A skipped #1 model is said on screen; a failed review counts against the model that made the
+  changes; a helper with no known job isn't one.
+- **Settings page**: switching a provider off reaches the running session at once; renaming one
+  keeps its helpers, tests and track record (and can't overwrite another); Automatic helpers are
+  picked again after models.dev, provider changes and deletes; a hung tool test is a fail, and a
+  model whose tool test failed gets no code or hard jobs; the setup dialog keeps only what you
+  changed; Providers' models.dev button doesn't fetch rankings or mark helpers; the Automatic
+  dialog tests what Test all tests, and doesn't reopen when none work; two HeartCodes keep each
+  other's test results; the page follows track records, rankings and tests written elsewhere.
+- **Prices** only from the provider itself or the model's maker (never just any provider's).
+- **Guided mode** offers the missing step first after "finish" is held.
+- Windows (CRLF) files keep their line endings on a fuzzy edit; a provider that sends an empty first
+  chunk and then stalls is given up on in time; fewer file reads per step; the chat is saved every
+  few seconds mid-task instead of every step.
+
+## 0.1.71 (2026-11-23)
+
+- **Each step is one line that says how it went**: `✓ Read src/app.js · 90 lines`, `✗ Read old.js ·
+  not found`, `✓ Search "listen" · 12 matches in 4 files`, `✓ Run npm test · ok · 2s`, `✗ Run … · exit 1
+  · 2s` (its error lines under it, in red), `⊘ … · declined`. The ● spins while it runs; no more "⎿"
+  line under each step.
+- **Steps of one kind in a row are one entry**: `✓ Read 8 files · 237 lines` with the names under it
+  (the folder said once); searches, lists and fetches the same. A failed one stands on its own line.
+- A search's step says what it looked for, not where.
+
+## 0.1.70 (2026-11-23)
+
+- **The model's thinking shows in full in the conversation**, as it comes, and stays there (no more
+  two lines above the spinner; `Alt+O`, `/toggle_thinking` and `--hide-thinking` are gone).
+- **The input box and status bar no longer vanish** after a task: readline wrote "clear to the end of
+  the screen" straight to the terminal in full screen; it writes nothing there now.
+- **Esc while it works means stop** (press it twice); it no longer pulls queued messages back or clears
+  the box first. `↑` brings a queued message back.
+- **Steps in words**: Read, Edit, Run, Search, Plan… instead of tool names, the model named only when
+  it changes. A command shows its last lines of output, not just "exit 0".
+- **Less on screen**: one spinner row (time and Esc beside it; "waiting for" only after 2 seconds), a
+  one-line plan, one line per queued message, no tab bar with one tab, a one-line header (the key
+  hints only before the first message), a one-row status bar that drops items to fit a narrow window.
+- **A line says why the model answers again** (HeartCode asked whether every part is done), and every
+  model takeover reads the same: `↻ llama takes over · qwen hit its rate limit`.
+- **Plainer words**: "runs everything", "asks before changes", "no tools", "stopped"; no
+  "checked at the first message"; the thinking effort only when you set one. Retries say which model
+  failed and wrap instead of being cut.
+- **No price for local models** (a local model showed another provider's price).
+- **Commands that answer at once** show no spinner, and a one-line answer stays in the conversation.
+- **The "/" menu** puts the commands you used last first, with short descriptions.
+- **The notifications question** at the first start waits until a model is set up.
+
 ## 0.1.69 (2026-11-18)
 
 - **Update model info and Test all are separate buttons again** (as in 0.1.67), instead of one

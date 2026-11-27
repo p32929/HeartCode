@@ -5,6 +5,7 @@ import { log } from './log.js'
 import { slug, fullSlug, keywords } from './memory.js'
 import { fillArgs, skillFiles, readSkillFile } from './skills.js'
 import { prompt } from './prompts.js'
+import { GUIDE_NAMES, guideList, guideText } from './guides.js'
 import path from 'node:path'
 import os from 'node:os'
 import { spawn, execFileSync } from 'node:child_process'
@@ -16,7 +17,9 @@ import { killTree } from './spawn.js'
 import { scoreOf } from './rankings.js'
 import { byRecord } from './record.js'
 import { family } from './client.js'
-import { webFetch, webSearch, fetchPage, pageView } from './web.js'
+import { guarded } from './guard.js'
+import { trusted, trust } from './trust.js'
+import { webFetch, webSearch, fetchPage, pageView, hostsIn } from './web.js'
 import { savePage, saveSearch, findResearch } from './research.js'
 import { runHooks } from './hooks.js'
 import { parsePatch, applyChunks } from './patch.js'
@@ -75,7 +78,23 @@ export function resolveIn(root, p, read = false) {
   if (trimmed !== abs && !fs.existsSync(abs) && fs.existsSync(trimmed)) abs = trimmed
   if (abs !== root && !abs.startsWith(root + path.sep)) abs = intoProject(root, clean) ?? abs
   if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error(`${clean} is outside the project; use a path relative to the project folder (${root}), like "index.html" or "src/app.js"`)
+  // where it really is: a link in the project (a repo can hold one to ~) doesn't take reads or writes out of it
+  const real = realOf(abs)
+  const top = realOf(root)
+  if (real !== top && !real.startsWith(top + path.sep) && !(read && readableOutside(real)) && !isSavedOutput(real)) throw new Error(`${clean} is a link to ${real}, outside the project: not read or written through it`)
   return abs
+}
+// a path whose real place is in the project
+const insideReal = (root, p) => ((r, top) => r === top || r.startsWith(top + path.sep))(realOf(p), realOf(root))
+// The real place a path points to, its links followed; the part that doesn't exist yet, as it is
+function realOf(p) {
+  for (let q = p; ; q = path.dirname(q)) {
+    try {
+      return path.join(fs.realpathSync.native(q), path.relative(q, p))
+    } catch {
+      if (q === path.dirname(q)) return p
+    }
+  }
 }
 
 // A small model's mangled copy of the project's long path, meant inside it: any path with the
@@ -257,6 +276,7 @@ export function searchFiles(root, query, sub = '', limit = 50) {
     searched++
     let buf
     try {
+      if (fs.lstatSync(path.resolve(root, f)).isSymbolicLink() && !insideReal(root, path.resolve(root, f))) continue // a link out of the project: not searched through
       buf = fs.readFileSync(path.resolve(root, f))
     } catch {
       continue
@@ -284,12 +304,13 @@ export function runCommand(root, cmd, { signal, timeout = 120_000, stdin, env, s
     let err = ''
     let done = false
     const group = process.platform !== 'win32'
-    const child = spawn(cmd, {
+    const safe = guarded(cmd, { ...process.env, CI: '1', FORCE_COLOR: '0', NO_COLOR: '1', ...env }) // it can't stop HeartCode (guard.js)
+    const child = spawn(safe.command, {
       cwd: root,
       shell: true,
       detached: group,
       stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-      env: { ...process.env, CI: '1', FORCE_COLOR: '0', NO_COLOR: '1', ...env },
+      env: safe.env,
     })
     if (stdin !== undefined) {
       child.stdin.on('error', () => {}) // a command that doesn't read its input
@@ -308,7 +329,7 @@ export function runCommand(root, cmd, { signal, timeout = 120_000, stdin, env, s
       setTimeout(() => kill('SIGKILL'), 2000).unref()
       child.stdout.destroy()
       child.stderr.destroy()
-      const plain = (t) => t.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+      const plain = (t) => t.replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x9b]/g, '') // no escape sequences (OSC 52, titles) for the model or the screen
       resolve({ code, output: (dropped ? '(the start of a very long output was left out: only its last 100,000 characters are here; the command itself was not affected)\n…' : '') + plain(out) + note, ...(split && { stderr: plain(err) }) })
     }
     let dropped = false // a very long output's start, left out (said, so it isn't read as the command failing)
@@ -443,17 +464,25 @@ const PLACEHOLDER = /(\.\.\.|…)\s*(rest|existing|remaining|unchanged|other)|re
 // model choice. A model never writes them (a small one once wrote its notes over this conversation).
 const OWN_DATA = /^\.heartcode\/(?:sessions|outputs|worktrees)(?:\/|$)|^\.heartcode\/models\.json$/
 
+// HeartCode's settings for this folder (hooks and MCP servers run commands, prompts steer it) and
+// git's (its hooks run commands): never written without asking, whatever the mode (a file or page
+// telling the model to write one would run its commands next time)
+const SETUP_FILES = /^(?:\.heartcode|\.git)(?:\/|$)/
+
 export async function proposeWrite(s, rel, old, next) {
   if (old === next) return { status: 'unchanged' }
-  if (OWN_DATA.test(path.relative(s.root, resolveIn(s.root, rel)).split(path.sep).join('/'))) return { status: 'rejected', feedback: `${rel} is HeartCode's own record (this conversation and its state), not a project file: it can't be written. Put what you write in the project's own files.` }
+  const where = path.relative(s.root, resolveIn(s.root, rel)).split(path.sep).join('/')
+  if (OWN_DATA.test(where)) return { status: 'rejected', feedback: `${rel} is HeartCode's own record (this conversation and its state), not a project file: it can't be written. Put what you write in the project's own files.` }
   if (s.ui.permission === 'plan') return { status: 'rejected', feedback: prompt('agent/plan-refused', { command: false }) } // both modes write through here
   if (s.ownFiles && !s.ownFiles.includes(path.resolve(s.root, rel))) return { status: 'rejected', feedback: prompt('agent/part-files', { file: rel, files: s.ownFiles.map((f) => path.relative(s.root, f)).join(', ') }) } // a part's helper: every way of writing (a patch in run_command, guided mode)
   const ops = diffLines(old, next ?? '')
   s.ui.print(renderDiff(ops, rel))
   if (next !== null && PLACEHOLDER.test(next) && !PLACEHOLDER.test(old)) s.ui.warn('the new content seems to contain a placeholder like "rest of code unchanged"')
-  const ok = await s.ui.confirm(next === null ? `Delete ${rel}?` : old ? `Apply this change to ${rel}?` : `Create ${rel}?`)
+  const setup = SETUP_FILES.test(where)
+  const ok = await s.ui.confirm(`${next === null ? `Delete ${rel}?` : old ? `Apply this change to ${rel}?` : `Create ${rel}?`}${setup ? ' (it sets up HeartCode or git here: it can run commands)' : ''}`, setup ? 'setup' : 'edit')
   log('write', rel, ok === true ? 'approved' : `rejected ${typeof ok === 'string' ? ok : ''}`)
   if (ok !== true) return { status: 'rejected', said: declined(s, ok, '') }
+  const wasTrusted = setup && trusted(s.root) // the folder's setup was yours: with this change you approved, still yours
   const abs = resolveIn(s.root, rel)
   s.track?.(rel, fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null) // for /rewind
   if (next === null) fs.rmSync(abs, { force: true })
@@ -461,6 +490,7 @@ export async function proposeWrite(s, rel, old, next) {
     fs.mkdirSync(path.dirname(abs), { recursive: true })
     fs.writeFileSync(abs, next)
   }
+  if (wasTrusted) trust(s.root)
   const add = ops.filter(([t]) => t === '+').length
   const del = ops.filter(([t]) => t === '-').length
   const res = { status: 'applied', summary: `+${add} -${del}`, diff: renderDiff(ops, rel, false, 2, 60), ops, text: next }
@@ -527,35 +557,29 @@ export function searchesOutside(cmd, root) {
 export async function runConfirmed(s, cmd, signal, background = false, wait) {
   s.ui.step(background ? 'run in background' : 'run', cmd, s.client?.model)
   if (s.ui.permission === 'plan' && !readOnlyCommand(cmd)) {
-    s.ui.result('not run: plan mode')
+    s.ui.result('not run: plan mode', { refused: true })
     return prompt('agent/plan-refused', { command: true })
   }
   if (searchesOutside(cmd, s.root)) {
     log('command', `refused (searches outside the project): ${cmd}`)
-    s.ui.result('not run: searches outside the project')
+    s.ui.result('not run: searches outside the project', { refused: true })
     return prompt('agent/outside-project', { root: s.root, wide: true })
   }
   const ok = s.ui.permission === 'plan' ? true : await s.ui.confirm(`Run ${c.bold(cmd)}?`, 'command') // plan mode: only read-only ones get here
   if (ok !== true) {
-    s.ui.result('declined')
+    s.ui.result('declined', { refused: true })
     return declined(s, ok, 'The user declined to run this command.')
   }
   const secs = Number(wait) > 0 ? Number(wait) : background ? 3 : 30
   const before = snapshot(s)
   const job = startJob(s.root, cmd)
-  // its latest output line beside it, read a few times a second (the label is re-read every frame)
-  let last = ''
-  let readAt = 0
-  s.ui.spinner(() => {
-    if (Date.now() - readAt > 250) [readAt, last] = [Date.now(), tailLines(job, 3).filter((l) => l.trim()).at(-1)?.trim() ?? '']
-    return `running ${clip(cmd, 50)}${last ? ` › ${clip(last, 60)}` : ''}`
-  })
+  s.ui.spinner('running a command') // the command itself is the step above, in the conversation
   await waitFor(job, secs * 1000, signal)
   s.ui.stopSpin()
   if (!job.exited) {
     if (signal?.aborted && !background) {
       removeJob(job) // Esc stops what it was waiting on
-      s.ui.result('stopped')
+      s.ui.result('stopped', { refused: true })
       return `Stopped by the user (Esc) after ${Math.round((Date.now() - job.started) / 1000)}s.`
     }
     s.ui.result(`still running: #${job.id} in the background`)
@@ -569,12 +593,13 @@ export async function runConfirmed(s, cmd, signal, background = false, wait) {
   try {
     lines = fs.readFileSync(job.file, 'utf8').split(/\r?\n|\r/).filter((l) => l.trim()).length
   } catch {}
-  s.ui.result(`exit ${job.code}${lines ? ` · ${lines} line${lines === 1 ? '' : 's'}` : ''}`)
-  // failed: its last lines under it (what went wrong, usually), aligned with the result's text
-  // why it failed: the last error line and what follows it (a stack's end says nothing), else the last lines
-  const tail = job.code !== 0 ? tailLines(job, 40).filter((x) => x.trim()) : []
-  const at = tail.findLastIndex((l) => /\b(error|exception|failed|fail|assert\w*|cannot|not found|denied)\b/i.test(l))
-  if (job.code !== 0) for (const l of at === -1 ? tail.slice(-3) : tail.slice(at, at + 3)) s.ui.print(`${s.isSub ? '      ' : '    '}${c.faint(clip(l.trimEnd(), 120))}`)
+  const took = `${Math.max(0, Math.round((job.ended - job.started) / 100) / 10)}s`
+  s.ui.result(job.code === 0 ? `ok · ${took}${lines ? '' : ' · no output'}` : `exit ${job.code} · ${took}`, { ok: job.code === 0 })
+  // its last lines under it; failed: the last error line and what follows it (a stack's end says
+  // nothing), else the last lines
+  const tail = tailLines(job, 40).filter((x) => x.trim())
+  const at = job.code !== 0 ? tail.findLastIndex((l) => /\b(error|exception|failed|fail|assert\w*|cannot|not found|denied)\b/i.test(l)) : -1
+  for (const l of at === -1 ? tail.slice(-3) : tail.slice(at, at + 3)) s.ui.print(`${s.isSub ? '      ' : '    '}${(job.code === 0 ? c.faint : c.err)(clip(l.trimEnd(), 120))}`)
   const changed = changesSince(s, before)
   return `exit code ${left ? 0 : job.code}\n${output.trim() || '(no output)'}${changed ? `\nFiles this command changed: ${changed}` : ''}${left ? `\n${prompt('agent/left-running', { id: job.id })}` : ''}`
 }
@@ -592,7 +617,7 @@ async function backgroundTool(s, a, signal) {
     return was ? `Stopped #${job.id} (${job.command}).` : `#${job.id} had already exited with ${job.code}.`
   }
   if (Number(a.wait) > 0) {
-    s.ui.spinner(`waiting on #${job.id} ${clip(job.command, 60)}`)
+    s.ui.spinner('waiting for a background command')
     await waitFor(job, Number(a.wait) * 1000, signal)
     s.ui.stopSpin()
   }
@@ -691,7 +716,7 @@ export const TOOL_DEFS = [
 // Plan mode (permission "plan"): looking around is fine, changing things isn't. Edits are refused,
 // and a command runs only when it only reads (else it's refused, not asked about).
 export const PLAN_HIDDEN = new Set(['edit_file', 'write_file', 'apply_patch'])
-const READ_ONLY = /^(cd|ls|cat|head|tail|wc|grep|egrep|rg|find|fd|tree|pwd|file|stat|du|df|which|type|echo|date|printenv|diff|cmp|sort|uniq|cut|jq|nl|basename|dirname|realpath|readlink|uname|whoami|(node|npm|python3?|go|cargo) --version|npm (ls|list|view|outdated)|git (status|log|diff|show|ls-files|blame|grep|describe|shortlog|rev-parse|config --get)|git (branch|tag|remote)( -[avlr]+| --list| -v)*$)\b/
+const READ_ONLY = /^(cd|ls|cat|head|tail|wc|grep|egrep|rg|find|fd|tree|pwd|file|stat|du|df|which|type|echo|date|diff|cmp|sort|uniq|cut|jq|nl|basename|dirname|realpath|readlink|uname|whoami|(node|npm|python3?|go|cargo) --version|npm (ls|list|view|outdated)|git (status|log|diff|show|ls-files|blame|grep|describe|shortlog|rev-parse|config --get)|git (branch|tag|remote)( -[avlr]+| --list| -v)*$)\b/
 // A command that went into a folder outside the project (a small model copying the project's long
 // path wrong, then lost in what it finds there): told where the project is.
 function outsideNote(root, cmd) {
@@ -702,7 +727,7 @@ function outsideNote(root, cmd) {
 
 export function readOnlyCommand(cmd) {
   const c = String(cmd).trim()
-  if (/[>`]|\$\(|<\(|\b(sudo|rm|mv|cp|tee|chmod|chown|dd|truncate|mkdir|touch|ln)\b|-delete\b|-exec|-ok\b|-fprint|-fls\b|--output\b|--pre\b|sed\s+-i|\bsort\b.*\s-o/.test(c)) return false // writes, or runs something else (git's --output, find's -fprint/-fls, rg's --pre)
+  if (/[>`]|\$\(|<\(|\b(sudo|rm|mv|cp|tee|chmod|chown|dd|truncate|mkdir|touch|ln)\b|-delete\b|-exec|-ok\b|-fprint|-fls\b|--output\b|--pre\b|sed\s+-i|\bsort\b.*\s-o|\s-O\S*|--open-files-in-pager|--ext-diff|--textconv|\s-c\s|\bprintenv\b|\benv\b/.test(c)) return false // writes, or runs something else (git's --output, find's -fprint/-fls, rg's --pre, git grep's -O<program>, git -c), or shows the environment (keys)
   return c.split(/\s*(?:&&|\|\||[;|&\n])\s*/).every((part) => READ_ONLY.test(part)) // `a & b`, a new line: each its own command
 }
 
@@ -751,6 +776,8 @@ export function extraTools(s) {
       parameters: obj({ action: { type: 'string', enum: ['write', 'read', 'search', 'delete'] }, name: str, description: str, type: str, tags: str, scope: { type: 'string', enum: ['project', 'global'] }, content: str, query: str }, ['action']),
     })
   }
+  // guides for kinds of work (guides.js): always there, so the model can look one up whenever it needs it
+  if (!s.ownSystem) out.push({ name: 'guide', description: prompt('agent/tool-guide', { guides: guideList() }), parameters: obj({ name: { type: 'string', enum: GUIDE_NAMES } }, ['name']) })
   const forModel = [...(s.skills?.values() ?? [])].filter((k) => k.use !== 'me') // "use: me" skills cost nothing here; "always" ones are in the system prompt, and listed so their files can be read
   if (forModel.length) {
     const skills = forModel.map((k) => `${k.name}: ${k.description}`).join('\n')
@@ -825,7 +852,7 @@ async function todoTool(s, args, signal, id) {
   // or one does it step by step. Nobody to answer (headless, no reply in time): several, the recommended
   const pending = todos.filter((t) => t.status === 'pending')
   if (s.split === undefined && !s.isSub && s.subagent && s.team?.().length && s.ui.permission !== 'plan' && pending.length >= 2) {
-    const said = await askUser(s, { question: `The plan has ${todos.length} steps. Work on it with several agents at once?`, header: 'Agents', options: [{ label: 'Several agents at once', description: 'steps that stand alone run side by side, each on the model best at it; one no model is sure of is done by two, and the better kept' }, { label: 'One agent', description: 'one model does every step, in turn' }] })
+    const said = await askUser(s, { question: `The plan has ${todos.length} steps. Work on it with several agents at once?`, header: 'Agents', options: [{ label: 'Several agents at once', description: 'steps that stand alone run side by side, each on the model best at it' }, { label: 'One agent', description: 'one model does every step in turn' }] })
     s.split = /One agent/.test(said) ? 'one' : 'several'
     log('parts', `the user chose: ${s.split} (${said})`)
   }
@@ -868,7 +895,7 @@ export async function stuckSaid(s, step, why, signal, id, answer = false) {
   let advice = ''
   const other = n === 2 && !s.isSub && s.subagent && secondOpinionModel(s)
   if (other) {
-    s.ui.step('stuck', `asking ${other.model} for a second opinion`)
+    s.ui.step('stuck', `asking ${other.model} for a second opinion`, '', { note: true })
     const tried = (s.ran ?? []).slice(-12).map((r) => `- ${r.command} → ${r.result}`).join('\n')
     try {
       advice = await s.subagent({ prompt: prompt('agent/second-opinion', { task: s.task ?? '', step: t.content, why: t.why, tried }), model: `${other.provider} ${other.model}`, description: 'second opinion' }, signal, id)
@@ -935,7 +962,7 @@ async function runParts(s, todos, signal, id) {
   const shown = todos.map((t) => ({ ...t })) // as printed: after the parts, what they changed
   for (const t of parts) t.status = 'in_progress'
   log('parts', parts.map((t) => `${t.content}${t.model ? ` (${t.model})` : ''}${t.files ? ` [${t.files.join(', ')}]` : ''}`))
-  s.ui.step('parts', `${parts.length} part${parts.length > 1 ? 's' : ''} at once: ${parts.map((t) => `${clip(t.content, 40)}${t.model ? ` (${t.model})` : ''}`).join(' · ')}`)
+  s.ui.step('parts', `${parts.length} part${parts.length > 1 ? 's' : ''} at once: ${parts.map((t) => `${clip(t.content, 40)}${t.model ? ` (${t.model})` : ''}`).join(' · ')}`, '', { note: true })
   const plan = todos.map((t) => `- ${t.content}`).join('\n')
   const choices = (s.chat?.choices ?? []).join('; ')
   const reports = await Promise.all(
@@ -977,7 +1004,7 @@ async function comparePart(s, t, brief, signal, id) {
   if (!first || !second) return null
   const pair = [first, second]
   const name = (x) => `${x.provider} ${x.model}`
-  s.ui.step('compare', `${clip(t.content, 50)}: ${first.model} and ${second.model}, each in a copy`)
+  s.ui.step('compare', `${clip(t.content, 50)}: ${first.model} and ${second.model}, each in a copy`, '', { note: true })
   const copies = pair.map(() => copyProject(s.root))
   try {
     const outs = await Promise.all(pair.map((x, i) => s.subagent({ prompt: brief, model: name(x), description: `${clip(t.content, 30)} · ${x.model}`, ownFiles: t.files, root: copies[i] }, signal, id).catch((e) => (e.name === 'AbortError' || signal?.aborted ? Promise.reject(e) : `error: ${e.message}`))))
@@ -1017,7 +1044,7 @@ async function comparePart(s, t, brief, signal, id) {
         }
       }
     }
-    s.ui.step('compare', pick < 0 ? `${clip(t.content, 50)}: neither worked` : `kept ${pair[pick].model}'s (${why})`)
+    s.ui.step('compare', pick < 0 ? `${clip(t.content, 50)}: neither worked` : `kept ${pair[pick].model}'s (${why})`, '', { note: true })
     if (pick < 0) t.status = 'pending'
     if (pick < 0) return `## ${t.content}: not done\n${results.map((r) => `${r.model.model}: ${clip(r.said, 800)}${r.check?.broken ? `\nHeartCode's check: ${clip(r.check.report, 400)}` : ''}`).join('\n\n')}`
     // the better one's files into the project, each recorded for /rewind and the checks
@@ -1167,7 +1194,7 @@ async function webTool(s, name, args, signal) {
       log('research', `"${what}": ${saved.length} saved page(s) offered first`)
       return prompt('agent/research-saved', { query: what, pages: saved.map((r) => `- ${r.title} — ${r.url} (read ${r.fetched}${r.used_for ? `; used for: ${r.used_for}` : ''}) → ${r.file}`).join('\n') })
     }
-    s.ui.spinner(`searching: ${clip(what, 60)}`)
+    s.ui.spinner('searching the web')
     const out = await webSearch(what, { signal })
     if (s.root && !s.noResearch && !/^(error:|no results)/.test(out)) {
       const { file } = saveSearch(s.root, what, out)
@@ -1175,9 +1202,10 @@ async function webTool(s, name, args, signal) {
     }
     return out
   }
-  s.ui.spinner(`fetching ${clip(what, 60)}`)
-  if (!s.root || s.noResearch) return await webFetch(what, { start: args.start, signal }) // nothing kept (--no-memory)
-  const page = await fetchPage(what, { signal })
+  s.ui.spinner('reading a web page')
+  const allowed = hostsIn(s.task) // a local or private host you named: may be fetched
+  if (!s.root || s.noResearch) return await webFetch(what, { start: args.start, signal, allowed }) // nothing kept (--no-memory)
+  const page = await fetchPage(what, { signal, allowed })
   if (page.error) return `error: ${page.error}`
   const head = `${page.ok ? '' : `error: HTTP ${page.status}\n`}${page.url !== page.asked ? `(redirected to ${page.url})\n` : ''}`
   if (!page.ok || !page.text.trim()) return `${head}${page.text.slice(0, MAX_PAGE) || '(empty page)'}` // an error page isn't worth keeping
@@ -1187,7 +1215,7 @@ async function webTool(s, name, args, signal) {
   if (id && s.chat) (s.chat.outputs ??= {})[id] = file // its result, cut from the conversation later, points here
   log('research', `saved ${page.url} → ${file}`)
   // "start": the part from there on, as before (an older conversation's way of reading on)
-  if (Number(args.start) > 0) return `${head}${await webFetch(page.url, { start: args.start, signal })}\n\n(All of this page is saved in ${file}.)`
+  if (Number(args.start) > 0) return `${head}${await webFetch(page.url, { start: args.start, signal, allowed })}\n\n(All of this page is saved in ${file}.)`
   return `${head}${page.title ? `# ${page.title}\n` : ''}${page.url}\n\n${pageView(page.text, { lookFor: args.look_for, file, bodyLine })}`
 }
 const MAX_PAGE = 10_000
@@ -1370,9 +1398,14 @@ async function callMcp(s, server, tool, a, signal) {
     if (s.ui.permission === 'plan') return prompt('agent/plan-refused', { command: false }) // might change something
     const ok = await s.ui.confirm(`Use ${server.name} → ${tool}?`, 'command')
     if (ok !== true) return declined(s, ok, 'The user declined this call.')
+  } else if (s.ui.permission !== 'plan' && !(s.mcpRead ??= new Set()).has(`${server.name}\n${tool}`)) {
+    // it says it only reads: the server's word, so asked once a session (plan mode: taken, it's for looking)
+    const ok = await s.ui.confirm(`Use ${server.name} → ${tool}? (it says it only reads; not asked again this session)`, 'command')
+    if (ok !== true) return declined(s, ok, 'The user declined this call.')
+    s.mcpRead.add(`${server.name}\n${tool}`)
   }
   const done = await s.mcpGate?.() // a helper may be using the MCP servers (a browser): its turn first
-  s.ui.spinner(`${server.name} · ${tool}`)
+  s.ui.spinner(`using ${server.name}`)
   const started = Date.now()
   let r
   try {
@@ -1671,7 +1704,7 @@ async function toolRun(name, args, s, signal, id) {
   const stop = pre.block ? prompt('agent/hook', { reason: pre.block, blocked: true }) : notMine ? prompt('agent/part-files', { file: notMine, files: s.ownFiles.map((f) => path.relative(s.root, f)).join(', ') }) : null
   if (stop && name === 'run_command') {
     s.ui.step('run', String(args?.command ?? ''), s.client?.model) // a command's lines are shown where it runs, which this one never reaches
-    s.ui.result(refusal(stop))
+    s.ui.result(refusal(stop), { refused: true })
   }
   if (stop) return stop
   let out = await tool(name, args, s, signal, id)
@@ -1790,6 +1823,13 @@ async function tool(name, args, s, signal, id) {
         return await s.subagent(args, signal, id)
       case 'ask_user':
         return await askUser(s, args)
+      case 'guide': {
+        const g = String(args.name ?? '').trim().toLowerCase()
+        if (!GUIDE_NAMES.includes(g)) return `error: no guide "${args.name}". Guides: ${GUIDE_NAMES.join(', ')}`
+        const sent = (s.chat.sentNotes ??= [])
+        if (!sent.includes(`domain:${g}`)) sent.push(`domain:${g}`) // not added again by itself (agent.js guidesFor)
+        return guideText(s, g)
+      }
       case 'skill': {
         const k = s.skills?.get(String(args.name ?? ''))
         if (!k || k.use === 'me') return `error: no skill "${args.name}". Skills: ${[...(s.skills?.values() ?? [])].filter((x) => x.use !== 'me').map((x) => x.name).join(', ') || 'none'}`

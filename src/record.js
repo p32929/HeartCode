@@ -24,6 +24,14 @@ function all() {
   return cache.all
 }
 
+// A provider renamed: its models' records go with it
+export function renameRecords(from, to) {
+  const now = readJson(FILE, {})
+  let moved = 0
+  for (const k of Object.keys(now)) if (k.startsWith(`${from}/`)) (now[`${to}/${k.slice(from.length + 1)}`] = now[k]), delete now[k], moved++
+  if (moved) writeJson(FILE, now)
+}
+
 // One event for a model ({ provider, model }). Older events fade (each new one counts a little more
 // than the last: after about 25 more, an event counts half), so a model that got better shows it.
 export function record(t, what) {

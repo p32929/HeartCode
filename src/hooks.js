@@ -10,6 +10,7 @@
 // tool_input, tool_response, prompt, stop_hook_active), runs in the project folder, and can also
 // answer with JSON on stdout: {"decision": "block", "reason": "…"} (or "continue": false).
 // Matchers are regexes, tested against HeartCode's tool names and Claude Code's (Edit, Bash, …).
+import { trusted } from './trust.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { HOME, readConfig } from './config.js'
@@ -21,7 +22,7 @@ export const EVENTS = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']
 // HeartCode's tool names → Claude Code's, for matchers and tool_input written for Claude Code.
 export const CLAUDE_NAMES = { read_file: 'Read', edit_file: 'Edit', write_file: 'Write', run_command: 'Bash', search: 'Grep', list_files: 'Glob', web_fetch: 'WebFetch', web_search: 'WebSearch', todo: 'TodoWrite', agent: 'Task' }
 
-export const hookFiles = (root) => [path.join(HOME, 'hooks.json'), path.join(root, '.heartcode', 'hooks.json')]
+export const hookFiles = (root) => [path.join(HOME, 'hooks.json'), ...(trusted(root) ? [path.join(root, '.heartcode', 'hooks.json')] : [])] // the folder's own: once you said yes to it (trust.js)
 
 // { event: [{ matcher, command, timeout, file }] }
 export function loadHooks(root) {
@@ -70,7 +71,7 @@ export async function runHooks(s, event, data = {}, signal) {
     const reason = (json?.reason ?? json?.stopReason ?? stderr.trim()) || output.trim() || `blocked by the hook ${h.command}`
     if (code === 2 || json?.decision === 'block' || json?.continue === false) {
       s.ui.step('hook', `${event}: ${clip(h.command, 50)}`)
-      s.ui.result(`blocked: ${clip(reason.split('\n')[0], 100)}`)
+      s.ui.result(`blocked: ${clip(reason.split('\n')[0], 100)}`, { refused: true })
       return { block: clip(reason, 4000), context: context.join('\n') }
     }
     if (code !== 0) s.ui.warn(`hook ${h.command} (${event}) failed: exit ${code}${stderr.trim() ? `: ${clip(stderr.trim().split('\n')[0], 120)}` : ''}`)

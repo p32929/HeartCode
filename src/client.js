@@ -5,6 +5,7 @@ import { log, logRequest, requestLog } from './log.js'
 import { loadRankings, scoreOf } from './rankings.js'
 import { byRecord, unreliable, record } from './record.js'
 import { fetch } from './http.js' // not the built-in one: see http.js
+import { cliOf, cliModels, cliChat } from './clis.js'
 
 // Tokens in a text, estimated the way tokenizers split it: a word or a number is about one, a long
 // word more, every symbol one. Prose comes out near characters ÷ 4; code, CSS, JSON and SVG paths,
@@ -225,6 +226,10 @@ export class Client {
     this.rotation = { list, on, retries, next, at: 0, good: list[0] }
     this.#use(list[0])
   }
+  // the coding CLI this model is one of (a provider at cli://claude…: clis.js), or null
+  get cli() {
+    return cliOf(this.baseUrl)
+  }
   get target() {
     return this.rotation?.list[this.rotation.at] ?? null
   }
@@ -297,7 +302,10 @@ export class Client {
     if (!r || r.next !== 'first') return
     const i = Math.max(0, r.list.findIndex((t) => !unreliable(t)))
     if (r.at !== i) {
-      if (i) log('rotate', `${r.list[0].model} failed most of its recent work (its track record): this message starts with ${r.list[i].model}`)
+      if (i) {
+        log('rotate', `${r.list[0].model} failed most of its recent work (its track record): this message starts with ${r.list[i].model}`)
+        this.onNotice?.(`↻ ${r.list[i].model} starts this message · ${r.list[0].model} failed most of its recent work here`) // your order skipped: said, not hidden in a log
+      }
       this.#use(r.list[(r.at = i)])
     }
   }
@@ -390,6 +398,7 @@ export class Client {
   }
   // The server's own entries for its models ({ id, owned_by, context_length, pricing… }, as it sends them).
   async modelEntries(timeout = 60_000) {
+    if (this.cli) return (await cliModels(this.cli)).map((m) => ({ ...m, name: m.name ?? m.id })) // a coding CLI (clis.js): its own list
     const data = await this.#json(this.baseUrl + '/models', undefined, timeout)
     // { result: [...] } (Cloudflare's shape): there the id is an internal one and the name is the model's
     if (Array.isArray(data.result)) return data.result.filter((m) => m?.name).map((m) => ({ ...m, id: m.name }))
@@ -402,6 +411,7 @@ export class Client {
   // server that is one of these is treated as a model server on this machine or network; its
   // address (localhost, 192.168…) says nothing (a proxy there may serve Gemini).
   async contextSize() {
+    if (this.cli) return { size: undefined, server: null }
     const root = this.baseUrl.replace(/\/v1$/, '')
     const host = new URL(root).hostname
     const n = (x) => (Number(x) > 0 ? Number(x) : undefined)
@@ -450,6 +460,7 @@ export class Client {
   // 131072"). Refused requests aren't charged. If it's accepted (a window that big), it's stopped
   // at once. Returns { limit } | { over } (it took that many) | { error }. Not logged: it's 4 MB.
   async measureContext({ signal, tokens = 2_200_000 } = {}) {
+    if (this.cli) return { error: 'a coding CLI keeps its own context' }
     const headers = { 'content-type': 'application/json', ...(this.apiKey && { authorization: `Bearer ${this.apiKey}` }) }
     const body = JSON.stringify({ model: this.model, messages: [{ role: 'user', content: 'a '.repeat(tokens) }], stream: true })
     const stop = new AbortController()
@@ -495,6 +506,7 @@ export class Client {
     let rounds = 0 // whole rounds of the list that failed
     const tried = new Set() // places in the model list tried for this request
     const down = new Set() // providers that answered it with an error (400 or above): their other models are skipped
+    const blamed = new Set() // models already given a "no-answer" for this request
     for (let attempt = 0; ; attempt++) {
       // The list moved on to a model whose window can't hold this request (a smaller one): not sent
       // to it as it is; the caller compacts the conversation for that model, then sends it (fit: the
@@ -511,7 +523,10 @@ export class Client {
       } catch (e) {
         if (e.name === 'AbortError' || opts.signal?.aborted) throw e
         this.onFail?.(e, { provider: this.provider, model: this.model }) // what it says is learned (a stated limit)
-        if (e.status !== 429) record({ provider: this.provider, model: this.model }, 'no-answer') // its track record: didn't answer, refused the key, needs a paid plan… (a rate limit passes)
+        // its track record: refused the key, no such model, a bad request… once per request; an outage
+        // (no connection, a timeout, a server error, a rate limit) isn't the model's doing
+        const who = `${this.provider}/${this.model}`
+        if (!outage(e) && !blamed.has(who)) blamed.add(who), record({ provider: this.provider, model: this.model }, 'no-answer')
         // With a list of models, any failure makes way for the next one (another provider's first).
         // Without one, only what waiting can fix is tried again.
         if (!(this.rotation?.list.length > 1) && !outage(e)) throw e
@@ -548,6 +563,7 @@ export class Client {
   async #timed(body, opts) {
     this.inFlight = Date.now()
     try {
+      if (this.cli) return await cliChat(this, body, opts) // a coding CLI (clis.js) answers it
       return await this.#chat(body, opts)
     } catch (e) {
       if (!e.recorded && this.last) this.#record(this.last.req, this.last.sent, { error: e }) // failed while the reply streamed in
@@ -748,9 +764,11 @@ export class Client {
         if (chunk.usage) usage = chunk.usage
         const ch = chunk.choices?.[0]
         if (!ch) continue
-        started() // it answers (a keep-alive or an empty frame doesn't get here)
         if (ch.finish_reason) finishReason = ch.finish_reason
         const d = ch.delta ?? ch.message ?? {} // some proxies send the whole message in a chunk
+        // it answers: words, thinking, a tool call or the end (a first chunk with only its role, sent
+        // before it queues the request, isn't an answer yet; nor a keep-alive)
+        if (ch.finish_reason || d.content?.length || d.reasoning_content || d.reasoning || d.thinking || d.tool_calls?.length) started()
         this.#reasoningField(d)
         if (Array.isArray(d.content)) d.content = textOf(d.content)
         const r = d.reasoning_content || d.reasoning || d.thinking

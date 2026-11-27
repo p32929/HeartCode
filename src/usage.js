@@ -19,6 +19,11 @@ export async function loadPrices({ url = 'https://models.dev/api.json', timeout 
   table ??= readJson(FILE, null)
   const asked = arguments[0]?.url || force // a list from somewhere else, or asked for again: always fetched
   if (!asked && ((table?.v === VERSION && Date.now() - table.at < DAY) || process.env.HEART_NO_PRICES)) return table // tests: no network
+  if (asked) return fetchPrices(url, timeout, force)
+  return (pending ??= fetchPrices(url, timeout, false).finally(() => (pending = null))) // asked for at once by several: fetched once
+}
+let pending = null
+async function fetchPrices(url, timeout, force) {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(timeout) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -43,6 +48,7 @@ export async function loadPrices({ url = 'https://models.dev/api.json', timeout 
   return table
 }
 
+const LOCAL = /^(localhost|127\.|0\.0\.0\.0|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|[^.:]+(:\d+)?$)/ // this computer, the local network, a bare host name
 const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
 const hostOf = (url) => {
   try {
@@ -52,18 +58,20 @@ const hostOf = (url) => {
   }
 }
 
-// The price of a model at a provider (HeartCode's name for it and its URL), or null. The provider
-// models.dev knows by that name or URL first, else any provider that lists the model.
+// The price of a model at a provider (HeartCode's name for it and its URL), or null: what models.dev
+// says for this provider (by its name or URL); else, for a name with its maker in front
+// ("anthropic/claude-sonnet-4"), the maker's own. Never just any provider's: a proxy, a company
+// server or a local one isn't priced like whichever lists the model first.
 export function priceOf(provider, baseUrl, model) {
   if (!table || !model) return null
   const all = Object.entries(table.providers)
-  const ids = [model, model.split('/').pop()]
+  const ids = [...new Set([model, model.replace(/^models\//, ''), model.split('/').pop()])]
   const find = (list) => {
     for (const [, p] of list) for (const id of ids) if (p.models[id]?.input !== undefined) return (({ limit, can, ...price }) => price)(p.models[id])
     return null
   }
-  const own = all.filter(ownBy(provider, baseUrl))
-  return find(own) ?? find(all)
+  const maker = model.includes('/') ? norm(model.split('/').at(-2)) : ''
+  return find(all.filter(ownBy(provider, baseUrl))) ?? (maker && !LOCAL.test(hostOf(baseUrl)) ? find(all.filter(([id]) => norm(id) === maker)) : null)
 }
 // models.dev's providers that are this one: by its name in HeartCode, or its URL.
 const ownBy = (provider, baseUrl) => {
