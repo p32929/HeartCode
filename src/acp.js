@@ -40,7 +40,7 @@ class AcpUI extends HeadlessUI {
   async confirm(question, kind = 'edit') {
     if (kind === 'read' && this.permission === 'plan') return true
     const mode = this.permission === 'plan' ? (this.beforePlan ?? 'ask') : this.permission // plan mode asks as the mode before it did (as the full screen's)
-    if (kind !== 'setup' && (mode === 'all' || (mode === 'commands' && kind === 'edit'))) return true // setup: always asked
+    if (mode === 'all' || (mode === 'commands' && kind === 'edit')) return true // runs everything: never asks; otherwise setup is always asked
     const toolCallId = runningCall.getStore() ?? this.calls[0] ?? `ask_${Date.now()}` // the call asking
     const r = await this.conn
       .request('session/request_permission', {

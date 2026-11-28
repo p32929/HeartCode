@@ -1982,7 +1982,8 @@ async function repl(app, f = {}) {
       })
       .catch(() => {})
   // this folder's own setup (a cloned repo's hooks and MCP servers run commands): used once you say so
-  if (!trusted(app.root)) {
+  if (!trusted(app.root) && ui.permission === 'all') trust(app.root), reloadPrompts() // runs everything: used without asking
+  else if (!trusted(app.root)) {
     const files = setupFiles(app.root)
     const yes = await ui.pick(`This folder has its own HeartCode setup (${files.join(', ')}). Its hooks and MCP servers run commands on this computer. Use it?`, [
       { label: 'Yes, use it', desc: 'for these files as they are now; asked again if they change', use: true },

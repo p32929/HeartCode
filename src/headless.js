@@ -86,7 +86,7 @@ export class HeadlessUI {
     this.said = null
   }
   async confirm(question, kind = 'edit') {
-    if (kind !== 'setup' && (this.permission === 'all' || (this.permission === 'commands' && kind === 'edit') || (this.permission === 'plan' && kind === 'read'))) return true // plan: only reading; setup (HeartCode's or git's settings here): never without someone to ask
+    if (this.permission === 'all' || (kind !== 'setup' && ((this.permission === 'commands' && kind === 'edit') || (this.permission === 'plan' && kind === 'read')))) return true // runs everything: everything; plan: only reading; setup (HeartCode's or git's settings here): otherwise never without someone to ask
     log('headless', `declined: ${question}`)
     return `Not allowed: HeartCode runs headless with permission mode "${this.permission}", so this can't be approved. Don't retry it; say in your reply what you would have done.`
   }

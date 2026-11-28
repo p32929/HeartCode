@@ -465,7 +465,7 @@ const PLACEHOLDER = /(\.\.\.|…)\s*(rest|existing|remaining|unchanged|other)|re
 const OWN_DATA = /^\.heartcode\/(?:sessions|outputs|worktrees)(?:\/|$)|^\.heartcode\/models\.json$/
 
 // HeartCode's settings for this folder (hooks, MCP servers and formatters run commands, prompts and
-// skills steer it) and git's (its hooks run commands): never written without asking, whatever the mode
+// skills steer it) and git's (its hooks run commands): asked about in every mode but runs everything
 // (a file or page telling the model to write one would run its commands next time). The rest of
 // .heartcode (a model's own scripts and notes there) is written like any project file.
 const SETUP_FILES = /^\.git(?:\/|$)|^\.heartcode\/(?:(?:hooks|mcp|format)\.json$|(?:prompts|skills)(?:\/|$))/

@@ -2310,7 +2310,7 @@ export class UI {
   async confirm(question, kind = 'edit') {
     if (kind === 'read' && this.permission === 'plan') return true
     const mode = this.permission === 'plan' ? (this.beforePlan ?? 'ask') : this.permission
-    if (kind !== 'setup' && (mode === 'all' || (mode === 'commands' && kind === 'edit'))) return true // setup: always asked (tools.js SETUP_FILES)
+    if (mode === 'all' || (mode === 'commands' && kind === 'edit')) return true // runs everything: never asks, setup files too; otherwise setup is always asked (tools.js SETUP_FILES)
     if (this.full) {
       this.askAbout = true // the dialog shows what it's about (the diff, the command) above the choices
       try {

@@ -2,6 +2,13 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.104 (2026-11-28)
+
+- **"Runs everything" now really runs everything: it never asks.** Writing the folder's HeartCode or
+  git settings (`.heartcode/hooks.json`, `mcp.json`, `format.json`, `prompts/`, `skills/`, `.git/`)
+  no longer stops to ask, and neither does a folder's own HeartCode setup at start (it's used). The
+  same holds headless (`-p`) and in editors. The other modes still ask about those files.
+
 ## 0.1.103 (2026-11-28)
 
 - **"Runs everything" no longer stops to ask about a model's own files in `.heartcode/`** (a test
