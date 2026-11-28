@@ -2,6 +2,12 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.103 (2026-11-28)
+
+- **"Runs everything" no longer stops to ask about a model's own files in `.heartcode/`** (a test
+  script it keeps there, say). The question is kept for what can run commands or steer HeartCode:
+  `.heartcode/hooks.json`, `mcp.json`, `format.json`, `prompts/`, `skills/`, and git's `.git/`.
+
 ## 0.1.102 (2026-11-27)
 
 - **Import & export your settings** (`/settings` → Advanced → Import & export): tick what goes in the
