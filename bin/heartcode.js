@@ -1971,16 +1971,18 @@ async function repl(app, f = {}) {
   // models this folder picked earlier (/select_model): said, with the way back to your whole list
   if (app.folderModels && cfg.session?.length) ui.notice(`This folder uses ${cfg.session.map((t) => t.model).join(', ')} (picked earlier) · /select_model auto for the whole list again`, 10000) // not a message
   app.tabs?.onChange?.() // the conversation it opened with
-  // a newer HeartCode: asked of npm in the background at every start, said once and kept in the status bar
-  if (cfg.updateCheck !== false)
+  // a newer HeartCode: asked of npm in the background at every start and every hour after (one left
+  // open for days still hears of it), said once per version and kept in the status bar
+  const askNpm = () =>
     checkUpdate()
       .then((u) => {
-        if (!u?.newer) return
+        if (!u?.newer || app.update?.latest === u.latest) return
         app.update = u
         ui.notice(`HeartCode ${u.latest} is out (this is ${u.current}) · /update`, 10000) // and in the status bar
         ui.render?.()
       })
       .catch(() => {})
+  if (cfg.updateCheck !== false) askNpm(), setInterval(askNpm, 3600_000).unref()
   // this folder's own setup (a cloned repo's hooks and MCP servers run commands): used once you say so
   if (!trusted(app.root) && ui.permission === 'all') trust(app.root), reloadPrompts() // runs everything: used without asking
   else if (!trusted(app.root)) {

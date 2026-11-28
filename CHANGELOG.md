@@ -2,6 +2,12 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.105 (2026-11-28)
+
+- **A newer HeartCode is noticed while HeartCode stays open**: npm is asked at start and then every
+  hour, so one left running hears of a version published after it started (said once per version,
+  then kept in the status bar). Before, only a restart found it.
+
 ## 0.1.104 (2026-11-28)
 
 - **"Runs everything" now really runs everything: it never asks.** Writing the folder's HeartCode or
