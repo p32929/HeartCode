@@ -9,7 +9,7 @@ import { loadRankings, scoreOf } from '../src/rankings.js'
 import { byRecord, useRecords } from '../src/record.js'
 import { Session, transcript, contextReport } from '../src/agent.js'
 import { listJobs, getJob, stopJob, removeJob, runningJobs, tailLines, ago as ranFor } from '../src/background.js'
-import { checkUpdate, installKind, UPDATE_COMMANDS, packageDir, whatsNew } from '../src/update.js'
+import { checkUpdate, installedVersion, newer, installKind, UPDATE_COMMANDS, packageDir, whatsNew } from '../src/update.js'
 import { treeItems, codePlan, move, leaving, leftText, leftFiles } from '../src/tree.js'
 import { UI, c, PERMISSIONS, duration, copyText, overSsh, prettyKey, rank, setTheme, themeCodes, renderDiff, diffLines, DEFAULT_KEYS, loadKeys, width, shortError, wrapWords, ownAsk } from '../src/ui.js'
 import { listFiles, runCommand, clip } from '../src/tools.js'
@@ -736,7 +736,7 @@ class App {
       autocompact: cfg.autoCompact === false ? c.faint('auto-compact off') : null,
       worktree: this.worktree ? c.info(`⎇ ${this.worktree.branch}`) : null,
       background: runningJobs(this.root).length ? c.info(`⚙ ${runningJobs(this.root).length} running`) + c.faint(' Alt+B') : null,
-      update: this.update?.newer ? c.green(`⬆ ${this.update.latest}`) + c.faint(' /update') : null,
+      update: this.installed ? c.green(`⬆ ${this.installed}`) + c.faint(' restart to use it') : this.update?.newer ? c.green(`⬆ ${this.update.latest}`) + c.faint(' /update') : null,
       permissions: { all: c.green('runs everything'), commands: c.yellow('asks before commands'), ask: c.yellow('asks before changes'), plan: c.info('plan mode') }[ui.permission],
     }
     if (strat) {
@@ -1983,6 +1983,14 @@ async function repl(app, f = {}) {
       })
       .catch(() => {})
   if (cfg.updateCheck !== false) askNpm(), setInterval(askNpm, 3600_000).unref()
+  // updated while this one runs (npm install -g in another window): it still runs the old code, so say so
+  setInterval(() => {
+    const v = installedVersion()
+    if (!v || !newer(v, VERSION) || app.installed === v) return
+    app.installed = v
+    ui.notice(`HeartCode ${v} is installed, but this one still runs ${VERSION} · restart it to use ${v} (/exit, then heart)`, 30000)
+    ui.render?.()
+  }, 60_000).unref()
   // this folder's own setup (a cloned repo's hooks and MCP servers run commands): used once you say so
   if (!trusted(app.root) && ui.permission === 'all') trust(app.root), reloadPrompts() // runs everything: used without asking
   else if (!trusted(app.root)) {

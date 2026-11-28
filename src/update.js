@@ -31,6 +31,16 @@ export async function checkUpdate() {
   return { current: VERSION, latest, newer: Boolean(latest) && newer(latest, VERSION) }
 }
 
+// The version installed on disk now: newer than VERSION when HeartCode was updated while this one
+// runs (it keeps the code it started with until it's restarted)
+export function installedVersion() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(PKG, 'package.json'), 'utf8')).version
+  } catch {
+    return null
+  }
+}
+
 // How HeartCode was installed: 'git' (a checkout, linked), or the package manager that put it there.
 export function installKind() {
   if (fs.existsSync(path.join(PKG, '.git')) || !PKG.split(path.sep).includes('node_modules')) return 'git'

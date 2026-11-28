@@ -2,6 +2,13 @@
 
 What changed in each version of HeartCode, newest first.
 
+## 0.1.106 (2026-11-28)
+
+- **Updated while it was open? HeartCode says to restart.** A HeartCode keeps running the code it
+  started with, so one left open while `npm install -g heartcode` ran in another window still
+  behaved like the old version. Now it notices the newer version on disk within a minute and says
+  "restart it to use 0.1.x" (also in the status bar).
+
 ## 0.1.105 (2026-11-28)
 
 - **A newer HeartCode is noticed while HeartCode stays open**: npm is asked at start and then every
